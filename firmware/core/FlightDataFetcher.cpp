@@ -23,8 +23,63 @@ static constexpr double kMetersPerSecToKnots = 1.94384;
 static constexpr double kMetersPerSecToFpm = 196.850;
 
 FlightDataFetcher::FlightDataFetcher(BaseStateVectorFetcher *stateFetcher,
-                                     BaseFlightFetcher *flightFetcher)
-    : _stateFetcher(stateFetcher), _flightFetcher(flightFetcher) {}
+                                     BaseFlightFetcher *aeroApi,
+                                     BaseFlightFetcher *adsbdb)
+    : _stateFetcher(stateFetcher), _aeroApi(aeroApi), _adsbdb(adsbdb) {}
+
+BaseFlightFetcher *FlightDataFetcher::activeFetcher()
+{
+    switch (g_settings.enrichmentSource)
+    {
+    case EnrichmentSource::AeroApi:
+        return _aeroApi;
+    case EnrichmentSource::Adsbdb:
+        return _adsbdb;
+    default:
+        return nullptr; // Off
+    }
+}
+
+bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
+                                    const String &icao24, FlightInfo &out)
+{
+    const unsigned long now = millis();
+    const unsigned long ttl = (unsigned long)g_settings.enrichmentCacheSeconds * 1000UL;
+
+    auto it = _cache.find(key);
+    if (it != _cache.end() && (now - it->second.ts) < ttl)
+    {
+        if (!it->second.valid)
+            return false; // cached miss; don't re-hammer the provider
+        out = it->second.info;
+        return true;
+    }
+
+    BaseFlightFetcher *f = activeFetcher();
+    FlightInfo info;
+    bool ok = f ? f->fetchFlightInfo(callsign, icao24, info) : false;
+
+    // Backup: if the free source (adsbdb) missed, fall back to AeroAPI when a key
+    // is configured. Also restores Flights-mode metrics (AeroAPI last_position).
+    if (!ok &&
+        g_settings.enrichmentSource == EnrichmentSource::Adsbdb &&
+        g_settings.enrichmentFallbackToAeroApi &&
+        g_settings.aeroApiKey.length() > 0 && _aeroApi)
+    {
+        ok = _aeroApi->fetchFlightInfo(callsign, icao24, info);
+    }
+
+    if (ok)
+        enrichNames(info);
+
+    if (_cache.size() > 64) // simple bound; aircraft churn over time
+        _cache.clear();
+    _cache[key] = CacheEntry{info, ok, now};
+
+    if (ok)
+        out = info;
+    return ok;
+}
 
 void FlightDataFetcher::enrichNames(FlightInfo &info)
 {
@@ -107,14 +162,20 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         if (outFlights.size() >= g_settings.maxFlights)
             break;
 
+        // Cache key prefers the stable ICAO24, falling back to callsign.
+        const String key = s.icao24.length() ? s.icao24 : s.callsign;
         FlightInfo info;
-        if (!_flightFetcher->fetchFlightInfo(s.callsign, info))
-            continue;
+        bool ok = getEnriched(key, s.callsign, s.icao24, info);
+        if (!ok)
+        {
+            if (g_settings.enrichmentSource == EnrichmentSource::Off)
+                info = FlightInfo(); // show a callsign-only card
+            else
+                continue; // provider selected but no data for this flight
+        }
 
         if (!passesAirlineAllowList(info))
             continue;
-
-        enrichNames(info);
 
         // Metrics from the live ADS-B state vector.
         double altM = !isnan(s.geo_altitude) ? s.geo_altitude : s.baro_altitude;
@@ -152,8 +213,14 @@ size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights)
             continue;
 
         FlightInfo info;
-        if (!_flightFetcher->fetchFlightInfo(ident, info))
-            continue;
+        bool ok = getEnriched(ident, ident, String(""), info);
+        if (!ok)
+        {
+            if (g_settings.enrichmentSource == EnrichmentSource::Off)
+                info = FlightInfo(); // callsign-only card
+            else
+                continue;
+        }
 
         if (!passesAirlineAllowList(info))
             continue;
@@ -162,7 +229,6 @@ size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights)
         if (!Filters::altitudeInBand(info.altitude_ft, g_settings.filters.minAltitudeFt, g_settings.filters.maxAltitudeFt))
             continue;
 
-        enrichNames(info);
         if (info.ident.length() == 0)
             info.ident = ident;
 

@@ -23,6 +23,13 @@ enum class TrackingMode : uint8_t
     Flights = 1 // Track a specific list of flights by ident / callsign / tail
 };
 
+enum class EnrichmentSource : uint8_t
+{
+    Adsbdb = 0, // free, no key (adsbdb.com)
+    AeroApi = 1, // paid FlightAware AeroAPI (needs key)
+    Off = 2      // no enrichment; callsign-only cards
+};
+
 // Which fields are rendered on each flight card, in order. Toggled from web UI.
 struct DisplayLayout
 {
@@ -64,6 +71,13 @@ struct Settings
     String openSkyClientId;
     String openSkyClientSecret;
     String aeroApiKey;
+
+    // ---- Flight enrichment (route/airline/aircraft) ----
+    EnrichmentSource enrichmentSource = EnrichmentSource::Adsbdb;
+    uint32_t enrichmentCacheSeconds = 600; // cache per-aircraft lookups (cuts requests)
+    // When the free source (adsbdb) is primary and misses a flight, fall back to
+    // AeroAPI (only if a key is configured). Keeps AeroAPI as a backup, not the default.
+    bool enrichmentFallbackToAeroApi = true;
 
     // ---- Tracking ----
     TrackingMode mode = TrackingMode::Area;

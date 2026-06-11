@@ -25,6 +25,10 @@ void Settings::seedDefaults()
     openSkyClientSecret = APIConfiguration::OPENSKY_CLIENT_SECRET;
     aeroApiKey = APIConfiguration::AEROAPI_KEY;
 
+    enrichmentSource = EnrichmentSource::Adsbdb;
+    enrichmentCacheSeconds = 600;
+    enrichmentFallbackToAeroApi = true;
+
     mode = TrackingMode::Area;
     centerLat = UserConfiguration::CENTER_LAT;
     centerLon = UserConfiguration::CENTER_LON;
@@ -110,6 +114,11 @@ String Settings::toJson() const
     api["openSkyClientId"] = openSkyClientId;
     api["openSkyClientSecret"] = openSkyClientSecret;
     api["aeroApiKey"] = aeroApiKey;
+    api["enrichmentSource"] = (enrichmentSource == EnrichmentSource::AeroApi) ? "aeroapi"
+                              : (enrichmentSource == EnrichmentSource::Off) ? "off"
+                                                                            : "adsbdb";
+    api["enrichmentCacheSeconds"] = enrichmentCacheSeconds;
+    api["enrichmentFallbackToAeroApi"] = enrichmentFallbackToAeroApi;
 
     JsonObject track = doc.createNestedObject("tracking");
     track["mode"] = (mode == TrackingMode::Flights) ? "flights" : "area";
@@ -194,6 +203,17 @@ bool Settings::fromJson(const String &in)
             openSkyClientSecret = api["openSkyClientSecret"].as<String>();
         if (api.containsKey("aeroApiKey"))
             aeroApiKey = api["aeroApiKey"].as<String>();
+        if (api.containsKey("enrichmentSource"))
+        {
+            String s = api["enrichmentSource"].as<String>();
+            enrichmentSource = (s == "aeroapi") ? EnrichmentSource::AeroApi
+                               : (s == "off") ? EnrichmentSource::Off
+                                              : EnrichmentSource::Adsbdb;
+        }
+        if (api.containsKey("enrichmentCacheSeconds"))
+            enrichmentCacheSeconds = api["enrichmentCacheSeconds"].as<uint32_t>();
+        if (api.containsKey("enrichmentFallbackToAeroApi"))
+            enrichmentFallbackToAeroApi = api["enrichmentFallbackToAeroApi"].as<bool>();
     }
 
     if (doc.containsKey("tracking"))

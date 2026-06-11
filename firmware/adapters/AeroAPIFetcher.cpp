@@ -17,8 +17,9 @@ static String safeGetString(JsonVariant v, const char *key)
     return String(v[key].as<const char *>());
 }
 
-bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, FlightInfo &outInfo)
+bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, const String &icao24, FlightInfo &outInfo)
 {
+    (void)icao24; // AeroAPI looks up by ident; icao24 unused
     if (g_settings.aeroApiKey.length() == 0)
     {
         Serial.println("AeroAPIFetcher: No API key configured");

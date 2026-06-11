@@ -77,8 +77,18 @@
     <input id="openSkyClientId" type="text" />
     <label>OpenSky Client Secret</label>
     <input id="openSkyClientSecret" type="password" />
-    <label>FlightAware AeroAPI Key</label>
+
+    <label>Flight enrichment source (route · airline · aircraft)</label>
+    <select id="enrichmentSource">
+      <option value="adsbdb">adsbdb.com — free, no key (recommended)</option>
+      <option value="aeroapi">FlightAware AeroAPI — paid (needs key below)</option>
+      <option value="off">Off — callsign only</option>
+    </select>
+    <small class="help">adsbdb.com is free and needs no key. Results are cached per aircraft to minimize requests.</small>
+
+    <label>FlightAware AeroAPI Key <span style="color:var(--muted)">(for AeroAPI source or backup)</span></label>
     <input id="aeroApiKey" type="password" />
+    <span class="check" style="margin-top:8px"><input type="checkbox" id="enrichmentFallbackToAeroApi"><label style="margin:0">Use AeroAPI as backup when adsbdb misses a flight (needs key)</label></span>
   </div>
 
   <div class="card">
@@ -203,6 +213,8 @@ async function loadSettings(){
   $('openSkyClientId').value = s.api.openSkyClientId || '';
   $('openSkyClientSecret').value = s.api.openSkyClientSecret || '';
   $('aeroApiKey').value = s.api.aeroApiKey || '';
+  $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
+  $('enrichmentFallbackToAeroApi').checked = s.api.enrichmentFallbackToAeroApi !== false;
 
   $('mode').value = s.tracking.mode;
   $('centerLat').value = s.tracking.centerLat;
@@ -243,7 +255,7 @@ function collect(){
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
     network:{ wifiSsid:$('wifiSsid').value, wifiPassword:$('wifiPassword').value },
-    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value },
+    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),

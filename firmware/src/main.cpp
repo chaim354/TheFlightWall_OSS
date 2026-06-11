@@ -30,12 +30,14 @@ Run loop:
 #include "core/Settings.h"
 #include "adapters/OpenSkyFetcher.h"
 #include "adapters/AeroAPIFetcher.h"
+#include "adapters/AdsbdbFetcher.h"
 #include "core/FlightDataFetcher.h"
 #include "core/WebConfigServer.h"
 #include "adapters/Hub75Display.h"
 
 static OpenSkyFetcher g_openSky;
 static AeroAPIFetcher g_aeroApi;
+static AdsbdbFetcher g_adsbdb;
 static FlightDataFetcher *g_fetcher = nullptr;
 static Hub75Display g_display;
 static WebConfigServer g_web;
@@ -216,7 +218,7 @@ void setup()
     g_web.setDisplay(&g_display);
     g_web.begin(g_apMode, g_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
 
-    g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi);
+    g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi, &g_adsbdb);
 }
 
 void loop()

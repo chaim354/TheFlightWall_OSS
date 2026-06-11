@@ -7,7 +7,7 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - **Two tracking modes**:
   - *Area* — OpenSky `states/all` filtered by location/radius; live metrics come from the ADS-B state vector.
   - *Flights* — a user list of idents/callsigns/tails looked up directly via AeroAPI; metrics from `last_position`.
-- **Enrich flights** with readable airline/aircraft info from AeroAPI and TheFlightWall CDN.
+- **Enrich flights** (airline / route / aircraft type) from a selectable source: **adsbdb.com** (free, no key — default), **AeroAPI** (paid; usable as primary or as a backup that only fires when adsbdb misses), or off. Results are cached per aircraft to minimize requests. Friendly names also come from TheFlightWall CDN.
 - **Render** a Mini-style flight card — airline logo tile on the left, then a configurable set of fields (flight #, route, aircraft, altitude, speed, heading, vertical rate) on the right — on a **HUB75 RGB LED matrix**, cycling up to N flights. Logos load from `data/logos/<ICAO>.rgb565`; airlines without a tile get a brand-style code badge.
 - **Live web preview** — each frame is composed into an in-RAM `GFXcanvas16` and blitted to the panel; the same buffer is served at `/api/framebuffer` so the web UI mirrors the wall pixel-for-pixel.
 - **Brightness scheduling** — day/night brightness using NTP time.

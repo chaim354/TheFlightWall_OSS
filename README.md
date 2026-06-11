@@ -66,11 +66,14 @@ The data pins are the only compile-time hardware setting — edit them in [`firm
 
 ## Data API Keys
 
-The data for this project consists of two main data sources:
-1. Core public [ADS-B](https://en.wikipedia.org/wiki/Automatic_Dependent_Surveillance%E2%80%93Broadcast) data for flight positions and callsigns - using [OpenSky](https://opensky-network.org)
-2. Flight information lookup - aircraft, airline, and route (origin/destination airport). This is typically the hardest / most expensive information to find. Using [FlightAware AeroAPI](https://flightaware.com/aeroapi)
+The data for this project consists of two parts:
+1. **Flight positions & callsigns** — public [ADS-B](https://en.wikipedia.org/wiki/Automatic_Dependent_Surveillance%E2%80%93Broadcast) data via [OpenSky](https://opensky-network.org) (free, needs an OAuth client id/secret).
+2. **Flight enrichment** — airline, route (origin/destination), and aircraft type. Selectable in the web UI:
+   - **[adsbdb.com](https://www.adsbdb.com/)** — *default, free, no API key.* Callsign → route + airline, ICAO24 → aircraft type.
+   - **[FlightAware AeroAPI](https://flightaware.com/aeroapi)** — paid; optional. Can be the primary source, or just a **backup** that only fires when adsbdb misses a flight (so you pay only for the gaps).
+   - **Off** — show callsign only.
 
-You'll need keys for both. You can enter them later in the web UI — you do **not** have to hardcode them.
+Enrichment results are **cached per aircraft** (default 10 min) so loitering planes aren't re-queried every cycle. Out of the box the wall costs **$0** for enrichment — you only need the OpenSky credentials. Enter everything later in the web UI — you do **not** have to hardcode anything.
 
 ### Setting up OpenSky
 1. Register for an [OpenSky](https://opensky-network.org/) account

@@ -13,5 +13,5 @@ public:
     AeroAPIFetcher() = default;
     ~AeroAPIFetcher() override = default;
 
-    bool fetchFlightInfo(const String &flightIdent, FlightInfo &outInfo) override;
+    bool fetchFlightInfo(const String &flightIdent, const String &icao24, FlightInfo &outInfo) override;
 };
