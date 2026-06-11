@@ -49,12 +49,15 @@ private:
     void drawTextLine(int16_t x, int16_t y, const String &text, uint16_t color);
     String truncateToColumns(const String &text, int maxColumns);
     void buildFlightLines(const FlightInfo &f, std::vector<String> &outLines, bool includeAirline);
-    void displaySingleFlightCard(const FlightInfo &f);
-    void displayTextOnlyCard(const FlightInfo &f);
+    void displayFlightCard(const FlightInfo &f);     // picks a layout by panel shape
+    void displaySideBySideCard(const FlightInfo &f); // wide panels: logo left, text right
+    void displayStackedCard(const FlightInfo &f);    // square/tall panels: logo top, text below
+    void displayTextOnlyCard(const FlightInfo &f);   // very short panels: bordered text
     void displayLoadingScreen();
     uint16_t textColor();
 
     bool loadLogoFor(const String &icao);
     uint16_t accentColorFor(const String &code);
-    void drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h);
+    void drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h, uint8_t scale = 1);
+    int16_t fitLines(std::vector<String> &lines, int maxCols, int availHeight);
 };

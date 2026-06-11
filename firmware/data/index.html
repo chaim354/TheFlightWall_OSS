@@ -154,12 +154,18 @@
 
   <div class="card">
     <h2>Hardware (HUB75)</h2>
+    <label>Presets</label>
+    <div class="bar" style="margin-bottom:6px">
+      <button class="ghost" type="button" onclick="setPanel(64,32,1)">64×32</button>
+      <button class="ghost" type="button" onclick="setPanel(64,64,1)">64×64</button>
+      <button class="ghost" type="button" onclick="setPanel(64,64,2)">128×64 (Mini)</button>
+    </div>
     <div class="row">
       <div><label>Panel width (px)</label><input id="panelResX" type="number" /></div>
       <div><label>Panel height (px)</label><input id="panelResY" type="number" /></div>
       <div><label>Panels chained</label><input id="panelChain" type="number" min="1" /></div>
     </div>
-    <small class="help">Matrix width = panel width × panels chained (e.g. 64 × 2 = 128 wide). Changes take effect after a restart.</small>
+    <small class="help">Matrix width = panel width × panels chained (e.g. 64 × 2 = 128 wide). Wide panels use a logo-left card; square panels (64×64) use a stacked logo-on-top card. Changes take effect after a restart.</small>
   </div>
 
   <div class="card">
@@ -178,6 +184,11 @@ const $ = id => document.getElementById(id);
 function rgbToHex(r,g,b){return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+
+function setPanel(x,y,chain){
+  $('panelResX').value = x; $('panelResY').value = y; $('panelChain').value = chain;
+  toast(`Panel set to ${x*chain}×${y} — Save + Restart to apply`);
+}
 
 function toggleMode(){
   const flights = $('mode').value === 'flights';

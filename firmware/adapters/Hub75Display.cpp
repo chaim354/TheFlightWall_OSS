@@ -296,13 +296,28 @@ uint16_t Hub75Display::accentColorFor(const String &code)
     return rgb565(r, g, b);
 }
 
-void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h)
+void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h, uint8_t scale)
 {
+    if (scale < 1)
+        scale = 1;
+
     if (loadLogoFor(f.operator_icao) && _logoValid)
     {
-        int16_t lx = x + (w - _logoW) / 2;
-        int16_t ly = y + (h - _logoH) / 2;
-        _canvas->drawRGBBitmap(lx, ly, _logoPixels, _logoW, _logoH);
+        const int16_t sw = _logoW * scale, sh = _logoH * scale;
+        const int16_t lx = x + (w - sw) / 2;
+        const int16_t ly = y + (h - sh) / 2;
+        if (scale == 1)
+        {
+            _canvas->drawRGBBitmap(lx, ly, _logoPixels, _logoW, _logoH);
+        }
+        else
+        {
+            // Nearest-neighbor upscale (logo tiles are small, runs occasionally).
+            for (int j = 0; j < _logoH; ++j)
+                for (int i = 0; i < _logoW; ++i)
+                    _canvas->fillRect(lx + i * scale, ly + j * scale, scale, scale,
+                                      _logoPixels[j * _logoW + i]);
+        }
         return;
     }
 
@@ -315,25 +330,49 @@ void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, in
     _canvas->fillRect(x, y, w, h, accentColorFor(key));
     if (code.length())
     {
-        const int charWidth = 6, charHeight = 8;
+        const int charWidth = 6 * scale, charHeight = 8 * scale;
         int16_t cx = x + (w - (int)code.length() * charWidth) / 2;
         int16_t cy = y + (h - charHeight) / 2;
+        _canvas->setTextSize(scale);
         drawTextLine(cx, cy, code, rgb565(255, 255, 255));
+        _canvas->setTextSize(1);
     }
 }
 
-void Hub75Display::displaySingleFlightCard(const FlightInfo &f)
+// Trim/truncate `lines` to what fits in availHeight, returns the total text
+// height (so callers can vertically center). 6x8 font + 1px line spacing.
+int16_t Hub75Display::fitLines(std::vector<String> &lines, int maxCols, int availHeight)
+{
+    if (maxCols < 1)
+        maxCols = 1;
+    const int charHeight = 8, lineSpacing = 1, perLine = charHeight + lineSpacing;
+    int maxLines = (availHeight + lineSpacing) / perLine;
+    if (maxLines < 1)
+        maxLines = 1;
+    if ((int)lines.size() > maxLines)
+        lines.resize(maxLines);
+    for (auto &ln : lines)
+        ln = truncateToColumns(ln, maxCols);
+    const int n = (int)lines.size();
+    return (int16_t)(n * charHeight + (n - 1) * lineSpacing);
+}
+
+void Hub75Display::displayFlightCard(const FlightInfo &f)
 {
     if (_matrixHeight < 16)
-    {
-        displayTextOnlyCard(f);
-        return;
-    }
+        displayTextOnlyCard(f); // too short for a logo
+    else if (_matrixWidth >= _matrixHeight * 2)
+        displaySideBySideCard(f); // wide & short (128x32, 128x64, 160x32, 64x32)
+    else
+        displayStackedCard(f); // square / tall (64x64)
+}
 
+void Hub75Display::displaySideBySideCard(const FlightInfo &f)
+{
     const uint16_t color = textColor();
 
     const int16_t boxW = (_matrixWidth >= 48) ? 16 : (_matrixWidth / 3);
-    const int16_t boxH = (_matrixHeight < 16) ? _matrixHeight : 16;
+    const int16_t boxH = 16;
     const int16_t boxX = 1;
     const int16_t boxY = (_matrixHeight - boxH) / 2;
     drawLogoOrBadge(f, boxX, boxY, boxW, boxH);
@@ -342,34 +381,51 @@ void Hub75Display::displaySingleFlightCard(const FlightInfo &f)
     _canvas->drawLine(sepX, 1, sepX, _matrixHeight - 2,
                       accentColorFor(f.operator_icao.length() ? f.operator_icao : f.operator_code));
 
-    const int charWidth = 6, charHeight = 8, lineSpacing = 1;
     const int16_t tx = sepX + 2;
-    const int innerWidth = _matrixWidth - tx - 1;
-    int maxCols = innerWidth / charWidth;
-    if (maxCols < 1)
-        maxCols = 1;
+    const int maxCols = (_matrixWidth - tx - 1) / 6;
 
     std::vector<String> lines;
     buildFlightLines(f, lines, /*includeAirline=*/false); // logo conveys the airline
     if (lines.empty())
         lines.push_back(f.ident.length() ? f.ident : String("?"));
 
-    const int perLine = charHeight + lineSpacing;
-    int maxLines = (_matrixHeight + lineSpacing) / perLine;
-    if (maxLines < 1)
-        maxLines = 1;
-    if ((int)lines.size() > maxLines)
-        lines.resize(maxLines);
-    for (auto &ln : lines)
-        ln = truncateToColumns(ln, maxCols);
-
-    const int lineCount = (int)lines.size();
-    const int totalTextHeight = lineCount * charHeight + (lineCount - 1) * lineSpacing;
-    int16_t y = (_matrixHeight - totalTextHeight) / 2;
+    const int16_t totalH = fitLines(lines, maxCols, _matrixHeight);
+    int16_t y = (_matrixHeight - totalH) / 2;
     for (const String &ln : lines)
     {
         drawTextLine(tx, y, ln, color);
-        y += perLine;
+        y += 9;
+    }
+}
+
+void Hub75Display::displayStackedCard(const FlightInfo &f)
+{
+    const uint16_t color = textColor();
+
+    // Bigger logo when there's vertical room (e.g. 64x64 -> 2x = 32px tall).
+    const uint8_t scale = (_matrixHeight >= 48) ? 2 : 1;
+    const int16_t boxW = 16 * scale, boxH = 16 * scale;
+    const int16_t boxX = (_matrixWidth - boxW) / 2;
+    const int16_t boxY = 2;
+    drawLogoOrBadge(f, boxX, boxY, boxW, boxH, scale);
+
+    const int16_t textTop = boxY + boxH + 2;
+    const int maxCols = (_matrixWidth - 2) / 6;
+
+    std::vector<String> lines;
+    buildFlightLines(f, lines, /*includeAirline=*/false);
+    if (lines.empty())
+        lines.push_back(f.ident.length() ? f.ident : String("?"));
+
+    const int availH = _matrixHeight - textTop;
+    const int16_t totalH = fitLines(lines, maxCols, availH);
+    int16_t y = textTop + (availH - totalH) / 2;
+    for (const String &ln : lines)
+    {
+        // Center each line horizontally.
+        const int16_t x = (_matrixWidth - (int)ln.length() * 6) / 2;
+        drawTextLine(x < 0 ? 0 : x, y, ln, color);
+        y += 9;
     }
 }
 
@@ -440,7 +496,7 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
         }
 
         const size_t index = _currentFlightIndex % flights.size();
-        displaySingleFlightCard(flights[index]);
+        displayFlightCard(flights[index]);
     }
     else
     {
