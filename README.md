@@ -116,6 +116,18 @@ There is no app to install — the device hosts its own configuration page.
 ### First-time setup (WiFi provisioning)
 On first boot (no WiFi saved yet) the wall starts a setup access point named **`FlightWall-Setup`**. Connect your phone/laptop to it and a captive-portal config page opens automatically (or browse to `http://192.168.4.1`). Enter your WiFi + API keys, save, and restart. After that the wall joins your network — the display shows its IP on boot, and you can reach the same page at **`http://flightwall.local/`** (mDNS) or `http://<that-ip>/`.
 
+### Set credentials over USB serial (no recompile)
+After flashing, you can also configure the device from the serial monitor — handy for setting WiFi without the setup AP or editing files:
+```bash
+pio device monitor -b 115200
+```
+Then type commands (`help` lists them all):
+```
+wifi MyNetwork MyPassword
+restart
+```
+Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <adsbdb|aeroapi|off>`, `mode <area|flights>`, `loc <lat> <lon> <radiusKm>`, `get`, `set <json>`, `erase`. Changes are saved to the device immediately.
+
 ### What you can configure from the web page
 - **WiFi** — scan + select your network (changes apply after a restart).
 - **API keys** — OpenSky client id/secret and the FlightAware AeroAPI key.

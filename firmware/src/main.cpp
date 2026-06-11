@@ -33,6 +33,7 @@ Run loop:
 #include "adapters/AdsbdbFetcher.h"
 #include "core/FlightDataFetcher.h"
 #include "core/WebConfigServer.h"
+#include "core/SerialConsole.h"
 #include "adapters/Hub75Display.h"
 
 static OpenSkyFetcher g_openSky;
@@ -41,6 +42,7 @@ static AdsbdbFetcher g_adsbdb;
 static FlightDataFetcher *g_fetcher = nullptr;
 static Hub75Display g_display;
 static WebConfigServer g_web;
+static SerialConsole g_console;
 
 static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
 static bool g_apMode = false;
@@ -188,6 +190,7 @@ void setup()
     delay(200);
 
     g_settings.begin();
+    g_console.begin();
 
     g_display.initialize();
     g_appliedBrightness = g_settings.brightness;
@@ -223,6 +226,7 @@ void setup()
 
 void loop()
 {
+    g_console.poll();
     g_web.handle();
 
     if (g_web.consumeRestartRequested())
