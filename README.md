@@ -95,7 +95,12 @@ The firmware can be built and uploaded to the ESP32 using [PlatformIO](https://p
    - Install [VS Code](https://code.visualstudio.com/)
    - Add the [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode)
 
-2. **(Optional) Adjust the data pin** in [HardwareConfiguration.h](firmware/config/HardwareConfiguration.h). Everything else — WiFi, API keys, location, display size, colors, layout — is set later from the web UI. (You *can* pre-seed defaults in the `config/*.h` files; they're only used on first boot before any settings are saved.)
+2. **(Optional) Bake in your WiFi at flash time** — instead of using the browser setup AP, copy [`firmware/config/Secrets.h.example`](firmware/config/Secrets.h.example) to `firmware/config/Secrets.h` and fill in your WiFi (and optionally API) credentials:
+   ```cpp
+   #define FW_WIFI_SSID      "YourWiFiName"
+   #define FW_WIFI_PASSWORD  "YourWiFiPassword"
+   ```
+   `Secrets.h` is **gitignored**, so your password is never committed. These values seed the device on first boot; afterwards everything is managed from the web UI. (The data pin in [HardwareConfiguration.h](firmware/config/HardwareConfiguration.h) is the only other compile-time setting.)
 
 3. **Upload the firmware and the web UI** (two artifacts). From the `firmware` folder:
    ```bash

@@ -2,3 +2,6 @@ misc
 .DS_Store
 .venv
 firmware/.pio
+
+# Local credentials baked in at flash time (never commit)
+firmware/config/Secrets.h
