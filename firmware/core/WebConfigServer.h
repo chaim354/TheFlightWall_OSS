@@ -36,6 +36,13 @@ public:
     // Display whose framebuffer is served as a live preview (/api/framebuffer).
     void setDisplay(BaseDisplay *display) { _display = display; }
 
+    // Latest ambient light reading, surfaced in /api/status for calibration.
+    void setLightStatus(int level, bool dark)
+    {
+        _lightLevel = level;
+        _lightDark = dark;
+    }
+
     // One-shot flags consumed by the main loop.
     bool consumeSettingsChanged();
     bool consumeRestartRequested();
@@ -49,6 +56,8 @@ private:
     int _lastFlightCount = 0;
     String _lastNote;
     BaseDisplay *_display = nullptr;
+    int _lightLevel = -1;
+    bool _lightDark = false;
 
     volatile bool _settingsChanged = false;
     volatile bool _restartRequested = false;

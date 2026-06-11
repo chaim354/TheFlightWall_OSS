@@ -47,6 +47,14 @@ void Settings::seedDefaults()
     filters = AircraftFilters();
     schedule = BrightnessSchedule();
 
+    lightSensorEnabled = false;
+    lightSensorType = LightSensorType::Analog;
+    lightSensorPin = 34;
+    lightDarkThreshold = 500;
+    lightHysteresis = 150;
+    lightSensorDimInstead = false;
+    lightDimBrightness = 3;
+
     panelResX = HardwareConfiguration::PANEL_RES_X;
     panelResY = HardwareConfiguration::PANEL_RES_Y;
     panelChain = HardwareConfiguration::PANEL_CHAIN;
@@ -162,6 +170,15 @@ String Settings::toJson() const
     sch["nightStartHour"] = schedule.nightStartHour;
     sch["nightEndHour"] = schedule.nightEndHour;
     sch["timezoneOffsetMinutes"] = schedule.timezoneOffsetMinutes;
+
+    JsonObject light = doc.createNestedObject("light");
+    light["enabled"] = lightSensorEnabled;
+    light["type"] = (lightSensorType == LightSensorType::BH1750) ? "bh1750" : "analog";
+    light["pin"] = lightSensorPin;
+    light["darkThreshold"] = lightDarkThreshold;
+    light["hysteresis"] = lightHysteresis;
+    light["dimInstead"] = lightSensorDimInstead;
+    light["dimBrightness"] = lightDimBrightness;
 
     JsonObject hw = doc.createNestedObject("hardware");
     hw["panelResX"] = panelResX;
@@ -310,6 +327,27 @@ bool Settings::fromJson(const String &in)
             schedule.nightEndHour = sch["nightEndHour"].as<uint8_t>();
         if (sch.containsKey("timezoneOffsetMinutes"))
             schedule.timezoneOffsetMinutes = sch["timezoneOffsetMinutes"].as<int16_t>();
+    }
+
+    if (doc.containsKey("light"))
+    {
+        JsonObject light = doc["light"];
+        if (light.containsKey("enabled"))
+            lightSensorEnabled = light["enabled"].as<bool>();
+        if (light.containsKey("type"))
+            lightSensorType = (String(light["type"].as<const char *>()) == "bh1750")
+                                  ? LightSensorType::BH1750
+                                  : LightSensorType::Analog;
+        if (light.containsKey("pin"))
+            lightSensorPin = light["pin"].as<uint8_t>();
+        if (light.containsKey("darkThreshold"))
+            lightDarkThreshold = light["darkThreshold"].as<uint16_t>();
+        if (light.containsKey("hysteresis"))
+            lightHysteresis = light["hysteresis"].as<uint16_t>();
+        if (light.containsKey("dimInstead"))
+            lightSensorDimInstead = light["dimInstead"].as<bool>();
+        if (light.containsKey("dimBrightness"))
+            lightDimBrightness = light["dimBrightness"].as<uint8_t>();
     }
 
     if (doc.containsKey("hardware"))

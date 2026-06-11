@@ -35,6 +35,7 @@ Run loop:
 #include "core/WebConfigServer.h"
 #include "core/SerialConsole.h"
 #include "adapters/Hub75Display.h"
+#include "adapters/LightSensor.h"
 
 static OpenSkyFetcher g_openSky;
 static AeroAPIFetcher g_aeroApi;
@@ -43,6 +44,8 @@ static FlightDataFetcher *g_fetcher = nullptr;
 static Hub75Display g_display;
 static WebConfigServer g_web;
 static SerialConsole g_console;
+static LightSensor g_light;
+static unsigned long g_lastLightMs = 0;
 
 static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
 static bool g_apMode = false;
@@ -124,6 +127,10 @@ static void applyBrightness()
             target = isNightHour(hour) ? g_settings.schedule.nightBrightness
                                        : g_settings.schedule.dayBrightness;
     }
+    // Ambient light sensor overrides: blank or dim when the room is dark.
+    if (g_settings.lightSensorEnabled && g_light.isDark())
+        target = g_settings.lightSensorDimInstead ? g_settings.lightDimBrightness : 0;
+
     if ((int)target != g_appliedBrightness)
     {
         g_display.setBrightness(target);
@@ -194,6 +201,7 @@ void setup()
 
     g_display.initialize();
     g_appliedBrightness = g_settings.brightness;
+    g_light.begin();
     g_display.displayMessage(String("FlightWall"));
 
     bool connected = connectWifiSta();
@@ -240,10 +248,22 @@ void loop()
     {
         // Re-apply runtime-tunable settings immediately. Hardware/WiFi changes
         // take effect on next reboot.
+        g_light.begin();          // re-init for new sensor type/pin/enable
         g_appliedBrightness = -1; // force re-apply
         applyBrightness();
         g_lastFetchMs = 0; // refresh promptly with new tracking/filter settings
     }
+
+    // Sample the ambient light sensor a few times a second (cheap; works in all
+    // modes so the panel auto-dims even on the setup AP).
+    const unsigned long nowMs = millis();
+    if (g_settings.lightSensorEnabled && nowMs - g_lastLightMs >= 500)
+    {
+        g_lastLightMs = nowMs;
+        g_light.update();
+        g_web.setLightStatus(g_light.level(), g_light.isDark());
+    }
+    applyBrightness();
 
     // In AP setup mode we only serve the web UI (no network for fetching).
     if (g_apMode || WiFi.status() != WL_CONNECTED)
@@ -251,8 +271,6 @@ void loop()
         delay(5);
         return;
     }
-
-    applyBrightness();
 
     const unsigned long intervalMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL;
     const unsigned long now = millis();

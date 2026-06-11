@@ -137,6 +137,7 @@ Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <ads
 - **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, and which **fields** appear on each card (airline+flight, route, aircraft, **altitude, speed, heading, vertical rate**).
 - **Filters** — altitude band, hide aircraft on the ground, and an airline allow-list.
 - **Brightness schedule** — separate day/night brightness with configurable night hours (uses NTP time + a UTC offset).
+- **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (34/35/36/39/33 — ADC2 can't be used with WiFi on) or an **I2C BH1750** lux sensor on SDA=21/SCL=22. Threshold + hysteresis are tunable, and the web UI shows the live reading for calibration.
 - **Hardware** — tile size and tile count, so you can match any panel layout (changes apply after a restart).
 - **Live status** — current connection, mode, the flights currently on the wall, and a **live pixel preview** of exactly what the LED matrix is showing right now (mirrored from the device framebuffer).
 

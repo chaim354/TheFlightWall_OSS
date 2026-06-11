@@ -135,6 +135,8 @@ void WebConfigServer::handleGetStatus()
     doc["flightCount"] = _lastFlightCount;
     doc["note"] = _lastNote;
     doc["freeHeap"] = (uint32_t)ESP.getFreeHeap();
+    doc["lightLevel"] = _lightLevel;
+    doc["lightDark"] = _lightDark;
     String out;
     serializeJson(doc, out);
     _server.send(200, "application/json", out);

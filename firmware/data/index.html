@@ -163,6 +163,27 @@
   </div>
 
   <div class="card">
+    <h2>Light Sensor (auto-off in the dark)</h2>
+    <span class="check"><input type="checkbox" id="lightSensorEnabled"><label style="margin:0">Enable ambient light sensor</label></span>
+    <div class="row">
+      <div><label>Sensor type</label>
+        <select id="lightSensorType">
+          <option value="analog">Analog LDR (ADC1 pin)</option>
+          <option value="bh1750">BH1750 lux (I2C 21/22)</option>
+        </select>
+      </div>
+      <div><label>Analog pin (ADC1: 34/35/36/39/33)</label><input id="lightSensorPin" type="number" /></div>
+    </div>
+    <div class="row">
+      <div><label>Dark threshold</label><input id="lightDarkThreshold" type="number" /></div>
+      <div><label>Hysteresis</label><input id="lightHysteresis" type="number" /></div>
+    </div>
+    <span class="check" style="margin-top:8px"><input type="checkbox" id="lightSensorDimInstead"><label style="margin:0">Dim instead of fully off</label></span>
+    <div class="row"><div><label>Dim brightness (0–255)</label><input id="lightDimBrightness" type="number" min="0" max="255" /></div></div>
+    <small class="help" id="lightLive">Live reading appears here when enabled — set the threshold just above the dark value.</small>
+  </div>
+
+  <div class="card">
     <h2>Hardware (HUB75)</h2>
     <label>Presets</label>
     <div class="bar" style="margin-bottom:6px">
@@ -243,6 +264,14 @@ async function loadSettings(){
   $('nightEndHour').value = s.schedule.nightEndHour;
   $('timezoneOffsetMinutes').value = s.schedule.timezoneOffsetMinutes;
 
+  $('lightSensorEnabled').checked = !!s.light.enabled;
+  $('lightSensorType').value = s.light.type;
+  $('lightSensorPin').value = s.light.pin;
+  $('lightDarkThreshold').value = s.light.darkThreshold;
+  $('lightHysteresis').value = s.light.hysteresis;
+  $('lightSensorDimInstead').checked = !!s.light.dimInstead;
+  $('lightDimBrightness').value = s.light.dimBrightness;
+
   $('panelResX').value = s.hardware.panelResX;
   $('panelResY').value = s.hardware.panelResY;
   $('panelChain').value = s.hardware.panelChain;
@@ -275,6 +304,11 @@ function collect(){
     schedule:{
       enabled:$('schedEnabled').checked, dayBrightness:+$('dayBrightness').value, nightBrightness:+$('nightBrightness').value,
       nightStartHour:+$('nightStartHour').value, nightEndHour:+$('nightEndHour').value, timezoneOffsetMinutes:+$('timezoneOffsetMinutes').value
+    },
+    light:{
+      enabled:$('lightSensorEnabled').checked, type:$('lightSensorType').value, pin:+$('lightSensorPin').value,
+      darkThreshold:+$('lightDarkThreshold').value, hysteresis:+$('lightHysteresis').value,
+      dimInstead:$('lightSensorDimInstead').checked, dimBrightness:+$('lightDimBrightness').value
     },
     hardware:{ panelResX:+$('panelResX').value, panelResY:+$('panelResY').value, panelChain:+$('panelChain').value }
   };
@@ -321,6 +355,10 @@ async function loadStatus(){
       `<span class="pill">${s.mode} mode</span>`+
       `<span class="pill">${s.flightCount} flights</span>`+
       `<span class="pill">heap ${Math.round(s.freeHeap/1024)}k</span>`;
+    if('lightLevel' in s && s.lightLevel >= 0){
+      const el = $('lightLive');
+      if(el) el.textContent = `Live reading: ${s.lightLevel}  ·  panel ${s.lightDark ? 'OFF (dark)' : 'on (lit)'} — set the threshold just above the dark value.`;
+    }
   }catch(e){}
   try{
     const f = await (await fetch('/api/flights')).json();
