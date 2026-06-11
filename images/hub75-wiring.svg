@@ -1,0 +1,138 @@
+<svg viewBox="0 0 980 700" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl desc" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <title id="ttl">FlightWall HUB75 to ESP32 wiring diagram</title>
+  <desc id="desc">Maps each pin of the HUB75 16-pin data header to an ESP32 GPIO, with a separate 5V power supply feeding the panel power connector.</desc>
+
+  <rect x="0" y="0" width="980" height="700" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+
+  <text x="40" y="42" font-size="22" font-weight="700" fill="#0f172a">FlightWall — HUB75 ↔ ESP32 wiring</text>
+  <text x="40" y="64" font-size="13" fill="#64748b">Pin map from config/HardwareConfiguration.h. Data header (left) + separate panel power (below).</text>
+
+  <!-- LED matrix -->
+  <rect x="600" y="82" width="340" height="46" rx="8" fill="#0f172a"/>
+  <text x="770" y="104" font-size="14" font-weight="700" fill="#f8fafc" text-anchor="middle">RGB LED MATRIX (HUB75)</text>
+  <text x="770" y="120" font-size="11" fill="#94a3b8" text-anchor="middle">e.g. 64×64 × 2 chained = 128×64</text>
+  <line x1="690" y1="128" x2="690" y2="150" stroke="#94a3b8" stroke-width="2"/>
+
+  <!-- ESP32 box -->
+  <rect x="110" y="150" width="180" height="430" rx="10" fill="#f1f5f9" stroke="#334155" stroke-width="1.5"/>
+  <text x="200" y="174" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">ESP32</text>
+  <text x="200" y="190" font-size="10.5" fill="#64748b" text-anchor="middle">USB = power + flashing</text>
+
+  <!-- HUB75 header box -->
+  <rect x="600" y="150" width="180" height="430" rx="10" fill="#f1f5f9" stroke="#334155" stroke-width="1.5"/>
+  <text x="690" y="174" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">HUB75 header (J1)</text>
+  <text x="690" y="190" font-size="10.5" fill="#64748b" text-anchor="middle">16-pin IDC, data only</text>
+
+  <!-- rows: wire + ESP32 GPIO stub + header signal + pin number -->
+  <!-- row template repeated -->
+  <g font-size="12.5">
+    <!-- R1 -->
+    <line x1="290" y1="206" x2="600" y2="206" stroke="#e11d48" stroke-width="3"/>
+    <circle cx="290" cy="206" r="3.5" fill="#e11d48"/><circle cx="600" cy="206" r="3.5" fill="#e11d48"/>
+    <text x="283" y="210" text-anchor="end" fill="#e11d48" font-weight="600">IO25</text>
+    <text x="608" y="210" fill="#0f172a" font-weight="600">R1</text><text x="772" y="210" text-anchor="end" fill="#94a3b8">1</text>
+    <!-- G1 -->
+    <line x1="290" y1="230" x2="600" y2="230" stroke="#16a34a" stroke-width="3"/>
+    <circle cx="290" cy="230" r="3.5" fill="#16a34a"/><circle cx="600" cy="230" r="3.5" fill="#16a34a"/>
+    <text x="283" y="234" text-anchor="end" fill="#16a34a" font-weight="600">IO26</text>
+    <text x="608" y="234" fill="#0f172a" font-weight="600">G1</text><text x="772" y="234" text-anchor="end" fill="#94a3b8">2</text>
+    <!-- B1 -->
+    <line x1="290" y1="254" x2="600" y2="254" stroke="#2563eb" stroke-width="3"/>
+    <circle cx="290" cy="254" r="3.5" fill="#2563eb"/><circle cx="600" cy="254" r="3.5" fill="#2563eb"/>
+    <text x="283" y="258" text-anchor="end" fill="#2563eb" font-weight="600">IO27</text>
+    <text x="608" y="258" fill="#0f172a" font-weight="600">B1</text><text x="772" y="258" text-anchor="end" fill="#94a3b8">3</text>
+    <!-- GND -->
+    <line x1="290" y1="278" x2="600" y2="278" stroke="#475569" stroke-width="3"/>
+    <circle cx="290" cy="278" r="3.5" fill="#475569"/><circle cx="600" cy="278" r="3.5" fill="#475569"/>
+    <text x="283" y="282" text-anchor="end" fill="#475569" font-weight="600">GND</text>
+    <text x="608" y="282" fill="#475569" font-weight="600">GND</text><text x="772" y="282" text-anchor="end" fill="#94a3b8">4</text>
+    <!-- R2 -->
+    <line x1="290" y1="302" x2="600" y2="302" stroke="#e11d48" stroke-width="3"/>
+    <circle cx="290" cy="302" r="3.5" fill="#e11d48"/><circle cx="600" cy="302" r="3.5" fill="#e11d48"/>
+    <text x="283" y="306" text-anchor="end" fill="#e11d48" font-weight="600">IO14</text>
+    <text x="608" y="306" fill="#0f172a" font-weight="600">R2</text><text x="772" y="306" text-anchor="end" fill="#94a3b8">5</text>
+    <!-- G2 -->
+    <line x1="290" y1="326" x2="600" y2="326" stroke="#16a34a" stroke-width="3"/>
+    <circle cx="290" cy="326" r="3.5" fill="#16a34a"/><circle cx="600" cy="326" r="3.5" fill="#16a34a"/>
+    <text x="283" y="330" text-anchor="end" fill="#16a34a" font-weight="600">IO12</text>
+    <text x="608" y="330" fill="#0f172a" font-weight="600">G2</text><text x="772" y="330" text-anchor="end" fill="#94a3b8">6</text>
+    <!-- B2 -->
+    <line x1="290" y1="350" x2="600" y2="350" stroke="#2563eb" stroke-width="3"/>
+    <circle cx="290" cy="350" r="3.5" fill="#2563eb"/><circle cx="600" cy="350" r="3.5" fill="#2563eb"/>
+    <text x="283" y="354" text-anchor="end" fill="#2563eb" font-weight="600">IO13</text>
+    <text x="608" y="354" fill="#0f172a" font-weight="600">B2</text><text x="772" y="354" text-anchor="end" fill="#94a3b8">7</text>
+    <!-- E -->
+    <line x1="290" y1="374" x2="600" y2="374" stroke="#7c3aed" stroke-width="3"/>
+    <circle cx="290" cy="374" r="3.5" fill="#7c3aed"/><circle cx="600" cy="374" r="3.5" fill="#7c3aed"/>
+    <text x="283" y="378" text-anchor="end" fill="#7c3aed" font-weight="600">IO32</text>
+    <text x="608" y="378" fill="#0f172a" font-weight="600">E</text><text x="772" y="378" text-anchor="end" fill="#94a3b8">8</text>
+    <!-- A -->
+    <line x1="290" y1="398" x2="600" y2="398" stroke="#7c3aed" stroke-width="3"/>
+    <circle cx="290" cy="398" r="3.5" fill="#7c3aed"/><circle cx="600" cy="398" r="3.5" fill="#7c3aed"/>
+    <text x="283" y="402" text-anchor="end" fill="#7c3aed" font-weight="600">IO23</text>
+    <text x="608" y="402" fill="#0f172a" font-weight="600">A</text><text x="772" y="402" text-anchor="end" fill="#94a3b8">9</text>
+    <!-- B(addr) -->
+    <line x1="290" y1="422" x2="600" y2="422" stroke="#7c3aed" stroke-width="3"/>
+    <circle cx="290" cy="422" r="3.5" fill="#7c3aed"/><circle cx="600" cy="422" r="3.5" fill="#7c3aed"/>
+    <text x="283" y="426" text-anchor="end" fill="#7c3aed" font-weight="600">IO19</text>
+    <text x="608" y="426" fill="#0f172a" font-weight="600">B</text><text x="770" y="426" text-anchor="end" fill="#94a3b8">10</text>
+    <!-- C -->
+    <line x1="290" y1="446" x2="600" y2="446" stroke="#7c3aed" stroke-width="3"/>
+    <circle cx="290" cy="446" r="3.5" fill="#7c3aed"/><circle cx="600" cy="446" r="3.5" fill="#7c3aed"/>
+    <text x="283" y="450" text-anchor="end" fill="#7c3aed" font-weight="600">IO5</text>
+    <text x="608" y="450" fill="#0f172a" font-weight="600">C</text><text x="770" y="450" text-anchor="end" fill="#94a3b8">11</text>
+    <!-- D -->
+    <line x1="290" y1="470" x2="600" y2="470" stroke="#7c3aed" stroke-width="3"/>
+    <circle cx="290" cy="470" r="3.5" fill="#7c3aed"/><circle cx="600" cy="470" r="3.5" fill="#7c3aed"/>
+    <text x="283" y="474" text-anchor="end" fill="#7c3aed" font-weight="600">IO17</text>
+    <text x="608" y="474" fill="#0f172a" font-weight="600">D</text><text x="770" y="474" text-anchor="end" fill="#94a3b8">12</text>
+    <!-- CLK -->
+    <line x1="290" y1="494" x2="600" y2="494" stroke="#ea580c" stroke-width="3"/>
+    <circle cx="290" cy="494" r="3.5" fill="#ea580c"/><circle cx="600" cy="494" r="3.5" fill="#ea580c"/>
+    <text x="283" y="498" text-anchor="end" fill="#ea580c" font-weight="600">IO16</text>
+    <text x="608" y="498" fill="#0f172a" font-weight="600">CLK</text><text x="770" y="498" text-anchor="end" fill="#94a3b8">13</text>
+    <!-- LAT -->
+    <line x1="290" y1="518" x2="600" y2="518" stroke="#ea580c" stroke-width="3"/>
+    <circle cx="290" cy="518" r="3.5" fill="#ea580c"/><circle cx="600" cy="518" r="3.5" fill="#ea580c"/>
+    <text x="283" y="522" text-anchor="end" fill="#ea580c" font-weight="600">IO4</text>
+    <text x="608" y="522" fill="#0f172a" font-weight="600">LAT</text><text x="770" y="522" text-anchor="end" fill="#94a3b8">14</text>
+    <!-- OE -->
+    <line x1="290" y1="542" x2="600" y2="542" stroke="#ea580c" stroke-width="3"/>
+    <circle cx="290" cy="542" r="3.5" fill="#ea580c"/><circle cx="600" cy="542" r="3.5" fill="#ea580c"/>
+    <text x="283" y="546" text-anchor="end" fill="#ea580c" font-weight="600">IO15</text>
+    <text x="608" y="546" fill="#0f172a" font-weight="600">OE</text><text x="770" y="546" text-anchor="end" fill="#94a3b8">15</text>
+    <!-- GND2 -->
+    <line x1="290" y1="566" x2="600" y2="566" stroke="#475569" stroke-width="3"/>
+    <circle cx="290" cy="566" r="3.5" fill="#475569"/><circle cx="600" cy="566" r="3.5" fill="#475569"/>
+    <text x="283" y="570" text-anchor="end" fill="#475569" font-weight="600">GND</text>
+    <text x="608" y="570" fill="#475569" font-weight="600">GND</text><text x="770" y="570" text-anchor="end" fill="#94a3b8">16</text>
+  </g>
+
+  <!-- Power supply + panel power connector -->
+  <rect x="110" y="612" width="180" height="64" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="200" y="636" font-size="13" font-weight="700" fill="#7c2d12" text-anchor="middle">5V power supply</text>
+  <text x="200" y="654" font-size="10.5" fill="#9a3412" text-anchor="middle">size for panel current (≥4A)</text>
+
+  <rect x="360" y="612" width="230" height="64" rx="10" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+  <text x="475" y="636" font-size="13" font-weight="700" fill="#0f172a" text-anchor="middle">Panel power connector</text>
+  <text x="475" y="654" font-size="10.5" fill="#64748b" text-anchor="middle">+5V / GND (separate from data)</text>
+
+  <line x1="290" y1="636" x2="360" y2="636" stroke="#e11d48" stroke-width="4"/>
+  <line x1="290" y1="656" x2="360" y2="656" stroke="#1f2937" stroke-width="4"/>
+  <text x="325" y="630" font-size="10" fill="#e11d48" text-anchor="middle">+5V</text>
+  <text x="325" y="672" font-size="10" fill="#1f2937" text-anchor="middle">GND</text>
+
+  <!-- Legend -->
+  <g font-size="11.5" fill="#334155">
+    <text x="620" y="616" font-size="12" font-weight="700" fill="#0f172a">Legend</text>
+    <rect x="620" y="626" width="14" height="8" fill="#e11d48"/><text x="640" y="634">R data (R1/R2)</text>
+    <rect x="620" y="642" width="14" height="8" fill="#16a34a"/><text x="640" y="650">G data (G1/G2)</text>
+    <rect x="620" y="658" width="14" height="8" fill="#2563eb"/><text x="640" y="666">B data (B1/B2)</text>
+    <rect x="790" y="626" width="14" height="8" fill="#7c3aed"/><text x="810" y="634">row select A–E</text>
+    <rect x="790" y="642" width="14" height="8" fill="#ea580c"/><text x="810" y="650">CLK / LAT / OE</text>
+    <rect x="790" y="658" width="14" height="8" fill="#475569"/><text x="810" y="666">ground</text>
+  </g>
+
+  <!-- Notes -->
+  <text x="40" y="694" font-size="11" fill="#64748b">Tie PSU GND + panel GND + ESP32 GND together (common ground). E pin (IO32) only for 64-row panels — use −1 for 32-row. A 3.3→5V level shifter (74AHCT245) on the data lines improves reliability.</text>
+</svg>

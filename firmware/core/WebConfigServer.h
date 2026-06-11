@@ -1,0 +1,66 @@
+/*
+Purpose: On-device configuration & control web server (replaces the mobile app).
+
+Serves a single-page web UI from LittleFS (`/index.html`) and a small REST API
+for reading/writing the runtime Settings, viewing live status, scanning WiFi, and
+restarting. Works both on the home network (STA mode) and as a first-time setup
+access point (AP mode) with a captive-portal DNS redirect.
+
+REST API:
+  GET  /api/settings   -> current settings JSON
+  POST /api/settings   -> apply + persist settings JSON (body)
+  GET  /api/status     -> connection + device status JSON
+  GET  /api/flights    -> currently displayed flights JSON (set by main loop)
+  GET  /api/wifiscan   -> nearby WiFi networks JSON
+  POST /api/restart    -> reboot the device
+*/
+#pragma once
+
+#include <Arduino.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include "interfaces/BaseDisplay.h"
+
+class WebConfigServer
+{
+public:
+    WebConfigServer();
+
+    void begin(bool apMode, const String &ipAddress);
+    void handle(); // call frequently from loop()
+
+    // Pushed in from the main loop so the UI can show what's on the wall.
+    void setFlightsJson(const String &json) { _flightsJson = json; }
+    void setLastFetchInfo(int flightCount, const String &note);
+
+    // Display whose framebuffer is served as a live preview (/api/framebuffer).
+    void setDisplay(BaseDisplay *display) { _display = display; }
+
+    // One-shot flags consumed by the main loop.
+    bool consumeSettingsChanged();
+    bool consumeRestartRequested();
+
+private:
+    WebServer _server;
+    DNSServer _dns;
+    bool _apMode = false;
+    String _ip;
+    String _flightsJson = "[]";
+    int _lastFlightCount = 0;
+    String _lastNote;
+    BaseDisplay *_display = nullptr;
+
+    volatile bool _settingsChanged = false;
+    volatile bool _restartRequested = false;
+
+    void registerRoutes();
+    void handleGetSettings();
+    void handlePostSettings();
+    void handleGetStatus();
+    void handleGetFlights();
+    void handleFramebuffer();
+    void handleWifiScan();
+    void handleRestart();
+    void handleRoot();
+    void handleNotFound();
+};

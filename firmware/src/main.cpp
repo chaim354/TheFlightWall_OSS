@@ -1,128 +1,269 @@
 /*
-Purpose: Firmware entry point for ESP32.
-Responsibilities:
-- Initialize serial, connect to Wi‑Fi, and construct fetchers and display.
-- Periodically fetch state vectors (OpenSky), enrich flights (AeroAPI), and render.
-Configuration: UserConfiguration (location/filters/colors), TimingConfiguration (intervals),
-               WiFiConfiguration (SSID/password), HardwareConfiguration (display specs).
+Purpose: Firmware entry point for ESP32 (FlightWall Mini parity build).
+
+Boot flow:
+- Mount LittleFS + load runtime Settings (or seed from compile-time defaults).
+- Initialize the LED matrix display.
+- Connect to WiFi (STA) using saved credentials; if none/failed, fall back to a
+  setup Access Point ("FlightWall-Setup") so the user can configure over the web.
+- Start the configuration & control web server (replaces the mobile app).
+- Start NTP for the brightness scheduler.
+
+Run loop:
+- Service the web server (settings edits, status, WiFi scan, restart).
+- Periodically fetch + enrich flights (Area or Flights mode) and render them.
+- Apply scheduled brightness based on local time.
+- React to settings changes / restart requests from the web UI.
 */
 #include <vector>
+#include <time.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-#include "config/UserConfiguration.h"
-#include "config/WiFiConfiguration.h"
-#include "config/TimingConfiguration.h"
+// Direct includes so PlatformIO's LDF adds these bundled framework libraries to
+// the build (it does not always follow them through project headers).
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <LittleFS.h>
+#include <ESPmDNS.h>
+#include <ArduinoJson.h>
+#include "core/Settings.h"
 #include "adapters/OpenSkyFetcher.h"
 #include "adapters/AeroAPIFetcher.h"
 #include "core/FlightDataFetcher.h"
-#include "adapters/NeoMatrixDisplay.h"
+#include "core/WebConfigServer.h"
+#include "adapters/Hub75Display.h"
 
 static OpenSkyFetcher g_openSky;
 static AeroAPIFetcher g_aeroApi;
 static FlightDataFetcher *g_fetcher = nullptr;
-static NeoMatrixDisplay g_display;
+static Hub75Display g_display;
+static WebConfigServer g_web;
 
+static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
+static bool g_apMode = false;
 static unsigned long g_lastFetchMs = 0;
+static unsigned long g_lastRenderMs = 0;
+static bool g_firstFetchDone = false;
+static int g_appliedBrightness = -1;
+static std::vector<FlightInfo> g_lastFlights;
+
+static const char *kSetupApSsid = "FlightWall-Setup";
+
+// ---- Helpers --------------------------------------------------------------
+
+static bool connectWifiSta()
+{
+    if (!g_settings.hasWifi())
+        return false;
+
+    WiFi.mode(WIFI_STA);
+    g_display.displayMessage(String("WiFi: ") + g_settings.wifiSsid);
+    WiFi.begin(g_settings.wifiSsid.c_str(), g_settings.wifiPassword.c_str());
+    Serial.print("Connecting to WiFi");
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 50)
+    {
+        delay(200);
+        Serial.print(".");
+        attempts++;
+    }
+    Serial.println();
+    return WiFi.status() == WL_CONNECTED;
+}
+
+static void startSetupAp()
+{
+    g_apMode = true;
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(kSetupApSsid);
+    IPAddress ip = WiFi.softAPIP();
+    Serial.print("Setup AP started. Connect to '");
+    Serial.print(kSetupApSsid);
+    Serial.print("' then browse to http://");
+    Serial.println(ip);
+    g_display.displayMessage(String("Setup: ") + kSetupApSsid);
+}
+
+// Compute the local hour [0-23] using NTP UTC + the configured offset.
+// Returns -1 if time is not yet synced.
+static int localHourNow()
+{
+    time_t now = time(nullptr);
+    if (now < 100000) // not synced yet
+        return -1;
+    long localSecs = (long)(now % 86400L) + (long)g_settings.schedule.timezoneOffsetMinutes * 60L;
+    localSecs %= 86400L;
+    if (localSecs < 0)
+        localSecs += 86400L;
+    return (int)(localSecs / 3600L);
+}
+
+static bool isNightHour(int hour)
+{
+    const auto &s = g_settings.schedule;
+    if (s.nightStartHour == s.nightEndHour)
+        return false;
+    if (s.nightStartHour < s.nightEndHour)
+        return hour >= s.nightStartHour && hour < s.nightEndHour;
+    // Wrapping window, e.g. 22 -> 7
+    return hour >= s.nightStartHour || hour < s.nightEndHour;
+}
+
+static void applyBrightness()
+{
+    uint8_t target = g_settings.brightness;
+    if (g_settings.schedule.enabled)
+    {
+        int hour = localHourNow();
+        if (hour >= 0)
+            target = isNightHour(hour) ? g_settings.schedule.nightBrightness
+                                       : g_settings.schedule.dayBrightness;
+    }
+    if ((int)target != g_appliedBrightness)
+    {
+        g_display.setBrightness(target);
+        g_appliedBrightness = target;
+    }
+}
+
+static String flightsToJson(const std::vector<FlightInfo> &flights)
+{
+    DynamicJsonDocument doc(4096);
+    JsonArray arr = doc.to<JsonArray>();
+    for (const auto &f : flights)
+    {
+        JsonObject o = arr.createNestedObject();
+        o["ident"] = f.ident.length() ? f.ident : f.ident_icao;
+        o["airline"] = f.airline_display_name_full;
+        o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+        o["origin"] = f.origin.code_icao;
+        o["destination"] = f.destination.code_icao;
+        if (f.has_metrics)
+        {
+            if (!isnan(f.altitude_ft))
+                o["altitudeFt"] = (long)f.altitude_ft;
+            if (!isnan(f.groundspeed_kt))
+                o["speedKt"] = (long)f.groundspeed_kt;
+            if (!isnan(f.heading_deg))
+                o["headingDeg"] = (long)f.heading_deg;
+            if (!isnan(f.vertical_rate_fpm))
+                o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
+        }
+    }
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
+static void doFetchAndRender()
+{
+    std::vector<StateVector> states;
+    std::vector<FlightInfo> flights;
+    size_t enriched = g_fetcher->fetchFlights(states, flights);
+
+    Serial.print("Enriched flights: ");
+    Serial.println((int)enriched);
+
+    g_web.setFlightsJson(flightsToJson(flights));
+    g_web.setLastFetchInfo((int)flights.size(),
+                           g_settings.mode == TrackingMode::Flights ? "flights mode" : "area mode");
+
+    g_lastFlights = flights;
+    g_display.displayFlights(g_lastFlights);
+    g_lastRenderMs = millis();
+    g_firstFetchDone = true;
+}
+
+// ---- Arduino entry points -------------------------------------------------
+// Guarded so the Unity test runner (test_build_src=true) provides its own
+// setup()/loop() without colliding with the firmware's.
+#ifndef PIO_UNIT_TESTING
 
 void setup()
 {
     Serial.begin(115200);
     delay(200);
 
+    g_settings.begin();
+
     g_display.initialize();
+    g_appliedBrightness = g_settings.brightness;
     g_display.displayMessage(String("FlightWall"));
 
-    if (strlen(WiFiConfiguration::WIFI_SSID) > 0)
+    bool connected = connectWifiSta();
+    if (connected)
     {
-        WiFi.mode(WIFI_STA);
-        g_display.displayMessage(String("WiFi: ") + WiFiConfiguration::WIFI_SSID);
-        WiFi.begin(WiFiConfiguration::WIFI_SSID, WiFiConfiguration::WIFI_PASSWORD);
-        Serial.print("Connecting to WiFi");
-        int attempts = 0;
-        while (WiFi.status() != WL_CONNECTED && attempts < 50)
+        Serial.print("WiFi connected: ");
+        Serial.println(WiFi.localIP());
+        g_display.displayMessage(String("WiFi OK ") + WiFi.localIP().toString());
+        delay(2000);
+        // Advertise http://flightwall.local so the UI is reachable without the IP.
+        if (MDNS.begin(kMdnsHostname))
         {
-            delay(200);
-            Serial.print(".");
-            attempts++;
+            MDNS.addService("http", "tcp", 80);
+            Serial.printf("mDNS: http://%s.local\n", kMdnsHostname);
         }
-        Serial.println();
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            Serial.print("WiFi connected: ");
-            Serial.println(WiFi.localIP());
-            g_display.displayMessage(String("WiFi OK ") + WiFi.localIP().toString());
-            delay(3000);
-            g_display.showLoading();
-        }
-        else
-        {
-            Serial.println("WiFi not connected; proceeding without network");
-            g_display.displayMessage(String("WiFi FAIL"));
-        }
+        // NTP for brightness scheduling (UTC; offset applied locally).
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        g_display.showLoading();
     }
+    else
+    {
+        startSetupAp();
+    }
+
+    g_web.setDisplay(&g_display);
+    g_web.begin(g_apMode, g_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
 
     g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi);
 }
 
 void loop()
 {
-    const unsigned long intervalMs = TimingConfiguration::FETCH_INTERVAL_SECONDS * 1000UL;
+    g_web.handle();
+
+    if (g_web.consumeRestartRequested())
+    {
+        Serial.println("Restart requested via web UI");
+        delay(200);
+        ESP.restart();
+    }
+
+    if (g_web.consumeSettingsChanged())
+    {
+        // Re-apply runtime-tunable settings immediately. Hardware/WiFi changes
+        // take effect on next reboot.
+        g_appliedBrightness = -1; // force re-apply
+        applyBrightness();
+        g_lastFetchMs = 0; // refresh promptly with new tracking/filter settings
+    }
+
+    // In AP setup mode we only serve the web UI (no network for fetching).
+    if (g_apMode || WiFi.status() != WL_CONNECTED)
+    {
+        delay(5);
+        return;
+    }
+
+    applyBrightness();
+
+    const unsigned long intervalMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL;
     const unsigned long now = millis();
-    if (now - g_lastFetchMs >= intervalMs)
+    if (!g_firstFetchDone || (now - g_lastFetchMs >= intervalMs))
     {
         g_lastFetchMs = now;
-
-        std::vector<StateVector> states;
-        std::vector<FlightInfo> flights;
-        size_t enriched = g_fetcher->fetchFlights(states, flights);
-
-        Serial.print("OpenSky state vectors: ");
-        Serial.println((int)states.size());
-        Serial.print("AeroAPI enriched flights: ");
-        Serial.println((int)enriched);
-
-        for (const auto &s : states)
-        {
-            Serial.print(" ");
-            Serial.print(s.callsign);
-            Serial.print(" @ ");
-            Serial.print(s.distance_km, 1);
-            Serial.print("km bearing ");
-            Serial.println(s.bearing_deg, 1);
-        }
-
-        for (const auto &f : flights)
-        {
-            Serial.println("=== FLIGHT INFO ===");
-            Serial.print("Ident: ");
-            Serial.println(f.ident);
-            Serial.print("Ident ICAO: ");
-            Serial.println(f.ident_icao);
-            Serial.print("Ident IATA: ");
-            Serial.println(f.ident_iata);
-            Serial.print("Airline: ");
-            Serial.println(f.airline_display_name_full);
-            Serial.print("Aircraft: ");
-            Serial.println(f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code);
-            Serial.print("Operator Code: ");
-            Serial.println(f.operator_code);
-            Serial.print("Operator ICAO: ");
-            Serial.println(f.operator_icao);
-            Serial.print("Operator IATA: ");
-            Serial.println(f.operator_iata);
-
-            Serial.println("--- Origin ---");
-            Serial.print("Code ICAO: ");
-            Serial.println(f.origin.code_icao);
-
-            Serial.println("--- Destination ---");
-            Serial.print("Code ICAO: ");
-            Serial.println(f.destination.code_icao);
-            Serial.println("===================");
-        }
-
-        g_display.displayFlights(flights);
+        doFetchAndRender();
     }
+    else if (now - g_lastRenderMs >= 200)
+    {
+        // Re-render the cached flights so multi-flight cycling advances at
+        // cycleSeconds between network fetches.
+        g_lastRenderMs = now;
+        g_display.displayFlights(g_lastFlights);
+    }
+
     delay(10);
 }
+
+#endif // PIO_UNIT_TESTING

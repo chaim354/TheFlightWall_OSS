@@ -9,6 +9,7 @@ Inputs: centerLat, centerLon, radiusKm, min/max bearing; APIConfiguration creds/
 Outputs: Populates outStateVectors with filtered results (distance_km, bearing_deg set).
 */
 #include "adapters/OpenSkyFetcher.h"
+#include "core/Settings.h"
 
 static String urlEncodeForm(const String &value)
 {
@@ -37,7 +38,7 @@ static String urlEncodeForm(const String &value)
 
 bool OpenSkyFetcher::ensureAccessToken(bool forceRefresh)
 {
-    const bool oauthConfigured = (strlen(APIConfiguration::OPENSKY_CLIENT_ID) > 0) && (strlen(APIConfiguration::OPENSKY_CLIENT_SECRET) > 0);
+    const bool oauthConfigured = (g_settings.openSkyClientId.length() > 0) && (g_settings.openSkyClientSecret.length() > 0);
     if (!oauthConfigured)
     {
         Serial.println("OpenSkyFetcher: OAuth credentials are required but not configured");
@@ -76,7 +77,7 @@ bool OpenSkyFetcher::ensureAuthenticated(bool forceRefresh)
 
 bool OpenSkyFetcher::requestAccessToken(String &outToken, unsigned long &outExpiryMs)
 {
-    if (strlen(APIConfiguration::OPENSKY_CLIENT_ID) == 0 || strlen(APIConfiguration::OPENSKY_CLIENT_SECRET) == 0)
+    if (g_settings.openSkyClientId.length() == 0 || g_settings.openSkyClientSecret.length() == 0)
     {
         Serial.println("OpenSkyFetcher: OAuth credentials not configured");
         return false;
@@ -90,14 +91,14 @@ bool OpenSkyFetcher::requestAccessToken(String &outToken, unsigned long &outExpi
     http.addHeader("Accept", "application/json");
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-    String body = String("grant_type=client_credentials&client_id=") + urlEncodeForm(APIConfiguration::OPENSKY_CLIENT_ID) +
-                  "&client_secret=" + urlEncodeForm(APIConfiguration::OPENSKY_CLIENT_SECRET);
+    String body = String("grant_type=client_credentials&client_id=") + urlEncodeForm(g_settings.openSkyClientId) +
+                  "&client_secret=" + urlEncodeForm(g_settings.openSkyClientSecret);
 
     // Debug: show request (without exposing secret)
     Serial.print("OpenSkyFetcher: Using client_id: ");
-    Serial.println(APIConfiguration::OPENSKY_CLIENT_ID);
+    Serial.println(g_settings.openSkyClientId);
     Serial.print("OpenSkyFetcher: client_secret length: ");
-    Serial.println((int)strlen(APIConfiguration::OPENSKY_CLIENT_SECRET));
+    Serial.println((int)g_settings.openSkyClientSecret.length());
     Serial.print("OpenSkyFetcher: POST body length: ");
     Serial.println((int)body.length());
     http.setTimeout(15000);
