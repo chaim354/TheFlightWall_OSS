@@ -126,15 +126,19 @@ Settings are stored on the device (LittleFS) and survive reboots — no re-flash
 
 The wall renders a **Mini-style flight card**: an airline logo tile on the left, then the flight number, route, aircraft, and your chosen metrics on the right. Logos are 16×16 tiles stored on the device at `firmware/data/logos/<ICAO>.rgb565` (keyed by the airline's ICAO code, e.g. `UAL.rgb565`).
 
-- A **starter set** of ~18 major carriers ships in the repo. Airlines without a tile fall back to a clean brand-style badge showing the airline code.
+- A bundled set of **~78 major carriers worldwide** ships in the repo as brand-colored code-badge tiles (the airline's 2-letter code on its brand color — not trademarked logo artwork). Airlines without a tile fall back to the same brand-style badge generated on the fly.
 - They're flashed as part of the LittleFS image (`pio run -t uploadfs`).
 
 ### Add or replace logos
-- **Use real artwork** (recommended) — convert any PNG to a tile, then re-flash the filesystem:
+- **Use real artwork** (one airline) — convert a PNG you have rights to use, then re-flash the filesystem:
   ```bash
   pip install pillow
   python3 tools/png_to_rgb565.py my_airline.png firmware/data/logos/SWA.rgb565 --size 16
   pio run -t uploadfs   # from the firmware/ folder
+  ```
+- **Batch-convert a whole folder** of `<ICAO>.png` logos at once:
+  ```bash
+  python3 tools/convert_logo_folder.py ~/airline_logos firmware/data/logos --size 16
   ```
 - **Regenerate the bundled code-badge tiles** (no dependencies): edit the `AIRLINES` table in [`tools/gen_starter_logos.py`](tools/gen_starter_logos.py) and run `python3 tools/gen_starter_logos.py`.
 
