@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FlightWall</title>
+<style>
+  :root { --bg:#0b0f17; --card:#141a26; --line:#26314a; --fg:#e8edf6; --muted:#8a98b5; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:18px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--bg); z-index:5;}
+  header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  .wrap { max-width:760px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:14px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+  label { display:block; font-size:13px; margin:10px 0 4px; color:var(--muted); }
+  input[type=text],input[type=password],input[type=number],textarea,select {
+    width:100%; padding:9px 10px; background:#0e1421; color:var(--fg); border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  textarea { min-height:70px; resize:vertical; font-family:ui-monospace,Menlo,monospace; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:130px; }
+  .checks { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; margin-top:6px; }
+  .check { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--fg); }
+  .check input { width:auto; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  button.warn { background:var(--warn); }
+  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .pill { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .pill.on { color:#fff; background:var(--ok); border-color:var(--ok); }
+  .pill.off { color:#fff; background:#ef4444; border-color:#ef4444; }
+  .hide { display:none; }
+  .flight { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-top:8px; font-size:13px; }
+  .flight b { color:#fff; } .flight span { color:var(--muted); }
+  .toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#1f2a40; border:1px solid var(--line); padding:10px 16px; border-radius:8px; opacity:0; transition:.2s; }
+  .toast.show { opacity:1; }
+  small.help { color:var(--muted); display:block; margin-top:4px; }
+  #preview { width:100%; height:auto; margin-top:6px; border:1px solid var(--line); border-radius:8px; background:#000; image-rendering:pixelated; image-rendering:crisp-edges; display:block; }
+  .scanlist button { display:block; width:100%; text-align:left; margin-top:6px; background:#0e1421; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>✈ FlightWall</h1>
+  <div class="bar">
+    <span id="connPill" class="pill">…</span>
+    <button class="ghost" onclick="loadAll()">Refresh</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>Status</h2>
+    <div id="status" class="bar"><span class="pill">loading…</span></div>
+    <label style="margin-top:12px">Live matrix preview</label>
+    <canvas id="preview" width="128" height="64"></canvas>
+    <div id="flights"></div>
+  </div>
+
+  <div class="card">
+    <h2>WiFi</h2>
+    <label>Network (SSID)</label>
+    <input id="wifiSsid" type="text" placeholder="Your WiFi name" />
+    <label>Password</label>
+    <input id="wifiPassword" type="password" placeholder="••••••••" />
+    <div class="bar" style="margin-top:10px">
+      <button class="ghost" onclick="scanWifi()">Scan networks</button>
+    </div>
+    <div id="scanlist" class="scanlist"></div>
+    <small class="help">Changing WiFi takes effect after a restart.</small>
+  </div>
+
+  <div class="card">
+    <h2>API Keys</h2>
+    <label>OpenSky Client ID</label>
+    <input id="openSkyClientId" type="text" />
+    <label>OpenSky Client Secret</label>
+    <input id="openSkyClientSecret" type="password" />
+
+    <label>Flight enrichment source (route · airline · aircraft)</label>
+    <select id="enrichmentSource">
+      <option value="adsbdb">adsbdb.com — free, no key (recommended)</option>
+      <option value="aeroapi">FlightAware AeroAPI — paid (needs key below)</option>
+      <option value="off">Off — callsign only</option>
+    </select>
+    <small class="help">adsbdb.com is free and needs no key. Results are cached per aircraft to minimize requests.</small>
+
+    <label>FlightAware AeroAPI Key <span style="color:var(--muted)">(for AeroAPI source or backup)</span></label>
+    <input id="aeroApiKey" type="password" />
+    <span class="check" style="margin-top:8px"><input type="checkbox" id="enrichmentFallbackToAeroApi"><label style="margin:0">Use AeroAPI as backup when adsbdb misses a flight (needs key)</label></span>
+  </div>
+
+  <div class="card">
+    <h2>Tracking</h2>
+    <label>Mode</label>
+    <select id="mode" onchange="toggleMode()">
+      <option value="area">Area — everything near a location</option>
+      <option value="flights">Flights — specific flights by number/callsign/tail</option>
+    </select>
+
+    <div id="areaBox">
+      <div class="row">
+        <div><label>Center latitude</label><input id="centerLat" type="number" step="0.0001" /></div>
+        <div><label>Center longitude</label><input id="centerLon" type="number" step="0.0001" /></div>
+        <div><label>Radius (km)</label><input id="radiusKm" type="number" step="0.5" /></div>
+      </div>
+    </div>
+
+    <div id="flightsBox" class="hide">
+      <label>Flights to track (one per line — flight #, callsign, or tail)</label>
+      <textarea id="trackedFlights" placeholder="UAL123&#10;N172SP&#10;BAW286"></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Display</h2>
+    <div class="row">
+      <div><label>Brightness (0–255)</label><input id="brightness" type="number" min="0" max="255" /></div>
+      <div><label>Text color</label><input id="textColor" type="color" /></div>
+    </div>
+    <div class="row">
+      <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
+      <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
+      <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
+    </div>
+    <label>Fields to show on each card</label>
+    <div class="checks">
+      <span class="check"><input type="checkbox" id="showAirlineFlight"><label style="margin:0">Airline + flight</label></span>
+      <span class="check"><input type="checkbox" id="showRoute"><label style="margin:0">Route</label></span>
+      <span class="check"><input type="checkbox" id="showAircraft"><label style="margin:0">Aircraft type</label></span>
+      <span class="check"><input type="checkbox" id="showAltitude"><label style="margin:0">Altitude</label></span>
+      <span class="check"><input type="checkbox" id="showSpeed"><label style="margin:0">Speed</label></span>
+      <span class="check"><input type="checkbox" id="showHeading"><label style="margin:0">Heading</label></span>
+      <span class="check"><input type="checkbox" id="showVerticalRate"><label style="margin:0">Vertical rate</label></span>
+    </div>
+    <small class="help">Only as many lines as physically fit on the panel are drawn.</small>
+  </div>
+
+  <div class="card">
+    <h2>Filters</h2>
+    <div class="row">
+      <div><label>Min altitude (ft)</label><input id="minAltitudeFt" type="number" /></div>
+      <div><label>Max altitude (ft)</label><input id="maxAltitudeFt" type="number" /></div>
+    </div>
+    <span class="check" style="margin-top:10px"><input type="checkbox" id="excludeOnGround"><label style="margin:0">Hide aircraft on the ground</label></span>
+    <label>Airline allow-list (comma separated ICAO/IATA, blank = all)</label>
+    <input id="airlineAllowList" type="text" placeholder="UAL, DAL, AAL" />
+  </div>
+
+  <div class="card">
+    <h2>Brightness Schedule</h2>
+    <span class="check"><input type="checkbox" id="schedEnabled"><label style="margin:0">Enable day/night brightness</label></span>
+    <div class="row">
+      <div><label>Day brightness</label><input id="dayBrightness" type="number" min="0" max="255" /></div>
+      <div><label>Night brightness</label><input id="nightBrightness" type="number" min="0" max="255" /></div>
+    </div>
+    <div class="row">
+      <div><label>Night start hour (0–23)</label><input id="nightStartHour" type="number" min="0" max="23" /></div>
+      <div><label>Night end hour (0–23)</label><input id="nightEndHour" type="number" min="0" max="23" /></div>
+      <div><label>UTC offset (minutes)</label><input id="timezoneOffsetMinutes" type="number" /></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Light Sensor (auto-off in the dark)</h2>
+    <span class="check"><input type="checkbox" id="lightSensorEnabled"><label style="margin:0">Enable ambient light sensor</label></span>
+    <div class="row">
+      <div><label>Sensor type</label>
+        <select id="lightSensorType">
+          <option value="analog">Analog LDR (ADC1 pin)</option>
+          <option value="bh1750">BH1750 lux (I2C 21/22)</option>
+        </select>
+      </div>
+      <div><label>Analog pin (ADC1: 34/35/36/39/33)</label><input id="lightSensorPin" type="number" /></div>
+    </div>
+    <div class="row">
+      <div><label>Dark threshold</label><input id="lightDarkThreshold" type="number" /></div>
+      <div><label>Hysteresis</label><input id="lightHysteresis" type="number" /></div>
+    </div>
+    <span class="check" style="margin-top:8px"><input type="checkbox" id="lightSensorDimInstead"><label style="margin:0">Dim instead of fully off</label></span>
+    <div class="row"><div><label>Dim brightness (0–255)</label><input id="lightDimBrightness" type="number" min="0" max="255" /></div></div>
+    <small class="help" id="lightLive">Live reading appears here when enabled — set the threshold just above the dark value.</small>
+  </div>
+
+  <div class="card">
+    <h2>Hardware (HUB75)</h2>
+    <label>Presets</label>
+    <div class="bar" style="margin-bottom:6px">
+      <button class="ghost" type="button" onclick="setPanel(64,32,1)">64×32</button>
+      <button class="ghost" type="button" onclick="setPanel(64,64,1)">64×64</button>
+      <button class="ghost" type="button" onclick="setPanel(64,64,2)">128×64 (Mini)</button>
+    </div>
+    <div class="row">
+      <div><label>Panel width (px)</label><input id="panelResX" type="number" /></div>
+      <div><label>Panel height (px)</label><input id="panelResY" type="number" /></div>
+      <div><label>Panels chained</label><input id="panelChain" type="number" min="1" /></div>
+    </div>
+    <small class="help">Matrix width = panel width × panels chained (e.g. 64 × 2 = 128 wide). Wide panels use a logo-left card; square panels (64×64) use a stacked logo-on-top card. Changes take effect after a restart.</small>
+  </div>
+
+  <div class="card">
+    <div class="bar">
+      <button onclick="save()">Save settings</button>
+      <button class="warn" onclick="restart()">Restart device</button>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+function rgbToHex(r,g,b){return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
+function hexToRgb(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+
+function setPanel(x,y,chain){
+  $('panelResX').value = x; $('panelResY').value = y; $('panelChain').value = chain;
+  toast(`Panel set to ${x*chain}×${y} — Save + Restart to apply`);
+}
+
+function toggleMode(){
+  const flights = $('mode').value === 'flights';
+  $('flightsBox').classList.toggle('hide', !flights);
+  $('areaBox').classList.toggle('hide', flights);
+}
+
+async function loadSettings(){
+  const s = await (await fetch('/api/settings')).json();
+  $('wifiSsid').value = s.network.wifiSsid || '';
+  $('wifiPassword').value = s.network.wifiPassword || '';
+  $('openSkyClientId').value = s.api.openSkyClientId || '';
+  $('openSkyClientSecret').value = s.api.openSkyClientSecret || '';
+  $('aeroApiKey').value = s.api.aeroApiKey || '';
+  $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
+  $('enrichmentFallbackToAeroApi').checked = s.api.enrichmentFallbackToAeroApi !== false;
+
+  $('mode').value = s.tracking.mode;
+  $('centerLat').value = s.tracking.centerLat;
+  $('centerLon').value = s.tracking.centerLon;
+  $('radiusKm').value = s.tracking.radiusKm;
+  $('trackedFlights').value = (s.tracking.trackedFlights || []).join('\n');
+
+  $('brightness').value = s.display.brightness;
+  $('textColor').value = rgbToHex(s.display.textColorR, s.display.textColorG, s.display.textColorB);
+  $('maxFlights').value = s.display.maxFlights;
+  $('cycleSeconds').value = s.display.cycleSeconds;
+  $('fetchIntervalSeconds').value = s.display.fetchIntervalSeconds;
+
+  for (const k of ['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate'])
+    $(k).checked = !!s.layout[k];
+
+  $('minAltitudeFt').value = s.filters.minAltitudeFt;
+  $('maxAltitudeFt').value = s.filters.maxAltitudeFt;
+  $('excludeOnGround').checked = !!s.filters.excludeOnGround;
+  $('airlineAllowList').value = (s.filters.airlineAllowList || []).join(', ');
+
+  $('schedEnabled').checked = !!s.schedule.enabled;
+  $('dayBrightness').value = s.schedule.dayBrightness;
+  $('nightBrightness').value = s.schedule.nightBrightness;
+  $('nightStartHour').value = s.schedule.nightStartHour;
+  $('nightEndHour').value = s.schedule.nightEndHour;
+  $('timezoneOffsetMinutes').value = s.schedule.timezoneOffsetMinutes;
+
+  $('lightSensorEnabled').checked = !!s.light.enabled;
+  $('lightSensorType').value = s.light.type;
+  $('lightSensorPin').value = s.light.pin;
+  $('lightDarkThreshold').value = s.light.darkThreshold;
+  $('lightHysteresis').value = s.light.hysteresis;
+  $('lightSensorDimInstead').checked = !!s.light.dimInstead;
+  $('lightDimBrightness').value = s.light.dimBrightness;
+
+  $('panelResX').value = s.hardware.panelResX;
+  $('panelResY').value = s.hardware.panelResY;
+  $('panelChain').value = s.hardware.panelChain;
+
+  toggleMode();
+}
+
+function collect(){
+  const [r,g,b] = hexToRgb($('textColor').value);
+  const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
+  return {
+    network:{ wifiSsid:$('wifiSsid').value, wifiPassword:$('wifiPassword').value },
+    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    tracking:{
+      mode:$('mode').value,
+      centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),
+      radiusKm:parseFloat($('radiusKm').value),
+      trackedFlights:lines($('trackedFlights').value)
+    },
+    display:{
+      brightness:+$('brightness').value, textColorR:r, textColorG:g, textColorB:b,
+      maxFlights:+$('maxFlights').value, cycleSeconds:+$('cycleSeconds').value,
+      fetchIntervalSeconds:+$('fetchIntervalSeconds').value
+    },
+    layout:Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate'].map(k=>[k,$(k).checked])),
+    filters:{
+      minAltitudeFt:+$('minAltitudeFt').value, maxAltitudeFt:+$('maxAltitudeFt').value,
+      excludeOnGround:$('excludeOnGround').checked, airlineAllowList:lines($('airlineAllowList').value)
+    },
+    schedule:{
+      enabled:$('schedEnabled').checked, dayBrightness:+$('dayBrightness').value, nightBrightness:+$('nightBrightness').value,
+      nightStartHour:+$('nightStartHour').value, nightEndHour:+$('nightEndHour').value, timezoneOffsetMinutes:+$('timezoneOffsetMinutes').value
+    },
+    light:{
+      enabled:$('lightSensorEnabled').checked, type:$('lightSensorType').value, pin:+$('lightSensorPin').value,
+      darkThreshold:+$('lightDarkThreshold').value, hysteresis:+$('lightHysteresis').value,
+      dimInstead:$('lightSensorDimInstead').checked, dimBrightness:+$('lightDimBrightness').value
+    },
+    hardware:{ panelResX:+$('panelResX').value, panelResY:+$('panelResY').value, panelChain:+$('panelChain').value }
+  };
+}
+
+async function save(){
+  const res = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())});
+  const j = await res.json();
+  toast(j.ok ? 'Saved ✓' : ('Error: '+(j.error||'failed')));
+}
+
+async function restart(){
+  if(!confirm('Restart the device?')) return;
+  await fetch('/api/restart',{method:'POST'});
+  toast('Restarting…');
+}
+
+async function scanWifi(){
+  $('scanlist').innerHTML = '<small class="help">Scanning…</small>';
+  try{
+    const nets = await (await fetch('/api/wifiscan')).json();
+    nets.sort((a,b)=>b.rssi-a.rssi);
+    $('scanlist').innerHTML = '';
+    nets.forEach(n=>{
+      const b=document.createElement('button');
+      b.textContent=`${n.ssid||'(hidden)'}  ${n.rssi}dBm ${n.secure?'🔒':''}`;
+      b.onclick=()=>{ $('wifiSsid').value=n.ssid; $('wifiPassword').focus(); };
+      $('scanlist').appendChild(b);
+    });
+    if(!nets.length) $('scanlist').innerHTML='<small class="help">No networks found.</small>';
+  }catch(e){ $('scanlist').innerHTML='<small class="help">Scan failed.</small>'; }
+}
+
+async function loadStatus(){
+  try{
+    const s = await (await fetch('/api/status')).json();
+    const pill = $('connPill');
+    if(s.apMode){ pill.textContent='Setup AP'; pill.className='pill off'; }
+    else if(s.wifiConnected){ pill.textContent='Online'; pill.className='pill on'; }
+    else { pill.textContent='Offline'; pill.className='pill off'; }
+    $('status').innerHTML =
+      `<span class="pill">${s.apMode?'AP':'WiFi'}: ${s.ssid||'-'}</span>`+
+      `<span class="pill">IP ${s.ip||'-'}</span>`+
+      `<span class="pill">${s.mode} mode</span>`+
+      `<span class="pill">${s.flightCount} flights</span>`+
+      `<span class="pill">heap ${Math.round(s.freeHeap/1024)}k</span>`;
+    if('lightLevel' in s && s.lightLevel >= 0){
+      const el = $('lightLive');
+      if(el) el.textContent = `Live reading: ${s.lightLevel}  ·  panel ${s.lightDark ? 'OFF (dark)' : 'on (lit)'} — set the threshold just above the dark value.`;
+    }
+  }catch(e){}
+  try{
+    const f = await (await fetch('/api/flights')).json();
+    $('flights').innerHTML = f.map(x=>{
+      const m=[]; if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
+      if('headingDeg'in x)m.push('HDG'+x.headingDeg); if('verticalRateFpm'in x)m.push(x.verticalRateFpm+'fpm');
+      return `<div class="flight"><b>${x.ident||'?'}</b> <span>${x.airline||''}</span><br>
+        <span>${x.origin||'?'} → ${x.destination||'?'} · ${x.aircraft||''}</span>
+        ${m.length?'<br><span>'+m.join(' · ')+'</span>':''}</div>`;
+    }).join('') || '<small class="help">No flights currently displayed.</small>';
+  }catch(e){}
+}
+
+let _previewOff = null; // offscreen w×h canvas, recreated when dimensions change
+async function loadPreview(){
+  try{
+    const res = await fetch('/api/framebuffer');
+    if(!res.ok) return; // 503 in AP/setup mode
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if(buf.length < 4) return;
+    const w = buf[0] | (buf[1]<<8), h = buf[2] | (buf[3]<<8);
+    if(w<=0 || h<=0 || buf.length < 4 + w*h*2) return;
+
+    if(!_previewOff || _previewOff.width!==w || _previewOff.height!==h){
+      _previewOff = document.createElement('canvas');
+      _previewOff.width = w; _previewOff.height = h;
+    }
+    const octx = _previewOff.getContext('2d');
+    const img = octx.createImageData(w, h);
+    for(let i=0;i<w*h;i++){
+      const lo = buf[4 + i*2], hi = buf[4 + i*2 + 1];
+      const v = lo | (hi<<8);
+      const r = (v>>11)&0x1f, g = (v>>5)&0x3f, b = v&0x1f;
+      const o = i*4;
+      img.data[o]   = (r*255/31)|0;
+      img.data[o+1] = (g*255/63)|0;
+      img.data[o+2] = (b*255/31)|0;
+      img.data[o+3] = 255;
+    }
+    octx.putImageData(img, 0, 0);
+
+    const cv = $('preview');
+    // Keep aspect ratio; scale up with nearest-neighbor for a crisp pixel look.
+    if(cv.width!==w || cv.height!==h){ cv.width=w; cv.height=h; }
+    const ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0,0,w,h);
+    ctx.drawImage(_previewOff, 0, 0);
+  }catch(e){}
+}
+
+function loadAll(){ loadSettings(); loadStatus(); loadPreview(); }
+loadAll();
+setInterval(loadStatus, 5000);
+setInterval(loadPreview, 1500);
+</script>
+</body>
+</html>

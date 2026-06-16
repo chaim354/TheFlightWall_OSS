@@ -7,5 +7,7 @@ class BaseFlightFetcher
 {
 public:
     virtual ~BaseFlightFetcher() = default;
-    virtual bool fetchFlightInfo(const String &flightIdent, FlightInfo &outInfo) = 0;
+    // ident = callsign/flight number (for route + airline lookup).
+    // icao24 = Mode-S hex (for aircraft-type lookup); may be empty (Flights mode).
+    virtual bool fetchFlightInfo(const String &flightIdent, const String &icao24, FlightInfo &outInfo) = 0;
 };

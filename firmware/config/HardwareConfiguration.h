@@ -4,18 +4,27 @@
 
 namespace HardwareConfiguration
 {
-    // Display configuration (FastLED NeoMatrix)
-    static const uint8_t DISPLAY_PIN = 25; // Data pin
+    // HUB75 RGB LED matrix pin mapping (ESP32). These match the common default
+    // wiring used by the ESP32-HUB75-MatrixPanel-I2S-DMA library. Change to match
+    // your board / breakout. (These are the only pin assignments that are
+    // compile-time; panel geometry is editable from the web UI.)
+    static const int8_t HUB75_R1 = 25;
+    static const int8_t HUB75_G1 = 26;
+    static const int8_t HUB75_B1 = 27;
+    static const int8_t HUB75_R2 = 14;
+    static const int8_t HUB75_G2 = 12;
+    static const int8_t HUB75_B2 = 13;
+    static const int8_t HUB75_A = 23;
+    static const int8_t HUB75_B = 19;
+    static const int8_t HUB75_C = 5;
+    static const int8_t HUB75_D = 17;
+    static const int8_t HUB75_E = 32;  // needed for 1/32-scan (64-row) panels; set to -1 for 32-row
+    static const int8_t HUB75_LAT = 4;
+    static const int8_t HUB75_OE = 15;
+    static const int8_t HUB75_CLK = 16;
 
-    // Physical tile size (pixels per 16x16 tile commonly)
-    static const uint16_t DISPLAY_TILE_PIXEL_W = 16;
-    static const uint16_t DISPLAY_TILE_PIXEL_H = 16;
-
-    // Tile arrangement (number of tiles horizontally and vertically)
-    static const uint8_t DISPLAY_TILES_X = 10; // e.g., 10 tiles wide -> 160px
-    static const uint8_t DISPLAY_TILES_Y = 2;  // e.g., 2 tiles high -> 32px
-
-    // Derived matrix dimensions
-    static const uint16_t DISPLAY_MATRIX_WIDTH = DISPLAY_TILE_PIXEL_W * DISPLAY_TILES_X;
-    static const uint16_t DISPLAY_MATRIX_HEIGHT = DISPLAY_TILE_PIXEL_H * DISPLAY_TILES_Y;
+    // Default panel geometry (overridable at runtime from the web UI / Settings).
+    static const uint16_t PANEL_RES_X = 64; // pixels wide per panel module
+    static const uint16_t PANEL_RES_Y = 64; // pixels high per panel module
+    static const uint8_t PANEL_CHAIN = 2;   // number of panels chained -> 128x64 total
 }

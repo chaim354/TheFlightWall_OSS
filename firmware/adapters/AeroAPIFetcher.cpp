@@ -8,6 +8,7 @@ Input: flight ident (e.g., callsign).
 Output: Populates FlightInfo on success and returns true.
 */
 #include "adapters/AeroAPIFetcher.h"
+#include "core/Settings.h"
 
 static String safeGetString(JsonVariant v, const char *key)
 {
@@ -16,9 +17,10 @@ static String safeGetString(JsonVariant v, const char *key)
     return String(v[key].as<const char *>());
 }
 
-bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, FlightInfo &outInfo)
+bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, const String &icao24, FlightInfo &outInfo)
 {
-    if (strlen(APIConfiguration::AEROAPI_KEY) == 0)
+    (void)icao24; // AeroAPI looks up by ident; icao24 unused
+    if (g_settings.aeroApiKey.length() == 0)
     {
         Serial.println("AeroAPIFetcher: No API key configured");
         return false;
@@ -33,7 +35,7 @@ bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, FlightInfo &outI
     HTTPClient http;
     String url = String(APIConfiguration::AEROAPI_BASE_URL) + "/flights/" + flightIdent;
     http.begin(client, url);
-    http.addHeader("x-apikey", APIConfiguration::AEROAPI_KEY);
+    http.addHeader("x-apikey", g_settings.aeroApiKey.c_str());
     http.addHeader("Accept", "application/json");
 
     int code = http.GET();
@@ -81,6 +83,39 @@ bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, FlightInfo &outI
     {
         JsonObject d = f["destination"].as<JsonObject>();
         outInfo.destination.code_icao = safeGetString(d, "code_icao");
+    }
+
+    // Live telemetry from last reported position (Flights-mode metrics).
+    if (f.containsKey("last_position") && f["last_position"].is<JsonObject>())
+    {
+        JsonObject p = f["last_position"].as<JsonObject>();
+        if (!p["altitude"].isNull())
+        {
+            // AeroAPI reports altitude in hundreds of feet.
+            outInfo.altitude_ft = p["altitude"].as<double>() * 100.0;
+            outInfo.has_metrics = true;
+        }
+        if (!p["groundspeed"].isNull())
+        {
+            outInfo.groundspeed_kt = p["groundspeed"].as<double>();
+            outInfo.has_metrics = true;
+        }
+        if (!p["heading"].isNull())
+        {
+            outInfo.heading_deg = p["heading"].as<double>();
+            outInfo.has_metrics = true;
+        }
+        // altitude_change: "C" climbing, "D" descending, "-" level. No magnitude.
+        if (!p["altitude_change"].isNull())
+        {
+            String ch = String(p["altitude_change"].as<const char *>());
+            if (ch == "C")
+                outInfo.vertical_rate_fpm = 1.0; // sign-only indicator
+            else if (ch == "D")
+                outInfo.vertical_rate_fpm = -1.0;
+            else
+                outInfo.vertical_rate_fpm = 0.0;
+        }
     }
 
     return true;
