@@ -189,8 +189,9 @@
   </div>
 
   <div class="card">
-    <h2>Hardware (HUB75)</h2>
-    <label>Presets</label>
+    <h2>Hardware — HUB75 (Advanced)</h2>
+    <small class="help" style="color:var(--warn)">⚠ Advanced — these must match your panel hardware. Wrong values can blank or scramble the display. Defaults suit a 128×64 panel.</small>
+    <label style="margin-top:10px">Presets</label>
     <div class="bar" style="margin-bottom:6px">
       <button class="ghost" type="button" onclick="setPanel(64,32,1)">64×32</button>
       <button class="ghost" type="button" onclick="setPanel(64,64,1)">64×64</button>
@@ -242,7 +243,12 @@ function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show')
 
 function setPanel(x,y,chain){
   $('panelResX').value = x; $('panelResY').value = y; $('panelChain').value = chain;
-  toast(`Panel set to ${x*chain}×${y} — Save + Restart to apply`);
+  // Big "Mini" panels (>=96 wide, >=48 tall) render two full-width metric rows —
+  // auto-enable those layout fields so they fill in.
+  if (x*chain >= 96 && y >= 48){
+    ['showAltitude','showSpeed','showHeading','showVerticalRate'].forEach(id => { if($(id)) $(id).checked = true; });
+  }
+  toast(`Panel set to ${x*chain}×${y} — metric fields enabled. Save + Restart to apply`);
 }
 
 function toggleMode(){

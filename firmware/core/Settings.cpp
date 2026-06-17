@@ -59,7 +59,7 @@ void Settings::seedDefaults()
     panelResX = HardwareConfiguration::PANEL_RES_X;
     panelResY = HardwareConfiguration::PANEL_RES_Y;
     panelChain = HardwareConfiguration::PANEL_CHAIN;
-    panelClkPhase = true;
+    panelClkPhase = false;
     panelI2sSpeedMhz = 8;
     panelLatchBlanking = 1;
     panelDriverChip = "shift";

@@ -410,51 +410,104 @@ static String iataRoute(const FlightInfo &f)
     return o + "-" + d;
 }
 
-static String miniAlt(double ft)
+// Metric formatters. When `unit` is false the unit suffix is dropped (used to
+// reclaim width instead of truncating with an ellipsis).
+static String miniAlt(double ft, bool unit)
 {
     if (isnan(ft))
         return String("");
     if (ft >= 1000)
     {
         char b[12];
-        snprintf(b, sizeof(b), "%.1fkft", ft / 1000.0);
+        snprintf(b, sizeof(b), unit ? "%.1fkft" : "%.1fk", ft / 1000.0);
         return String(b);
     }
-    return String((long)(ft + 0.5)) + "ft";
+    return String((long)(ft + 0.5)) + (unit ? "ft" : "");
 }
 
-static String miniSpdMph(double kt)
+static String miniSpdMph(double kt, bool unit)
 {
     if (isnan(kt))
         return String("");
-    return String((long)(kt * 1.15078 + 0.5)) + "mph";
+    return String((long)(kt * 1.15078 + 0.5)) + (unit ? "mph" : "");
 }
 
-static String miniTrk(double deg)
+static String miniTrk(double deg, bool unit)
 {
     if (isnan(deg))
         return String("");
     long d = ((long)(deg + 0.5)) % 360;
     if (d < 0)
         d += 360;
-    return String(d) + "deg";
+    return String(d) + (unit ? "deg" : "");
 }
 
-static String miniVr(double fpm)
+static String miniVr(double fpm, bool unit)
 {
     if (isnan(fpm))
         return String("");
     long fps = (long)(fpm / 60.0 + (fpm >= 0 ? 0.5 : -0.5));
-    return String(fps) + "ft/s";
+    return String(fps) + (unit ? "ft/s" : "");
+}
+
+// Drop the redundant airline-suffix words (the logo conveys it):
+//   "United Airlines"   -> "United"
+//   "British Airways"   -> "British"
+//   "Delta Air Lines"   -> "Delta"      (two-word "Air Line(s)")
+// Keeps brand uses of "Air" like "Air France" / "Air China". Returns the original
+// if stripping would leave nothing.
+static String stripAirlineWords(const String &name)
+{
+    std::vector<String> toks;
+    int start = 0;
+    const int n = (int)name.length();
+    while (start < n)
+    {
+        int sp = name.indexOf(' ', start);
+        String tok = (sp < 0) ? name.substring(start) : name.substring(start, sp);
+        if (tok.length())
+            toks.push_back(tok);
+        if (sp < 0)
+            break;
+        start = sp + 1;
+    }
+
+    auto lower = [](const String &s)
+    { String t = s; t.toLowerCase(); return t; };
+
+    String out;
+    for (size_t i = 0; i < toks.size(); ++i)
+    {
+        String l = lower(toks[i]);
+        // Two-word "Air Line"/"Air Lines" — drop both tokens.
+        if (l == "air" && i + 1 < toks.size())
+        {
+            String l2 = lower(toks[i + 1]);
+            if (l2 == "lines" || l2 == "line")
+            {
+                ++i;
+                continue;
+            }
+        }
+        // Single-word suffixes.
+        if (l == "airline" || l == "airlines" || l == "airway" || l == "airways")
+            continue;
+        if (out.length())
+            out += " ";
+        out += toks[i];
+    }
+    out.trim();
+    return out.length() ? out : name;
 }
 
 void Hub75Display::displayMiniCard(const FlightInfo &f)
 {
     const uint16_t color = textColor();
 
-    // Logo: 32x32 box, top-left.
+    // Logo: 32x32 box, top-left (nudged down a few px for vertical balance).
     const int16_t box = 32;
-    drawLogoOrBadge(f, 2, 1, box, box);
+    const int16_t topY = 4;
+    drawLogoOrBadge(f, 2, topY, box, box);
 
     // Three info lines to the right of the logo (airline / route / aircraft).
     const int16_t tx = 2 + box + 4; // ~38
@@ -467,39 +520,72 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
     if (!airline.length())
         airline = f.ident.length() ? f.ident : String("?");
+    // When a real logo tile is shown, the "Airlines/Airways" suffix is redundant.
+    if (_logoValid)
+        airline = stripAirlineWords(airline);
 
-    drawTextLine(tx, 1, truncateToColumns(airline, topCols), color);
+    drawTextLine(tx, topY, truncateToColumns(airline, topCols), color);
     if (route.length())
-        drawTextLine(tx, 12, truncateToColumns(route, topCols), color);
+        drawTextLine(tx, topY + 11, truncateToColumns(route, topCols), color);
     if (type.length())
-        drawTextLine(tx, 23, truncateToColumns(type, topCols), color);
+        drawTextLine(tx, topY + 22, truncateToColumns(type, topCols), color);
 
-    // Two full-width metric rows at the bottom. Comma (no space) keeps two fields
-    // within 128px at the 6px font (21 cols).
+    // Two full-width metric rows at the bottom. If a row doesn't fit, we drop the
+    // unit suffixes (mph/ft/deg/...) to reclaim width rather than truncating with
+    // an ellipsis — the numbers stay readable.
     const int botCols = (_matrixWidth - 2) / 6;
-    String alt = miniAlt(f.altitude_ft), spd = miniSpdMph(f.groundspeed_kt);
-    String trk = miniTrk(f.heading_deg), vr = miniVr(f.vertical_rate_fpm);
+    const DisplayLayout &L = g_settings.layout;
 
-    String row1;
-    if (g_settings.layout.showAltitude && alt.length())
-        row1 = "Alt:" + alt;
-    if (g_settings.layout.showSpeed && spd.length())
-        row1 += (row1.length() ? "," : "") + String("Spd:") + spd;
+    auto buildRow1 = [&](bool unit)
+    {
+        String r;
+        if (L.showAltitude)
+        {
+            String a = miniAlt(f.altitude_ft, unit);
+            if (a.length())
+                r = "Alt:" + a;
+        }
+        if (L.showSpeed)
+        {
+            String s = miniSpdMph(f.groundspeed_kt, unit);
+            if (s.length())
+                r += (r.length() ? " " : "") + String("Spd:") + s;
+        }
+        return r;
+    };
+    auto buildRow2 = [&](bool unit)
+    {
+        String r;
+        if (L.showHeading)
+        {
+            String t = miniTrk(f.heading_deg, unit);
+            if (t.length())
+                r = "Trk:" + t;
+        }
+        if (L.showVerticalRate)
+        {
+            String v = miniVr(f.vertical_rate_fpm, unit);
+            if (v.length())
+                r += (r.length() ? " " : "") + String("Vr:") + v;
+        }
+        return r;
+    };
 
-    String row2;
-    if (g_settings.layout.showHeading && trk.length())
-        row2 = "Trk:" + trk;
-    if (g_settings.layout.showVerticalRate && vr.length())
-        row2 += (row2.length() ? "," : "") + String("Vr:") + vr;
+    String row1 = buildRow1(true);
+    if ((int)row1.length() > botCols)
+        row1 = buildRow1(false); // drop units instead of "..."
+    String row2 = buildRow2(true);
+    if ((int)row2.length() > botCols)
+        row2 = buildRow2(false);
 
     int16_t by = (row1.length() && row2.length()) ? 40 : 44;
     if (row1.length())
     {
-        drawTextLine(1, by, truncateToColumns(row1, botCols), color);
+        drawTextLine(1, by, row1, color);
         by += 12;
     }
     if (row2.length())
-        drawTextLine(1, by, truncateToColumns(row2, botCols), color);
+        drawTextLine(1, by, row2, color);
 }
 
 void Hub75Display::displaySideBySideCard(const FlightInfo &f)

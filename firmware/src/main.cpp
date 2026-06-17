@@ -50,6 +50,7 @@ static unsigned long g_lastLightMs = 0;
 
 static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
 static bool g_apMode = false;
+static unsigned long g_wifiDownSinceMs = 0; // for the runtime reconnect/AP-fallback watchdog
 static unsigned long g_lastFetchMs = 0;
 static unsigned long g_lastRenderMs = 0;
 static bool g_firstFetchDone = false;
@@ -66,11 +67,13 @@ static bool connectWifiSta()
         return false;
 
     WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true); // recover transient drops without a reboot
+    WiFi.persistent(false);
     g_display.displayMessage(String("WiFi: ") + g_settings.wifiSsid);
     WiFi.begin(g_settings.wifiSsid.c_str(), g_settings.wifiPassword.c_str());
     Serial.print("Connecting to WiFi");
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 50)
+    while (WiFi.status() != WL_CONNECTED && attempts < 150) // 150 * 200ms = 30s
     {
         delay(200);
         Serial.print(".");
@@ -281,6 +284,28 @@ void loop()
         g_web.setLightStatus(g_light.level(), g_light.isDark());
     }
     applyBrightness();
+
+    // Self-heal: in STA mode, if WiFi stays down for >60s (auto-reconnect failed,
+    // e.g. the password changed), reboot. On restart it re-tries the network and
+    // falls back to the FlightWall-Setup AP if it still can't connect.
+    if (!g_apMode)
+    {
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            g_wifiDownSinceMs = 0;
+        }
+        else
+        {
+            if (g_wifiDownSinceMs == 0)
+                g_wifiDownSinceMs = nowMs;
+            else if (nowMs - g_wifiDownSinceMs > 60000UL)
+            {
+                Serial.println("WiFi down >60s; restarting to re-provision");
+                delay(100);
+                ESP.restart();
+            }
+        }
+    }
 
     // In AP setup mode we only serve the web UI (no network for fetching).
     if (g_apMode || WiFi.status() != WL_CONNECTED)

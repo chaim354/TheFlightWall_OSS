@@ -42,10 +42,10 @@ struct DisplayLayout
     bool showAirlineFlight = true; // "United UA123"
     bool showRoute = true;         // "KSFO>KJFK"
     bool showAircraft = true;      // "B739"
-    bool showAltitude = false;     // "FL350" / "12,500ft"
-    bool showSpeed = false;        // "451kt"
-    bool showHeading = false;      // "HDG 094"
-    bool showVerticalRate = false; // "+1200fpm"
+    bool showAltitude = true;      // "FL350" / "12,500ft"
+    bool showSpeed = true;         // "451kt"
+    bool showHeading = true;       // "HDG 094"
+    bool showVerticalRate = true;  // "+1200fpm"
 };
 
 struct AircraftFilters
@@ -121,7 +121,7 @@ struct Settings
     uint8_t panelChain = 2;  // panels chained -> matrix width = panelResX * panelChain
 
     // HUB75 signal-integrity tuning (try these if pixels flicker / shift by one):
-    bool panelClkPhase = true;        // false often fixes an off-by-one pixel shift
+    bool panelClkPhase = false;       // default off — fixes the off-by-one pixel shift on most panels
     uint8_t panelI2sSpeedMhz = 8;     // 8 / 16 / 20 — lower = more stable at 3.3V
     uint8_t panelLatchBlanking = 1;   // raise to reduce ghosting (some panels dislike >1)
     String panelDriverChip = "shift"; // shift | fm6124 | fm6126a | icn2038s | mbi5124
