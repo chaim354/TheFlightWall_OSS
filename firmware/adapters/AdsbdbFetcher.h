@@ -1,15 +1,13 @@
 #pragma once
 
 #include <Arduino.h>
-#include <HTTPClient.h>
-#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include "interfaces/BaseFlightFetcher.h"
 #include "core/HttpJson.h"
 
 // Free flight enrichment via adsbdb.com (no API key required).
 //  - callsign  -> route (origin/destination ICAO) + airline (name/icao/iata)
-//  - ICAO24    -> aircraft ICAO type + registered owner (operator) fallback
+//  - ICAO24    -> aircraft ICAO type
 // A drop-in, no-cost alternative to AeroAPI for route/airline/aircraft lookup.
 class AdsbdbFetcher : public BaseFlightFetcher
 {

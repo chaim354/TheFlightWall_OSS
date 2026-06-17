@@ -28,6 +28,7 @@ Run loop:
 #include <ESPmDNS.h>
 #include <ArduinoJson.h>
 #include "core/Settings.h"
+#include "core/HttpJson.h"
 #include "adapters/OpenSkyFetcher.h"
 #include "adapters/AeroAPIFetcher.h"
 #include "adapters/AdsbdbFetcher.h"
@@ -38,6 +39,7 @@ Run loop:
 #include "adapters/LightSensor.h"
 #include "adapters/GeoLocator.h"
 
+static HttpJson g_http;
 static OpenSkyFetcher g_openSky;
 static AeroAPIFetcher g_aeroApi;
 static AdsbdbFetcher g_adsbdb;
@@ -250,6 +252,8 @@ void setup()
     g_web.setDisplay(&g_display);
     g_web.begin(g_apMode, g_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
 
+    g_openSky.setHttp(&g_http);
+    g_adsbdb.setHttp(&g_http);
     g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi, &g_adsbdb);
 }
 
