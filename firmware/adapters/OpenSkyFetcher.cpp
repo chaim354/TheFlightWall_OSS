@@ -167,7 +167,6 @@ bool OpenSkyFetcher::fetchStateVectors(double centerLat,
                                        double radiusKm,
                                        std::vector<StateVector> &outStateVectors)
 {
-    // Ensure OAuth token if configured
     if (!ensureAccessToken(false))
     {
         Serial.println("OpenSkyFetcher: ensureAccessToken failed before GET");
@@ -184,149 +183,84 @@ bool OpenSkyFetcher::fetchStateVectors(double centerLat,
                  "&extended=1"; // include ADS-B emitter category (index 17; 8 = rotorcraft)
 
     HTTPClient http;
-    http.begin(url);
-    // OAuth Bearer required
+    http.begin(url); // OpenSky uses its own transport (Bearer token, not via HttpJson)
+    http.useHTTP10(true); // unchunked body so we can stream-parse the states array
+    http.setTimeout(15000);
     http.addHeader("Authorization", String("Bearer ") + m_accessToken);
 
     int code = http.GET();
+    if (code == 401 && m_accessToken.length() > 0 && ensureAccessToken(true))
+    {
+        http.end();
+        http.begin(url);
+        http.useHTTP10(true);
+        http.setTimeout(15000);
+        http.addHeader("Authorization", String("Bearer ") + m_accessToken);
+        code = http.GET();
+    }
     if (code != 200)
     {
-        bool attemptedRefresh = false;
-        if (code == 401 && m_accessToken.length() > 0)
-        {
-            // Try refresh once
-            http.end();
-            if (ensureAccessToken(true))
-            {
-                HTTPClient retry;
-                retry.begin(url);
-                retry.addHeader("Authorization", String("Bearer ") + m_accessToken);
-                code = retry.GET();
-                if (code != 200)
-                {
-                    Serial.print("OpenSkyFetcher: HTTP retry failed with code: ");
-                    Serial.println(code);
-                    retry.end();
-                    return false;
-                }
-                String payload = retry.getString();
-                retry.end();
-                try
-                {
-                    parseStatesInto(payload, centerLat, centerLon, radiusKm, outStateVectors);
-                }
-                catch (...)
-                {
-                    outStateVectors.clear();
-                    Serial.println("OpenSkyFetcher: parse aborted (low memory)");
-                }
-                return true;
-            }
-            attemptedRefresh = true;
-        }
-
         Serial.print("OpenSkyFetcher: HTTP request failed with code: ");
         Serial.println(code);
         http.end();
-        if (attemptedRefresh)
-        {
-            Serial.println("OpenSkyFetcher: Token refresh attempt failed");
-        }
         return false;
     }
-    String payload = http.getString();
-    http.end();
+
     try
     {
-        parseStatesInto(payload, centerLat, centerLon, radiusKm, outStateVectors);
+        parseStatesInto(http.getStream(), centerLat, centerLon, radiusKm, outStateVectors);
     }
     catch (...)
     {
         outStateVectors.clear();
         Serial.println("OpenSkyFetcher: parse aborted (low memory)");
     }
+    http.end();
     return true;
 }
 
-void OpenSkyFetcher::parseStatesInto(const String &payload, double centerLat, double centerLon,
+void OpenSkyFetcher::parseStatesInto(Stream &stream, double centerLat, double centerLon,
                                      double radiusKm, std::vector<StateVector> &out)
 {
-    int sidx = payload.indexOf("\"states\"");
-    if (sidx < 0)
-        return; // no states key
-    int i = payload.indexOf('[', sidx);
-    if (i < 0)
-        return;
-    i++; // step past the outer '['
-    const int n = (int)payload.length();
+    // Seek to the start of the states array, then parse ONE inner array at a
+    // time into a reused tiny document (never the whole response in RAM).
+    if (!stream.find("\"states\":["))
+        return; // no states array (e.g. {"time":..,"states":null})
 
     JsonDocument sdoc; // reused; holds only ONE state vector at a time
-
-    while (i < n && out.size() < 40)
+    do
     {
-        // advance to the next inner array (or end of the states array)
-        while (i < n && payload[i] != '[' && payload[i] != ']')
-            i++;
-        if (i >= n || payload[i] == ']')
-            break;
-
-        // bracket-match this one state array, skipping over any strings
-        const int start = i;
-        int depth = 0;
-        bool inStr = false;
-        while (i < n)
+        sdoc.clear();
+        DeserializationError err = deserializeJson(sdoc, stream);
+        if (err)
+            break; // hit ']' / malformed — stop
+        JsonArray a = sdoc.as<JsonArray>();
+        if (a.size() >= 7)
         {
-            char ch = payload[i];
-            if (inStr)
+            StateVector s;
+            s.icao24 = a[0].as<const char *>();
+            s.callsign = a[1].isNull() ? String("") : String(a[1].as<const char *>());
+            s.callsign.trim();
+            s.lon = a[5].isNull() ? NAN : a[5].as<double>();
+            s.lat = a[6].isNull() ? NAN : a[6].as<double>();
+            s.baro_altitude = a[7].isNull() ? NAN : a[7].as<double>();
+            s.on_ground = a[8].isNull() ? false : a[8].as<bool>();
+            s.velocity = a[9].isNull() ? NAN : a[9].as<double>();
+            s.heading = a[10].isNull() ? NAN : a[10].as<double>();
+            s.vertical_rate = a[11].isNull() ? NAN : a[11].as<double>();
+            s.geo_altitude = a[13].isNull() ? NAN : a[13].as<double>();
+            s.position_source = a[16].isNull() ? 0 : a[16].as<int>();
+            s.category = a[17].isNull() ? 0 : a[17].as<int>(); // extended=1; 8 = rotorcraft
+
+            if (!isnan(s.lat) && !isnan(s.lon))
             {
-                if (ch == '\\')
-                    i++; // skip escaped char
-                else if (ch == '"')
-                    inStr = false;
-            }
-            else if (ch == '"')
-                inStr = true;
-            else if (ch == '[')
-                depth++;
-            else if (ch == ']')
-            {
-                if (--depth == 0)
+                s.distance_km = haversineKm(centerLat, centerLon, s.lat, s.lon);
+                if (s.distance_km <= radiusKm)
                 {
-                    i++;
-                    break;
+                    s.bearing_deg = computeBearingDeg(centerLat, centerLon, s.lat, s.lon);
+                    out.push_back(s);
                 }
             }
-            i++;
         }
-
-        sdoc.clear();
-        if (deserializeJson(sdoc, payload.substring(start, i)))
-            continue;
-        JsonArray a = sdoc.as<JsonArray>();
-        if (a.size() < 7)
-            continue;
-
-        StateVector s;
-        s.icao24 = a[0].as<const char *>();
-        s.callsign = a[1].isNull() ? String("") : String(a[1].as<const char *>());
-        s.callsign.trim();
-        s.lon = a[5].isNull() ? NAN : a[5].as<double>();
-        s.lat = a[6].isNull() ? NAN : a[6].as<double>();
-        s.baro_altitude = a[7].isNull() ? NAN : a[7].as<double>();
-        s.on_ground = a[8].isNull() ? false : a[8].as<bool>();
-        s.velocity = a[9].isNull() ? NAN : a[9].as<double>();
-        s.heading = a[10].isNull() ? NAN : a[10].as<double>();
-        s.vertical_rate = a[11].isNull() ? NAN : a[11].as<double>();
-        s.geo_altitude = a[13].isNull() ? NAN : a[13].as<double>();
-        s.position_source = a[16].isNull() ? 0 : a[16].as<int>();
-        s.category = a[17].isNull() ? 0 : a[17].as<int>(); // extended=1; 8 = rotorcraft
-
-        if (isnan(s.lat) || isnan(s.lon))
-            continue;
-        s.distance_km = haversineKm(centerLat, centerLon, s.lat, s.lon);
-        if (s.distance_km > radiusKm)
-            continue;
-        s.bearing_deg = computeBearingDeg(centerLat, centerLon, s.lat, s.lon);
-        out.push_back(s);
-    }
+    } while (out.size() < 40 && stream.findUntil(",", "]"));
 }
