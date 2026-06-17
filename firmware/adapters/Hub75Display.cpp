@@ -325,13 +325,15 @@ uint16_t Hub75Display::accentColorFor(const String &code)
     return rgb565(r, g, b);
 }
 
-void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h, uint8_t scale)
+void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h)
 {
-    if (scale < 1)
-        scale = 1;
-
     if (loadLogoFor(f.operator_icao) && _logoValid)
     {
+        // Integer-scale the native tile to fill the box (1x for a 32px tile in a
+        // 32px box, 2x for a 16px tile, etc.).
+        int scale = min(w / _logoW, h / _logoH);
+        if (scale < 1)
+            scale = 1;
         const int16_t sw = _logoW * scale, sh = _logoH * scale;
         const int16_t lx = x + (w - sw) / 2;
         const int16_t ly = y + (h - sh) / 2;
@@ -341,7 +343,6 @@ void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, in
         }
         else
         {
-            // Nearest-neighbor upscale (logo tiles are small, runs occasionally).
             for (int j = 0; j < _logoH; ++j)
                 for (int i = 0; i < _logoW; ++i)
                     _canvas->fillRect(lx + i * scale, ly + j * scale, scale, scale,
@@ -356,13 +357,14 @@ void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, in
     code.toUpperCase();
     String key = f.operator_icao.length() ? f.operator_icao : code;
 
+    const uint8_t ts = (h >= 24) ? 2 : 1; // larger code text in a tall box
     _canvas->fillRect(x, y, w, h, accentColorFor(key));
     if (code.length())
     {
-        const int charWidth = 6 * scale, charHeight = 8 * scale;
+        const int charWidth = 6 * ts, charHeight = 8 * ts;
         int16_t cx = x + (w - (int)code.length() * charWidth) / 2;
         int16_t cy = y + (h - charHeight) / 2;
-        _canvas->setTextSize(scale);
+        _canvas->setTextSize(ts);
         drawTextLine(cx, cy, code, rgb565(255, 255, 255));
         _canvas->setTextSize(1);
     }
@@ -388,12 +390,116 @@ int16_t Hub75Display::fitLines(std::vector<String> &lines, int maxCols, int avai
 
 void Hub75Display::displayFlightCard(const FlightInfo &f)
 {
-    if (_matrixHeight < 16)
+    if (_matrixHeight >= 48 && _matrixWidth >= 96)
+        displayMiniCard(f); // big panel (e.g. 128x64): logo + 3 info lines + 2 metric rows
+    else if (_matrixHeight < 16)
         displayTextOnlyCard(f); // too short for a logo
     else if (_matrixWidth >= _matrixHeight * 2)
-        displaySideBySideCard(f); // wide & short (128x32, 128x64, 160x32, 64x32)
+        displaySideBySideCard(f); // wide & short (128x32, 160x32, 64x32)
     else
         displayStackedCard(f); // square / tall (64x64)
+}
+
+// "ORD-LAX" style route, preferring IATA codes.
+static String iataRoute(const FlightInfo &f)
+{
+    String o = f.origin.code_iata.length() ? f.origin.code_iata : f.origin.code_icao;
+    String d = f.destination.code_iata.length() ? f.destination.code_iata : f.destination.code_icao;
+    if (!o.length() && !d.length())
+        return String("");
+    return o + "-" + d;
+}
+
+static String miniAlt(double ft)
+{
+    if (isnan(ft))
+        return String("");
+    if (ft >= 1000)
+    {
+        char b[12];
+        snprintf(b, sizeof(b), "%.1fkft", ft / 1000.0);
+        return String(b);
+    }
+    return String((long)(ft + 0.5)) + "ft";
+}
+
+static String miniSpdMph(double kt)
+{
+    if (isnan(kt))
+        return String("");
+    return String((long)(kt * 1.15078 + 0.5)) + "mph";
+}
+
+static String miniTrk(double deg)
+{
+    if (isnan(deg))
+        return String("");
+    long d = ((long)(deg + 0.5)) % 360;
+    if (d < 0)
+        d += 360;
+    return String(d) + "deg";
+}
+
+static String miniVr(double fpm)
+{
+    if (isnan(fpm))
+        return String("");
+    long fps = (long)(fpm / 60.0 + (fpm >= 0 ? 0.5 : -0.5));
+    return String(fps) + "ft/s";
+}
+
+void Hub75Display::displayMiniCard(const FlightInfo &f)
+{
+    const uint16_t color = textColor();
+
+    // Logo: 32x32 box, top-left.
+    const int16_t box = 32;
+    drawLogoOrBadge(f, 2, 1, box, box);
+
+    // Three info lines to the right of the logo (airline / route / aircraft).
+    const int16_t tx = 2 + box + 4; // ~38
+    const int topCols = (_matrixWidth - tx - 1) / 6;
+
+    String airline = f.airline_display_name_full.length() ? f.airline_display_name_full
+                     : (f.operator_iata.length() ? f.operator_iata
+                        : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
+    String route = iataRoute(f);
+    String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+    if (!airline.length())
+        airline = f.ident.length() ? f.ident : String("?");
+
+    drawTextLine(tx, 1, truncateToColumns(airline, topCols), color);
+    if (route.length())
+        drawTextLine(tx, 12, truncateToColumns(route, topCols), color);
+    if (type.length())
+        drawTextLine(tx, 23, truncateToColumns(type, topCols), color);
+
+    // Two full-width metric rows at the bottom. Comma (no space) keeps two fields
+    // within 128px at the 6px font (21 cols).
+    const int botCols = (_matrixWidth - 2) / 6;
+    String alt = miniAlt(f.altitude_ft), spd = miniSpdMph(f.groundspeed_kt);
+    String trk = miniTrk(f.heading_deg), vr = miniVr(f.vertical_rate_fpm);
+
+    String row1;
+    if (g_settings.layout.showAltitude && alt.length())
+        row1 = "Alt:" + alt;
+    if (g_settings.layout.showSpeed && spd.length())
+        row1 += (row1.length() ? "," : "") + String("Spd:") + spd;
+
+    String row2;
+    if (g_settings.layout.showHeading && trk.length())
+        row2 = "Trk:" + trk;
+    if (g_settings.layout.showVerticalRate && vr.length())
+        row2 += (row2.length() ? "," : "") + String("Vr:") + vr;
+
+    int16_t by = (row1.length() && row2.length()) ? 40 : 44;
+    if (row1.length())
+    {
+        drawTextLine(1, by, truncateToColumns(row1, botCols), color);
+        by += 12;
+    }
+    if (row2.length())
+        drawTextLine(1, by, truncateToColumns(row2, botCols), color);
 }
 
 void Hub75Display::displaySideBySideCard(const FlightInfo &f)
@@ -431,12 +537,12 @@ void Hub75Display::displayStackedCard(const FlightInfo &f)
 {
     const uint16_t color = textColor();
 
-    // Bigger logo when there's vertical room (e.g. 64x64 -> 2x = 32px tall).
-    const uint8_t scale = (_matrixHeight >= 48) ? 2 : 1;
-    const int16_t boxW = 16 * scale, boxH = 16 * scale;
+    // Bigger logo when there's vertical room (e.g. 64x64 -> 32px box).
+    const int16_t boxW = (_matrixHeight >= 48) ? 32 : 16;
+    const int16_t boxH = boxW;
     const int16_t boxX = (_matrixWidth - boxW) / 2;
     const int16_t boxY = 2;
-    drawLogoOrBadge(f, boxX, boxY, boxW, boxH, scale);
+    drawLogoOrBadge(f, boxX, boxY, boxW, boxH);
 
     const int16_t textTop = boxY + boxH + 2;
     const int maxCols = (_matrixWidth - 2) / 6;

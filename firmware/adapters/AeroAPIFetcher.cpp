@@ -77,12 +77,14 @@ bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, const String &ic
     {
         JsonObject o = f["origin"].as<JsonObject>();
         outInfo.origin.code_icao = safeGetString(o, "code_icao");
+        outInfo.origin.code_iata = safeGetString(o, "code_iata");
     }
 
     if (f.containsKey("destination") && f["destination"].is<JsonObject>())
     {
         JsonObject d = f["destination"].as<JsonObject>();
         outInfo.destination.code_icao = safeGetString(d, "code_icao");
+        outInfo.destination.code_iata = safeGetString(d, "code_iata");
     }
 
     // Live telemetry from last reported position (Flights-mode metrics).

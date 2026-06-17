@@ -171,7 +171,10 @@ The wall renders a **Mini-style flight card**: an airline logo tile on the left,
   ```
 - **Regenerate the bundled code-badge tiles** (no dependencies): edit the `AIRLINES` table in [`tools/gen_starter_logos.py`](tools/gen_starter_logos.py) and run `python3 tools/gen_starter_logos.py`.
 
-Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64 (16×16 matches one panel tile).
+Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64. **For a 128×64 panel use `--size 32`** (the big-panel layout draws a 32×32 logo); the renderer auto-fits whatever size you provide. The bundled brand badges are 16×16 and get upscaled when needed.
+
+### Layouts by panel size
+The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft,Spd:258mph` / `Trk:263deg,Vr:-18ft/s`, with IATA airport codes); **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.
 
 # Thanks
 We really appreciate all the support on this project!

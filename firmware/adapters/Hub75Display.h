@@ -50,6 +50,7 @@ private:
     String truncateToColumns(const String &text, int maxColumns);
     void buildFlightLines(const FlightInfo &f, std::vector<String> &outLines, bool includeAirline);
     void displayFlightCard(const FlightInfo &f);     // picks a layout by panel shape
+    void displayMiniCard(const FlightInfo &f);       // big panels (128x64): logo + info + metric rows
     void displaySideBySideCard(const FlightInfo &f); // wide panels: logo left, text right
     void displayStackedCard(const FlightInfo &f);    // square/tall panels: logo top, text below
     void displayTextOnlyCard(const FlightInfo &f);   // very short panels: bordered text
@@ -58,6 +59,7 @@ private:
 
     bool loadLogoFor(const String &icao);
     uint16_t accentColorFor(const String &code);
-    void drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h, uint8_t scale = 1);
+    // Draws the logo (auto-fit to the box by integer scale) or a code badge fallback.
+    void drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h);
     int16_t fitLines(std::vector<String> &lines, int maxCols, int availHeight);
 };
