@@ -17,6 +17,8 @@ public:
 
 private:
     bool httpGetJson(const String &url, String &outPayload);
-    bool fetchRoute(const String &callsign, FlightInfo &out);
-    bool fetchAircraft(const String &icao24, FlightInfo &out);
+    bool fetchRoute(const String &callsign, FlightInfo &out);        // adsbdb route
+    bool fetchAircraft(const String &icao24, FlightInfo &out);       // adsbdb aircraft type
+    bool fetchRouteHexdb(const String &callsign, FlightInfo &out);   // hexdb.io route fallback
+    bool fetchAircraftHexdb(const String &icao24, FlightInfo &out);  // hexdb.io aircraft fallback
 };

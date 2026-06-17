@@ -327,7 +327,10 @@ uint16_t Hub75Display::accentColorFor(const String &code)
 
 void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h)
 {
-    if (loadLogoFor(f.operator_icao) && _logoValid)
+    // Helicopters show the generic rotorcraft icon; everything else uses the
+    // airline's ICAO logo tile.
+    const String logoKey = f.is_helicopter ? String("_HELI") : f.operator_icao;
+    if (loadLogoFor(logoKey) && _logoValid)
     {
         // Integer-scale the native tile to fill the box (1x for a 32px tile in a
         // 32px box, 2x for a 16px tile, etc.).
@@ -450,6 +453,15 @@ static String miniVr(double fpm, bool unit)
     return String(fps) + (unit ? "ft/s" : "");
 }
 
+// Small per-airline display-name fixups (spacing / branding). Extend as needed —
+// keyed by operator ICAO; returns `fallback` unchanged when there's no override.
+static String airlineNameOverride(const String &icao, const String &fallback)
+{
+    if (icao.equalsIgnoreCase("SWR"))
+        return String("Swiss Air"); // CDN returns "Swissair"
+    return fallback;
+}
+
 // Drop the redundant airline-suffix words (the logo conveys it):
 //   "United Airlines"   -> "United"
 //   "British Airways"   -> "British"
@@ -518,6 +530,7 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
                         : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
     String route = iataRoute(f);
     String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+    airline = airlineNameOverride(f.operator_icao, airline);
     if (!airline.length())
         airline = f.ident.length() ? f.ident : String("?");
     // When a real logo tile is shown, the "Airlines/Airways" suffix is redundant.
@@ -562,7 +575,13 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
             if (t.length())
                 r = "Trk:" + t;
         }
-        if (L.showVerticalRate)
+        if (L.flightNumberOverVr)
+        {
+            String flt = f.ident.length() ? f.ident : f.ident_icao;
+            if (flt.length())
+                r += (r.length() ? " " : "") + flt;
+        }
+        else if (L.showVerticalRate)
         {
             String v = miniVr(f.vertical_rate_fpm, unit);
             if (v.length())

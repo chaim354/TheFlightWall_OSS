@@ -23,7 +23,7 @@ bool GeoLocator::locate(double &lat, double &lon, String &place)
     String payload = http.getString();
     http.end();
 
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     if (deserializeJson(doc, payload))
         return false;
     if (String(doc["status"] | "") != "success")

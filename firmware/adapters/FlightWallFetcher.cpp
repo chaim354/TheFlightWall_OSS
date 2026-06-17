@@ -23,6 +23,8 @@ bool FlightWallFetcher::httpGetJson(const String &url, String &outPayload)
     int code = http.GET();
     if (code != 200)
     {
+        if (code != 404) // 404 = code not in the CDN lookup — expected, not an error
+            Serial.printf("FlightWallFetcher: GET %d  %s\n", code, url.c_str());
         http.end();
         return false;
     }
@@ -42,7 +44,7 @@ bool FlightWallFetcher::getAirlineName(const String &airlineIcao, String &outDis
     if (!httpGetJson(url, payload))
         return false;
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err)
         return false;
@@ -69,7 +71,7 @@ bool FlightWallFetcher::getAircraftName(const String &aircraftIcao,
     if (!httpGetJson(url, payload))
         return false;
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err)
         return false;

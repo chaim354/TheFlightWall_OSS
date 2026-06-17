@@ -46,6 +46,7 @@ struct DisplayLayout
     bool showSpeed = true;         // "451kt"
     bool showHeading = true;       // "HDG 094"
     bool showVerticalRate = true;  // "+1200fpm"
+    bool flightNumberOverVr = false; // show the flight number in the vertical-rate slot
 };
 
 struct AircraftFilters

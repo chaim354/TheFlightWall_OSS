@@ -144,7 +144,7 @@ static void applyBrightness()
 
 static String flightsToJson(const std::vector<FlightInfo> &flights)
 {
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     for (const auto &f : flights)
     {
@@ -154,6 +154,7 @@ static String flightsToJson(const std::vector<FlightInfo> &flights)
         o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
         o["origin"] = f.origin.code_icao;
         o["destination"] = f.destination.code_icao;
+        o["helicopter"] = f.is_helicopter;
         if (f.has_metrics)
         {
             if (!isnan(f.altitude_ft))

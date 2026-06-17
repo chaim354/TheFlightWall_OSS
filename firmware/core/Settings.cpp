@@ -117,7 +117,7 @@ bool Settings::save() const
 
 String Settings::toJson() const
 {
-    DynamicJsonDocument doc(8192);
+    JsonDocument doc;
 
     JsonObject net = doc.createNestedObject("network");
     net["wifiSsid"] = wifiSsid;
@@ -160,6 +160,7 @@ String Settings::toJson() const
     lay["showSpeed"] = layout.showSpeed;
     lay["showHeading"] = layout.showHeading;
     lay["showVerticalRate"] = layout.showVerticalRate;
+    lay["flightNumberOverVr"] = layout.flightNumberOverVr;
 
     JsonObject filt = doc.createNestedObject("filters");
     filt["minAltitudeFt"] = filters.minAltitudeFt;
@@ -202,7 +203,7 @@ String Settings::toJson() const
 
 bool Settings::fromJson(const String &in)
 {
-    DynamicJsonDocument doc(8192);
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, in);
     if (err)
     {
@@ -299,6 +300,7 @@ bool Settings::fromJson(const String &in)
         layout.showSpeed = lay["showSpeed"] | layout.showSpeed;
         layout.showHeading = lay["showHeading"] | layout.showHeading;
         layout.showVerticalRate = lay["showVerticalRate"] | layout.showVerticalRate;
+        layout.flightNumberOverVr = lay["flightNumberOverVr"] | layout.flightNumberOverVr;
     }
 
     if (doc.containsKey("filters"))

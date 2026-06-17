@@ -21,6 +21,7 @@ struct StateVector
     String squawk;
     bool spi = false;
     int position_source = 0;
+    int category = 0; // ADS-B emitter category (with extended=1); 8 = rotorcraft
     double distance_km = NAN;
     double bearing_deg = NAN;
 };

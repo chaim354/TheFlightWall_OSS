@@ -4,10 +4,10 @@
 
 namespace UserConfiguration
 {
-    // Location configuration
-    static const double CENTER_LAT = 37.7749; // San Francisco (example)
-    static const double CENTER_LON = -122.4194;
-    static const double RADIUS_KM = 10.0; // Search radius in km
+    // Location configuration (default seed; change to your area or use the web UI / auto-detect)
+    static const double CENTER_LAT = 40.7234; // near JFK / NYC
+    static const double CENTER_LON = -73.7021;
+    static const double RADIUS_KM = 10.0; // Search radius in km (memory-safe; raise in UI if stable)
 
     // Display customization
     // Brightness controls overall display brightness (0-255)

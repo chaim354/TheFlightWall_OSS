@@ -49,7 +49,7 @@ bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, const String &ic
     String payload = http.getString();
     http.end();
 
-    DynamicJsonDocument doc(16384);
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err)
     {

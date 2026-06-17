@@ -27,4 +27,9 @@ private:
 
     bool ensureAccessToken(bool forceRefresh = false);
     bool requestAccessToken(String &outToken, unsigned long &outExpiryMs);
+
+    // Parses the states/all body one aircraft at a time (bounded memory — never
+    // builds a document of the whole response), filtering by radius and capping count.
+    void parseStatesInto(const String &payload, double centerLat, double centerLon,
+                         double radiusKm, std::vector<StateVector> &out);
 };

@@ -138,6 +138,7 @@
       <span class="check"><input type="checkbox" id="showSpeed"><label style="margin:0">Speed</label></span>
       <span class="check"><input type="checkbox" id="showHeading"><label style="margin:0">Heading</label></span>
       <span class="check"><input type="checkbox" id="showVerticalRate"><label style="margin:0">Vertical rate</label></span>
+      <span class="check"><input type="checkbox" id="flightNumberOverVr"><label style="margin:0">Flight # (instead of vertical rate)</label></span>
     </div>
     <small class="help">Only as many lines as physically fit on the panel are drawn.</small>
   </div>
@@ -280,7 +281,7 @@ async function loadSettings(){
   $('cycleSeconds').value = s.display.cycleSeconds;
   $('fetchIntervalSeconds').value = s.display.fetchIntervalSeconds;
 
-  for (const k of ['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate'])
+  for (const k of ['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'])
     $(k).checked = !!s.layout[k];
 
   $('minAltitudeFt').value = s.filters.minAltitudeFt;
@@ -332,7 +333,7 @@ function collect(){
       maxFlights:+$('maxFlights').value, cycleSeconds:+$('cycleSeconds').value,
       fetchIntervalSeconds:+$('fetchIntervalSeconds').value
     },
-    layout:Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate'].map(k=>[k,$(k).checked])),
+    layout:Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'].map(k=>[k,$(k).checked])),
     filters:{
       minAltitudeFt:+$('minAltitudeFt').value, maxAltitudeFt:+$('maxAltitudeFt').value,
       excludeOnGround:$('excludeOnGround').checked, airlineAllowList:lines($('airlineAllowList').value)
@@ -417,7 +418,7 @@ async function loadStatus(){
     $('flights').innerHTML = f.map(x=>{
       const m=[]; if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
       if('headingDeg'in x)m.push('HDG'+x.headingDeg); if('verticalRateFpm'in x)m.push(x.verticalRateFpm+'fpm');
-      return `<div class="flight"><b>${x.ident||'?'}</b> <span>${x.airline||''}</span><br>
+      return `<div class="flight"><b>${x.ident||'?'}</b> ${x.helicopter?'🚁':''} <span>${x.airline||''}</span><br>
         <span>${x.origin||'?'} → ${x.destination||'?'} · ${x.aircraft||''}</span>
         ${m.length?'<br><span>'+m.join(' · ')+'</span>':''}</div>`;
     }).join('') || '<small class="help">No flights currently displayed.</small>';

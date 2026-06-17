@@ -35,6 +35,7 @@ struct FlightInfo
     double heading_deg = NAN;       // track/heading in degrees from north
     double vertical_rate_fpm = NAN; // climb (+) / descent (-) in feet per minute
     bool on_ground = false;
+    bool is_helicopter = false;     // from ADS-B emitter category (rotorcraft)
     double distance_km = NAN;       // distance from configured center (Area mode)
     double bearing_deg = NAN;       // bearing from configured center (Area mode)
 };

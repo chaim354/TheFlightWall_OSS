@@ -128,7 +128,7 @@ void WebConfigServer::handlePostSettings()
 
 void WebConfigServer::handleGetStatus()
 {
-    DynamicJsonDocument doc(512);
+    JsonDocument doc;
     doc["apMode"] = _apMode;
     doc["wifiConnected"] = (WiFi.status() == WL_CONNECTED);
     doc["ssid"] = _apMode ? WiFi.softAPSSID() : WiFi.SSID();
@@ -180,7 +180,7 @@ void WebConfigServer::handleGeolocate()
     String place;
     if (geo.locate(lat, lon, place))
     {
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["ok"] = true;
         doc["lat"] = lat;
         doc["lon"] = lon;
@@ -198,7 +198,7 @@ void WebConfigServer::handleGeolocate()
 void WebConfigServer::handleWifiScan()
 {
     int n = WiFi.scanNetworks();
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     for (int i = 0; i < n && i < 20; ++i)
     {

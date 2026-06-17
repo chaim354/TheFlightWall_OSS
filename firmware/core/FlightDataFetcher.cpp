@@ -84,7 +84,9 @@ bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
 void FlightDataFetcher::enrichNames(FlightInfo &info)
 {
     FlightWallFetcher fw;
-    if (info.operator_icao.length())
+    // Airline name: only hit the CDN if we don't already have one. adsbdb's route
+    // response already includes it, so this avoids a redundant HTTPS call per flight.
+    if (info.operator_icao.length() && info.airline_display_name_full.length() == 0)
     {
         String airlineFull;
         if (fw.getAirlineName(info.operator_icao, airlineFull))
@@ -92,7 +94,8 @@ void FlightDataFetcher::enrichNames(FlightInfo &info)
             info.airline_display_name_full = airlineFull;
         }
     }
-    if (info.aircraft_code.length())
+    // Friendly aircraft short name from the ICAO type (e.g. A21N -> A321neo).
+    if (info.aircraft_code.length() && info.aircraft_display_name_short.length() == 0)
     {
         String aircraftShort, aircraftFull;
         if (fw.getAircraftName(info.aircraft_code, aircraftShort, aircraftFull))
@@ -188,6 +191,7 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         if (!isnan(s.vertical_rate))
             info.vertical_rate_fpm = s.vertical_rate * kMetersPerSecToFpm;
         info.on_ground = s.on_ground;
+        info.is_helicopter = (s.category == 8); // ADS-B rotorcraft category
         info.distance_km = s.distance_km;
         info.bearing_deg = s.bearing_deg;
         info.has_metrics = true;
