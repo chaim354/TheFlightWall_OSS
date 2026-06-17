@@ -1,8 +1,10 @@
 /*
-Purpose: Free flight enrichment via adsbdb.com (no API key).
-- GET /v0/callsign/{callsign} -> flightroute: airline + origin/destination ICAO.
-- GET /v0/aircraft/{icao24}   -> aircraft: icao_type + registered owner codes.
-Maps results into FlightInfo (route/operator/aircraft + friendly airline name).
+Purpose: Free flight enrichment via adsbdb.com (+ hexdb.io fallback), no API key.
+- /v0/callsign/{cs} -> route (origin/dest ICAO+IATA) and airline name.
+- /v0/aircraft/{icao24} -> ICAO aircraft type.
+All HTTP goes through the shared streaming HttpJson client. Returns true only
+when a NETWORK lookup actually produced route or aircraft data (the caller adds
+local callsign-prefix identity separately, so prefix-only is NOT "enriched").
 */
 #include "adapters/AdsbdbFetcher.h"
 
@@ -15,42 +17,15 @@ static String jstr(JsonObject o, const char *key)
     return o[key].as<String>();
 }
 
-bool AdsbdbFetcher::httpGetJson(const String &url, String &outPayload)
-{
-    WiFiClientSecure client;
-    client.setInsecure();
-
-    HTTPClient http;
-    http.begin(client, url);
-    http.addHeader("Accept", "application/json");
-    http.setTimeout(12000);
-
-    int code = http.GET();
-    if (code != 200)
-    {
-        if (code != 404) // 404 just means "not in this DB" — expected, not an error
-            Serial.printf("AdsbdbFetcher: GET %d  %s\n", code, url.c_str());
-        http.end();
-        return false;
-    }
-    outPayload = http.getString();
-    http.end();
-    return true;
-}
-
 bool AdsbdbFetcher::fetchRoute(const String &callsign, FlightInfo &out)
 {
     String cs = callsign;
     cs.trim();
-    if (cs.length() == 0)
-        return false;
-
-    String payload;
-    if (!httpGetJson(String(kAdsbdbBase) + "/callsign/" + cs, payload))
+    if (cs.length() == 0 || !_http)
         return false;
 
     JsonDocument doc;
-    if (deserializeJson(doc, payload))
+    if (!_http->getJson(String(kAdsbdbBase) + "/callsign/" + cs, doc))
         return false;
 
     JsonObject fr = doc["response"]["flightroute"].as<JsonObject>();
@@ -89,7 +64,6 @@ bool AdsbdbFetcher::fetchRoute(const String &callsign, FlightInfo &out)
         out.destination.code_icao = jstr(d, "icao_code");
         out.destination.code_iata = jstr(d, "iata_code");
     }
-
     return true;
 }
 
@@ -97,24 +71,17 @@ bool AdsbdbFetcher::fetchAircraft(const String &icao24, FlightInfo &out)
 {
     String hex = icao24;
     hex.trim();
-    if (hex.length() == 0)
-        return false;
-
-    String payload;
-    if (!httpGetJson(String(kAdsbdbBase) + "/aircraft/" + hex, payload))
+    if (hex.length() == 0 || !_http)
         return false;
 
     JsonDocument doc;
-    if (deserializeJson(doc, payload))
+    if (!_http->getJson(String(kAdsbdbBase) + "/aircraft/" + hex, doc))
         return false;
 
     JsonObject ac = doc["response"]["aircraft"].as<JsonObject>();
     if (ac.isNull())
         return false;
 
-    // Only the aircraft ICAO type is reliable/useful here. The "registered_owner"
-    // is frequently a leasing company, not the operating airline, so we take the
-    // airline strictly from the callsign route lookup instead.
     String type = jstr(ac, "icao_type");
     if (type.length())
     {
@@ -124,38 +91,15 @@ bool AdsbdbFetcher::fetchAircraft(const String &icao24, FlightInfo &out)
     return false;
 }
 
-// Airline ICAO from an airline-format callsign (3 letters + a flight number):
-// "QFA3" -> "QFA", "DAL123" -> "DAL". Tail numbers like "N172SP" return "".
-static String airlineIcaoFromCallsign(const String &callsign)
-{
-    String c = callsign;
-    c.trim();
-    if (c.length() < 4)
-        return String("");
-    auto alpha = [](char ch)
-    { return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'); };
-    if (!alpha(c[0]) || !alpha(c[1]) || !alpha(c[2]))
-        return String("");
-    if (c[3] < '0' || c[3] > '9') // 4th char must be a digit (flight number)
-        return String("");
-    String p = c.substring(0, 3);
-    p.toUpperCase();
-    return p;
-}
-
 bool AdsbdbFetcher::fetchRouteHexdb(const String &callsign, FlightInfo &out)
 {
     String cs = callsign;
     cs.trim();
-    if (cs.length() == 0)
-        return false;
-
-    String payload;
-    if (!httpGetJson(String("https://hexdb.io/api/v1/route/icao/") + cs, payload))
+    if (cs.length() == 0 || !_http)
         return false;
 
     JsonDocument doc;
-    if (deserializeJson(doc, payload))
+    if (!_http->getJson(String("https://hexdb.io/api/v1/route/icao/") + cs, doc))
         return false;
 
     String route = doc["route"] | "";
@@ -177,15 +121,11 @@ bool AdsbdbFetcher::fetchAircraftHexdb(const String &icao24, FlightInfo &out)
 {
     String hex = icao24;
     hex.trim();
-    if (hex.length() == 0)
-        return false;
-
-    String payload;
-    if (!httpGetJson(String("https://hexdb.io/api/v1/aircraft/") + hex, payload))
+    if (hex.length() == 0 || !_http)
         return false;
 
     JsonDocument doc;
-    if (deserializeJson(doc, payload))
+    if (!_http->getJson(String("https://hexdb.io/api/v1/aircraft/") + hex, doc))
         return false;
 
     String t = doc["ICAOTypeCode"] | "";
@@ -199,35 +139,28 @@ bool AdsbdbFetcher::fetchAircraftHexdb(const String &icao24, FlightInfo &out)
 
 bool AdsbdbFetcher::fetchFlightInfo(const String &flightIdent, const String &icao24, FlightInfo &outInfo)
 {
-    bool ok = false;
+    bool gotNetworkData = false;
 
-    // Route: adsbdb first, then hexdb.io fallback (catches callsigns adsbdb lacks).
+    // Route: adsbdb first (also gives airline name), then hexdb.io fallback.
     if (flightIdent.length())
     {
         if (fetchRoute(flightIdent, outInfo))
-            ok = true;
+            gotNetworkData = true;
         else if (fetchRouteHexdb(flightIdent, outInfo))
-            ok = true;
+            gotNetworkData = true;
     }
 
     // Aircraft type: adsbdb first, then hexdb.io fallback.
     if (icao24.length())
     {
         if (fetchAircraft(icao24, outInfo))
-            ok = true;
+            gotNetworkData = true;
         else if (fetchAircraftHexdb(icao24, outInfo))
-            ok = true;
+            gotNetworkData = true;
     }
 
-    // Airline identity is taken primarily from the callsign prefix (the operating
-    // carrier as broadcast) so the airline + logo resolve even when the route and
-    // aircraft lookups miss. GA tail numbers yield no prefix and stay unidentified.
-    String prefix = airlineIcaoFromCallsign(flightIdent);
-    if (prefix.length())
-    {
-        outInfo.operator_icao = prefix;
-        ok = true;
-    }
-
-    return ok;
+    // NOTE: callsign-prefix -> operator_icao is applied by the orchestrator
+    // (FlightDataFetcher), NOT here, so prefix-only does not count as a network
+    // success and never poisons the cache.
+    return gotNetworkData;
 }
