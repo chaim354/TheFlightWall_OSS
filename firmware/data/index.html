@@ -105,6 +105,11 @@
         <div><label>Center longitude</label><input id="centerLon" type="number" step="0.0001" /></div>
         <div><label>Radius (km)</label><input id="radiusKm" type="number" step="0.5" /></div>
       </div>
+      <div class="bar" style="margin-top:8px">
+        <button class="ghost" type="button" onclick="geolocate()">Auto-detect my location</button>
+        <small class="help" id="geoNote" style="margin:0">Uses your IP (approximate). Review before saving.</small>
+      </div>
+      <span class="check" style="margin-top:8px"><input type="checkbox" id="autoLocateOnBoot"><label style="margin:0">Auto-detect location on every boot</label></span>
     </div>
 
     <div id="flightsBox" class="hide">
@@ -197,6 +202,25 @@
       <div><label>Panels chained</label><input id="panelChain" type="number" min="1" /></div>
     </div>
     <small class="help">Matrix width = panel width × panels chained (e.g. 64 × 2 = 128 wide). Wide panels use a logo-left card; square panels (64×64) use a stacked logo-on-top card. Changes take effect after a restart.</small>
+
+    <label style="margin-top:14px">Signal tuning — if pixels flicker or shift by one</label>
+    <span class="check"><input type="checkbox" id="panelClkPhase"><label style="margin:0">Clock phase (uncheck first to fix an off-by-one shift)</label></span>
+    <div class="row" style="margin-top:6px">
+      <div><label>Driver chip</label>
+        <select id="panelDriverChip">
+          <option value="shift">Generic shift register (default)</option>
+          <option value="fm6126a">FM6126A</option>
+          <option value="fm6124">FM6124</option>
+          <option value="icn2038s">ICN2038S</option>
+          <option value="mbi5124">MBI5124</option>
+        </select>
+      </div>
+      <div><label>I2S clock (MHz)</label>
+        <select id="panelI2sSpeedMhz"><option value="8">8 (most stable)</option><option value="16">16</option><option value="20">20</option></select>
+      </div>
+      <div><label>Latch blanking</label><input id="panelLatchBlanking" type="number" min="1" max="4" /></div>
+    </div>
+    <small class="help">Start with: uncheck Clock phase. Still bad? Try driver = FM6126A. These apply after a restart. A 74HCT245 level shifter is the robust hardware fix.</small>
   </div>
 
   <div class="card">
@@ -241,6 +265,7 @@ async function loadSettings(){
   $('centerLat').value = s.tracking.centerLat;
   $('centerLon').value = s.tracking.centerLon;
   $('radiusKm').value = s.tracking.radiusKm;
+  $('autoLocateOnBoot').checked = !!s.tracking.autoLocateOnBoot;
   $('trackedFlights').value = (s.tracking.trackedFlights || []).join('\n');
 
   $('brightness').value = s.display.brightness;
@@ -275,6 +300,10 @@ async function loadSettings(){
   $('panelResX').value = s.hardware.panelResX;
   $('panelResY').value = s.hardware.panelResY;
   $('panelChain').value = s.hardware.panelChain;
+  $('panelClkPhase').checked = s.hardware.panelClkPhase !== false;
+  $('panelDriverChip').value = s.hardware.panelDriverChip || 'shift';
+  $('panelI2sSpeedMhz').value = s.hardware.panelI2sSpeedMhz || 8;
+  $('panelLatchBlanking').value = s.hardware.panelLatchBlanking || 1;
 
   toggleMode();
 }
@@ -289,6 +318,7 @@ function collect(){
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),
       radiusKm:parseFloat($('radiusKm').value),
+      autoLocateOnBoot:$('autoLocateOnBoot').checked,
       trackedFlights:lines($('trackedFlights').value)
     },
     display:{
@@ -310,7 +340,9 @@ function collect(){
       darkThreshold:+$('lightDarkThreshold').value, hysteresis:+$('lightHysteresis').value,
       dimInstead:$('lightSensorDimInstead').checked, dimBrightness:+$('lightDimBrightness').value
     },
-    hardware:{ panelResX:+$('panelResX').value, panelResY:+$('panelResY').value, panelChain:+$('panelChain').value }
+    hardware:{ panelResX:+$('panelResX').value, panelResY:+$('panelResY').value, panelChain:+$('panelChain').value,
+      panelClkPhase:$('panelClkPhase').checked, panelDriverChip:$('panelDriverChip').value,
+      panelI2sSpeedMhz:+$('panelI2sSpeedMhz').value, panelLatchBlanking:+$('panelLatchBlanking').value }
   };
 }
 
@@ -324,6 +356,20 @@ async function restart(){
   if(!confirm('Restart the device?')) return;
   await fetch('/api/restart',{method:'POST'});
   toast('Restarting…');
+}
+
+async function geolocate(){
+  $('geoNote').textContent='Locating…';
+  try{
+    const r = await (await fetch('/api/geolocate')).json();
+    if(r.ok){
+      $('centerLat').value = (+r.lat).toFixed(4);
+      $('centerLon').value = (+r.lon).toFixed(4);
+      $('geoNote').textContent = `≈ ${r.place||'found'} — review, then Save.`;
+    } else {
+      $('geoNote').textContent = 'Could not detect (try again).';
+    }
+  }catch(e){ $('geoNote').textContent='Detect failed.'; }
 }
 
 async function scanWifi(){

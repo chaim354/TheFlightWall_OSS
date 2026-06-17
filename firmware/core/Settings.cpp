@@ -33,6 +33,7 @@ void Settings::seedDefaults()
     centerLat = UserConfiguration::CENTER_LAT;
     centerLon = UserConfiguration::CENTER_LON;
     radiusKm = UserConfiguration::RADIUS_KM;
+    autoLocateOnBoot = false;
     trackedFlights.clear();
 
     brightness = UserConfiguration::DISPLAY_BRIGHTNESS;
@@ -58,6 +59,10 @@ void Settings::seedDefaults()
     panelResX = HardwareConfiguration::PANEL_RES_X;
     panelResY = HardwareConfiguration::PANEL_RES_Y;
     panelChain = HardwareConfiguration::PANEL_CHAIN;
+    panelClkPhase = true;
+    panelI2sSpeedMhz = 8;
+    panelLatchBlanking = 1;
+    panelDriverChip = "shift";
 }
 
 bool Settings::begin()
@@ -133,6 +138,7 @@ String Settings::toJson() const
     track["centerLat"] = centerLat;
     track["centerLon"] = centerLon;
     track["radiusKm"] = radiusKm;
+    track["autoLocateOnBoot"] = autoLocateOnBoot;
     JsonArray flights = track.createNestedArray("trackedFlights");
     for (const auto &id : trackedFlights)
         flights.add(id);
@@ -184,6 +190,10 @@ String Settings::toJson() const
     hw["panelResX"] = panelResX;
     hw["panelResY"] = panelResY;
     hw["panelChain"] = panelChain;
+    hw["panelClkPhase"] = panelClkPhase;
+    hw["panelI2sSpeedMhz"] = panelI2sSpeedMhz;
+    hw["panelLatchBlanking"] = panelLatchBlanking;
+    hw["panelDriverChip"] = panelDriverChip;
 
     String out;
     serializeJson(doc, out);
@@ -244,6 +254,8 @@ bool Settings::fromJson(const String &in)
             centerLon = track["centerLon"].as<double>();
         if (track.containsKey("radiusKm"))
             radiusKm = track["radiusKm"].as<double>();
+        if (track.containsKey("autoLocateOnBoot"))
+            autoLocateOnBoot = track["autoLocateOnBoot"].as<bool>();
         if (track.containsKey("trackedFlights"))
         {
             trackedFlights.clear();
@@ -359,6 +371,14 @@ bool Settings::fromJson(const String &in)
             panelResY = hw["panelResY"].as<uint16_t>();
         if (hw.containsKey("panelChain"))
             panelChain = hw["panelChain"].as<uint8_t>();
+        if (hw.containsKey("panelClkPhase"))
+            panelClkPhase = hw["panelClkPhase"].as<bool>();
+        if (hw.containsKey("panelI2sSpeedMhz"))
+            panelI2sSpeedMhz = hw["panelI2sSpeedMhz"].as<uint8_t>();
+        if (hw.containsKey("panelLatchBlanking"))
+            panelLatchBlanking = hw["panelLatchBlanking"].as<uint8_t>();
+        if (hw.containsKey("panelDriverChip"))
+            panelDriverChip = hw["panelDriverChip"].as<String>();
     }
 
     return true;

@@ -58,6 +58,14 @@ The data pins are the only compile-time hardware setting — edit them in [`firm
 
 `E` is only needed for 1/32-scan (64-row) panels; set it to `-1` for 32-row panels. Power the panel from the external **5V** supply with grounds tied to the ESP32.
 
+### Unstable display? (flicker / pixels shifted by one)
+Driving HUB75 directly at the ESP32's 3.3 V can be marginal. The web UI's **Hardware → Signal tuning** section exposes fixes (applied on restart):
+- **Clock phase** — turn it *off* first; this usually fixes an off-by-one pixel shift.
+- **Driver chip** — many 128×64 panels use **FM6126A**; selecting it fixes flicker/garbage if the panel doesn't init as a plain shift register.
+- **I2S clock** — drop to 8 MHz for the most stable signal.
+
+The robust hardware fix is a **fast push-pull level shifter (74HCT245 / 74AHCT245)** on the 13–14 logic lines. Note: a *bidirectional I2C* level shifter (BSS138 type) will **not** work for HUB75 — it's too slow and has too few channels.
+
 ![HUB75 Wiring Diagram](images/hub75-wiring.svg)
 
 > The legacy WS2812B single-data-line wiring diagram (no longer used by this firmware) is kept at [`images/wiring-diagram.png`](images/wiring-diagram.png) for reference.
@@ -132,7 +140,7 @@ Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <ads
 - **WiFi** — scan + select your network (changes apply after a restart).
 - **API keys** — OpenSky client id/secret and the FlightAware AeroAPI key.
 - **Tracking mode**:
-  - **Area** — show everything within a radius of a center point (your home/window).
+  - **Area** — show everything within a radius of a center point (your home/window). An **Auto-detect** button fills the center from IP geolocation (free, no key, approximate — review before saving), with an optional "auto-detect on every boot" toggle.
   - **Flights** — track a specific list of flights by flight number, callsign, or tail.
 - **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, and which **fields** appear on each card (airline+flight, route, aircraft, **altitude, speed, heading, vertical rate**).
 - **Filters** — altitude band, hide aircraft on the ground, and an airline allow-list.

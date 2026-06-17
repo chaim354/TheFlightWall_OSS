@@ -61,6 +61,35 @@ bool Hub75Display::initialize()
         (uint8_t)g_settings.panelChain,
         pins);
 
+    // Signal-integrity tuning (fixes flicker / off-by-one on many panels).
+    mxconfig.clkphase = g_settings.panelClkPhase;
+    mxconfig.latch_blanking = g_settings.panelLatchBlanking;
+    switch (g_settings.panelI2sSpeedMhz)
+    {
+    case 20:
+        mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
+        break;
+    case 15:
+    case 16:
+        mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M;
+        break;
+    default:
+        mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_8M;
+        break;
+    }
+    String drv = g_settings.panelDriverChip;
+    drv.toLowerCase();
+    if (drv == "fm6126a")
+        mxconfig.driver = HUB75_I2S_CFG::FM6126A;
+    else if (drv == "fm6124")
+        mxconfig.driver = HUB75_I2S_CFG::FM6124;
+    else if (drv == "icn2038s")
+        mxconfig.driver = HUB75_I2S_CFG::ICN2038S;
+    else if (drv == "mbi5124")
+        mxconfig.driver = HUB75_I2S_CFG::MBI5124;
+    else
+        mxconfig.driver = HUB75_I2S_CFG::SHIFTREG;
+
     _panel = new MatrixPanel_I2S_DMA(mxconfig);
     _panel->begin();
     _panel->setBrightness8(g_settings.brightness);

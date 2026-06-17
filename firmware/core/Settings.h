@@ -90,6 +90,7 @@ struct Settings
     double centerLat = 37.7749;
     double centerLon = -122.4194;
     double radiusKm = 10.0;
+    bool autoLocateOnBoot = false; // set center from IP geolocation each boot
     std::vector<String> trackedFlights; // idents / callsigns / tails for Flights mode
 
     // ---- Display ----
@@ -118,6 +119,12 @@ struct Settings
     uint16_t panelResX = 64; // pixels wide per panel module
     uint16_t panelResY = 64; // pixels high per panel module
     uint8_t panelChain = 2;  // panels chained -> matrix width = panelResX * panelChain
+
+    // HUB75 signal-integrity tuning (try these if pixels flicker / shift by one):
+    bool panelClkPhase = true;        // false often fixes an off-by-one pixel shift
+    uint8_t panelI2sSpeedMhz = 8;     // 8 / 16 / 20 — lower = more stable at 3.3V
+    uint8_t panelLatchBlanking = 1;   // raise to reduce ghosting (some panels dislike >1)
+    String panelDriverChip = "shift"; // shift | fm6124 | fm6126a | icn2038s | mbi5124
 
     // ---- Persistence / lifecycle ----
     bool begin();          // mount FS + load (or seed) settings
