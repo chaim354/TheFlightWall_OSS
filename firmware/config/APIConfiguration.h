@@ -35,10 +35,6 @@ namespace APIConfiguration
     static const char *AEROAPI_KEY = FW_AEROAPI_KEY;
     static constexpr const char *AEROAPI_BASE_URL = "https://aeroapi.flightaware.com/aeroapi";
 
-    // FlightWall CDN lookup
-    static constexpr const char *FLIGHTWALL_CDN_BASE_URL = "https://cdn.theflightwall.com";
-
     // TLS behavior for external services
     static const bool AEROAPI_INSECURE_TLS = true;
-    static const bool FLIGHTWALL_INSECURE_TLS = true;
 }
