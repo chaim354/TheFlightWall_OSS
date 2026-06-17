@@ -7,6 +7,7 @@
 #include "interfaces/BaseFlightFetcher.h"
 #include "models/StateVector.h"
 #include "models/FlightInfo.h"
+#include "utils/CallsignUtils.h"
 
 class FlightDataFetcher
 {
@@ -44,6 +45,6 @@ private:
                          std::vector<FlightInfo> &outFlights);
     size_t fetchFlightsMode(std::vector<FlightInfo> &outFlights);
 
-    void enrichNames(FlightInfo &info);
+    void applyLocalIdentity(const String &callsign, FlightInfo &info);
     bool passesAirlineAllowList(const FlightInfo &info);
 };

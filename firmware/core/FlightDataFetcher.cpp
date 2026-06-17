@@ -13,7 +13,6 @@ applied before the (relatively expensive) name enrichment where possible.
 #include "core/FlightDataFetcher.h"
 #include "core/Settings.h"
 #include "core/Filters.h"
-#include "adapters/FlightWallFetcher.h"
 
 #include <algorithm>
 
@@ -44,23 +43,28 @@ bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
                                     const String &icao24, FlightInfo &out)
 {
     const unsigned long now = millis();
-    const unsigned long ttl = (unsigned long)g_settings.enrichmentCacheSeconds * 1000UL;
+    const unsigned long posTtl = (unsigned long)g_settings.enrichmentCacheSeconds * 1000UL;
+    const unsigned long negTtl = 60UL * 1000UL; // retry failures after 60s, not the full TTL
 
     auto it = _cache.find(key);
-    if (it != _cache.end() && (now - it->second.ts) < ttl)
+    if (it != _cache.end())
     {
-        if (!it->second.valid)
-            return false; // cached miss; don't re-hammer the provider
-        out = it->second.info;
-        return true;
+        CacheAction act = cacheActionFor(true, it->second.valid, now - it->second.ts, posTtl, negTtl);
+        if (act == CacheAction::UseValid)
+        {
+            out = it->second.info;
+            return true;
+        }
+        if (act == CacheAction::SkipNegative)
+            return false; // recent failure; don't re-hammer the provider yet
+        // else: expired -> fall through and re-fetch
     }
 
     BaseFlightFetcher *f = activeFetcher();
     FlightInfo info;
     bool ok = f ? f->fetchFlightInfo(callsign, icao24, info) : false;
 
-    // Backup: if the free source (adsbdb) missed, fall back to AeroAPI when a key
-    // is configured. Also restores Flights-mode metrics (AeroAPI last_position).
+    // Backup: if the free source (adsbdb) missed AND a key is set, try AeroAPI.
     if (!ok &&
         g_settings.enrichmentSource == EnrichmentSource::Adsbdb &&
         g_settings.enrichmentFallbackToAeroApi &&
@@ -68,9 +72,6 @@ bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
     {
         ok = _aeroApi->fetchFlightInfo(callsign, icao24, info);
     }
-
-    if (ok)
-        enrichNames(info);
 
     if (_cache.size() > 64) // simple bound; aircraft churn over time
         _cache.clear();
@@ -81,31 +82,14 @@ bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
     return ok;
 }
 
-void FlightDataFetcher::enrichNames(FlightInfo &info)
+// Local, network-free identity from the broadcast callsign: airline ICAO prefix
+// -> operator_icao (drives the logo). Always applied so a flight still shows its
+// airline/logo even when route/aircraft network lookups fail.
+void FlightDataFetcher::applyLocalIdentity(const String &callsign, FlightInfo &info)
 {
-    FlightWallFetcher fw;
-    // Airline name: only hit the CDN if we don't already have one. adsbdb's route
-    // response already includes it, so this avoids a redundant HTTPS call per flight.
-    if (info.operator_icao.length() && info.airline_display_name_full.length() == 0)
-    {
-        String airlineFull;
-        if (fw.getAirlineName(info.operator_icao, airlineFull))
-        {
-            info.airline_display_name_full = airlineFull;
-        }
-    }
-    // Friendly aircraft short name from the ICAO type (e.g. A21N -> A321neo).
-    if (info.aircraft_code.length() && info.aircraft_display_name_short.length() == 0)
-    {
-        String aircraftShort, aircraftFull;
-        if (fw.getAircraftName(info.aircraft_code, aircraftShort, aircraftFull))
-        {
-            if (aircraftShort.length())
-            {
-                info.aircraft_display_name_short = aircraftShort;
-            }
-        }
-    }
+    char prefix[4];
+    if (parseAirlineIcao(callsign.c_str(), prefix) && info.operator_icao.length() == 0)
+        info.operator_icao = prefix;
 }
 
 bool FlightDataFetcher::passesAirlineAllowList(const FlightInfo &info)
@@ -168,14 +152,13 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // Cache key prefers the stable ICAO24, falling back to callsign.
         const String key = s.icao24.length() ? s.icao24 : s.callsign;
         FlightInfo info;
-        bool ok = getEnriched(key, s.callsign, s.icao24, info);
-        if (!ok)
-        {
-            if (g_settings.enrichmentSource == EnrichmentSource::Off)
-                info = FlightInfo(); // show a callsign-only card
-            else
-                continue; // provider selected but no data for this flight
-        }
+        getEnriched(key, s.callsign, s.icao24, info); // network route/aircraft (best-effort)
+
+        // Local, free identity (logo) is applied whether or not the network lookup
+        // succeeded — so airliners always show their logo/airline. In Area mode we
+        // always show the candidate flight (callsign + live metrics + logo); route
+        // and aircraft type fill in when the network provides them.
+        applyLocalIdentity(s.callsign, info);
 
         if (!passesAirlineAllowList(info))
             continue;
@@ -225,6 +208,8 @@ size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights)
             else
                 continue;
         }
+
+        applyLocalIdentity(ident, info);
 
         if (!passesAirlineAllowList(info))
             continue;
