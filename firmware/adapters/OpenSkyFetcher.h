@@ -7,7 +7,6 @@
 #include "utils/GeoUtils.h"
 #include "config/APIConfiguration.h"
 #include "config/UserConfiguration.h"
-#include "core/HttpJson.h"
 
 class OpenSkyFetcher : public BaseStateVectorFetcher
 {
@@ -22,10 +21,7 @@ public:
 
     bool ensureAuthenticated(bool forceRefresh = false);
 
-    void setHttp(HttpJson *http) { _http = http; }
-
 private:
-    HttpJson *_http = nullptr;
     String m_accessToken;
     unsigned long m_tokenExpiryMs = 0;
 

@@ -18,8 +18,6 @@ Run loop:
 #include <vector>
 #include <time.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
-#include <WiFiClientSecure.h>
 // Direct includes so PlatformIO's LDF adds these bundled framework libraries to
 // the build (it does not always follow them through project headers).
 #include <WebServer.h>
@@ -252,7 +250,6 @@ void setup()
     g_web.setDisplay(&g_display);
     g_web.begin(g_apMode, g_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
 
-    g_openSky.setHttp(&g_http);
     g_adsbdb.setHttp(&g_http);
     g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi, &g_adsbdb);
 }
