@@ -27,6 +27,7 @@ Run loop:
 #include <ArduinoJson.h>
 #include "core/Settings.h"
 #include "core/HttpJson.h"
+#include "esp_heap_caps.h"
 #include "adapters/OpenSkyFetcher.h"
 #include "adapters/AeroAPIFetcher.h"
 #include "adapters/AdsbdbFetcher.h"
@@ -172,8 +173,19 @@ static String flightsToJson(const std::vector<FlightInfo> &flights)
     return out;
 }
 
+// [heapdiag] free heap vs largest contiguous blocks. TLS needs a ~40KB-class 8BIT
+// block; if free is high but largest8 is low, the failure is fragmentation.
+static void logHeap(const char *tag)
+{
+    Serial.printf("[heapdiag] %s: free=%u largest8=%u largestDMA=%u\n", tag,
+                  (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+}
+
 static void doFetchAndRender()
 {
+    logHeap("cycle-start");
     std::vector<StateVector> states;
     std::vector<FlightInfo> flights;
     size_t enriched = g_fetcher->fetchFlights(states, flights);
@@ -252,6 +264,8 @@ void setup()
 
     g_adsbdb.setHttp(&g_http);
     g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi, &g_adsbdb);
+
+    logHeap("boot-done");
 }
 
 void loop()

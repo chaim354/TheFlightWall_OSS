@@ -14,6 +14,7 @@ Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
 #include <Adafruit_GFX.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <LittleFS.h>
+#include "esp_heap_caps.h"
 #include "config/HardwareConfiguration.h"
 #include "core/Settings.h"
 
@@ -90,12 +91,27 @@ bool Hub75Display::initialize()
     else
         mxconfig.driver = HUB75_I2S_CFG::SHIFTREG;
 
+    // [heapdiag] Measure how much the HUB75 DMA framebuffer reserves — prime
+    // suspect for the contiguous-internal-RAM shortage that breaks TLS handshakes.
+    size_t intBeforePanel = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t dmaBeforePanel = heap_caps_get_free_size(MALLOC_CAP_DMA);
     _panel = new MatrixPanel_I2S_DMA(mxconfig);
     _panel->begin();
+    size_t intAfterPanel = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t dmaAfterPanel = heap_caps_get_free_size(MALLOC_CAP_DMA);
+    Serial.printf("[heapdiag] HUB75 panel: internal used ~%u (free %u->%u), DMA used ~%u (free %u->%u), largestInternal=%u\n",
+                  (unsigned)(intBeforePanel - intAfterPanel), (unsigned)intBeforePanel, (unsigned)intAfterPanel,
+                  (unsigned)(dmaBeforePanel - dmaAfterPanel), (unsigned)dmaBeforePanel, (unsigned)dmaAfterPanel,
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     _panel->setBrightness8(g_settings.brightness);
     _panel->clearScreen();
 
+    size_t intBeforeCanvas = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     _canvas = new GFXcanvas16(_matrixWidth, _matrixHeight);
+    Serial.printf("[heapdiag] GFXcanvas16(%ux%u): internal used ~%u, largestInternal=%u\n",
+                  _matrixWidth, _matrixHeight,
+                  (unsigned)(intBeforeCanvas - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     _canvas->setTextWrap(false);
     _canvas->setTextSize(1);
 
