@@ -36,6 +36,7 @@ Run loop:
 #include "core/SerialConsole.h"
 #include "adapters/Hub75Display.h"
 #include "adapters/LightSensor.h"
+#include "adapters/GeoLocator.h"
 
 static OpenSkyFetcher g_openSky;
 static AeroAPIFetcher g_aeroApi;
@@ -219,6 +220,22 @@ void setup()
         }
         // NTP for brightness scheduling (UTC; offset applied locally).
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+        // Optionally seed the Area-mode center from IP geolocation.
+        if (g_settings.autoLocateOnBoot)
+        {
+            GeoLocator geo;
+            double lat = 0, lon = 0;
+            String place;
+            if (geo.locate(lat, lon, place))
+            {
+                g_settings.centerLat = lat;
+                g_settings.centerLon = lon;
+                g_settings.save();
+                Serial.printf("Auto-located: %.4f, %.4f (%s)\n", lat, lon, place.c_str());
+            }
+        }
+
         g_display.showLoading();
     }
     else

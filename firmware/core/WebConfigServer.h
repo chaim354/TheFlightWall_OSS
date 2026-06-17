@@ -68,6 +68,7 @@ private:
     void handleGetStatus();
     void handleGetFlights();
     void handleFramebuffer();
+    void handleGeolocate();
     void handleWifiScan();
     void handleRestart();
     void handleRoot();

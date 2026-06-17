@@ -3,6 +3,7 @@ Purpose: Implementation of the on-device configuration & control web server.
 */
 #include "core/WebConfigServer.h"
 #include "core/Settings.h"
+#include "adapters/GeoLocator.h"
 
 #include <LittleFS.h>
 #include <WiFi.h>
@@ -77,6 +78,8 @@ void WebConfigServer::registerRoutes()
                { handleGetFlights(); });
     _server.on("/api/framebuffer", HTTP_GET, [this]()
                { handleFramebuffer(); });
+    _server.on("/api/geolocate", HTTP_GET, [this]()
+               { handleGeolocate(); });
     _server.on("/api/wifiscan", HTTP_GET, [this]()
                { handleWifiScan(); });
     _server.on("/api/restart", HTTP_POST, [this]()
@@ -168,6 +171,28 @@ void WebConfigServer::handleFramebuffer()
     WiFiClient client = _server.client();
     client.write(hdr, sizeof(hdr));
     client.write((const uint8_t *)fb, pxBytes); // ESP32 is little-endian: bytes match RGB565 LE
+}
+
+void WebConfigServer::handleGeolocate()
+{
+    GeoLocator geo;
+    double lat = 0, lon = 0;
+    String place;
+    if (geo.locate(lat, lon, place))
+    {
+        DynamicJsonDocument doc(256);
+        doc["ok"] = true;
+        doc["lat"] = lat;
+        doc["lon"] = lon;
+        doc["place"] = place;
+        String out;
+        serializeJson(doc, out);
+        _server.send(200, "application/json", out);
+    }
+    else
+    {
+        _server.send(200, "application/json", "{\"ok\":false}");
+    }
 }
 
 void WebConfigServer::handleWifiScan()
