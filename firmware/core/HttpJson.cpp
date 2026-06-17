@@ -22,11 +22,15 @@ bool HttpJson::getJson(const String &url, JsonDocument &doc,
         Serial.printf("HttpJson: begin() failed  %s\n", url.c_str());
         return false;
     }
-    http.useHTTP10(true); // unchunked Content-Length body -> safe to stream-parse.
-                          // NOTE: useHTTP10(true) internally sets reuse=false, so the
-                          // setReuse(true) below MUST stay after this line.
-    http.setReuse(true);  // persistent _secure amortizes mbedTLS buffer allocation; actual
-                          // handshake reuse is best-effort (HTTP/1.0 servers often close)
+    // HTTP/1.1 keep-alive: reuse ONE TLS handshake across same-host calls within a
+    // fetch cycle. adsbdb and hexdb both return Content-Length (verified), so we do
+    // NOT need useHTTP10 here — and avoiding it is critical: a TLS handshake needs a
+    // scarce ~40KB contiguous heap block, and on a fragmented heap re-handshaking on
+    // every call fails with mbedTLS -32512. With keep-alive the persistent _secure
+    // connection is reused, so a cycle pays ~1 adsbdb handshake instead of one per call.
+    // (OpenSky's body IS chunked and needs useHTTP10 — but it uses its own HTTPClient,
+    // not HttpJson, so this only affects the adsbdb/hexdb enrichment path.)
+    http.setReuse(true);
     http.setTimeout(timeoutMs);
     http.addHeader("Accept", "application/json");
     if (bearerToken)
