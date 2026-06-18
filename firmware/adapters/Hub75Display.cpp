@@ -726,13 +726,21 @@ void Hub75Display::displayTextOnlyCard(const FlightInfo &f)
     }
 }
 
+void Hub75Display::markFlightsUpdated()
+{
+    // Bump the data version so the next displayFlights() recomposes even if the
+    // cycled index is unchanged (e.g. a fresh fetch at the same single flight).
+    ++_dataVersion;
+}
+
 void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
 {
     if (!_canvas)
         return;
 
-    _canvas->fillScreen(0);
-
+    // 1) Run the cycle-advance logic FIRST to decide which card we'd show now.
+    //    SIZE_MAX is the "empty list / loading screen" sentinel.
+    size_t indexToShow = SIZE_MAX;
     if (!flights.empty())
     {
         const unsigned long now = millis();
@@ -751,8 +759,27 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
             _currentFlightIndex = 0;
         }
 
-        const size_t index = _currentFlightIndex % flights.size();
-        displayFlightCard(flights[index]);
+        indexToShow = _currentFlightIndex % flights.size();
+    }
+
+    // 2) Dirty-check: skip the expensive recompose (string formatters + canvas
+    //    redraw + blit) when neither the displayed card index nor the data
+    //    version changed. A new fetch bumps _dataVersion via markFlightsUpdated();
+    //    a cycle advance changes indexToShow; the empty<->non-empty transition is
+    //    a change in indexToShow (SIZE_MAX vs a real index). The very first render
+    //    composes because _lastComposedVersion(0) != _dataVersion(1).
+    if (indexToShow == _lastComposedIndex && _dataVersion == _lastComposedVersion)
+        return;
+
+    _lastComposedIndex = indexToShow;
+    _lastComposedVersion = _dataVersion;
+
+    // 3) Compose the card (or loading screen for an empty list).
+    _canvas->fillScreen(0);
+
+    if (indexToShow != SIZE_MAX)
+    {
+        displayFlightCard(flights[indexToShow]);
     }
     else
     {

@@ -24,6 +24,12 @@ public:
     void displayMessage(const String &message);
     void showLoading();
 
+    // Call right after a fresh flight list is fetched/assigned. Bumps the data
+    // version so the next displayFlights() recomposes the canvas even if the
+    // cycled index hasn't changed. The 200ms re-render path does NOT call this,
+    // so it only recomposes when the cycle advances.
+    void markFlightsUpdated();
+
     void setBrightness(uint8_t brightness);
     const uint16_t *framebuffer(uint16_t &w, uint16_t &h) const override;
 
@@ -36,6 +42,14 @@ private:
 
     size_t _currentFlightIndex = 0;
     unsigned long _lastCycleMs = 0;
+
+    // Dirty-check gating so we only recompose the canvas when the displayed card
+    // actually changes (cycle advance or new data), not on every 200ms poll.
+    // _dataVersion starts at 1 and _lastComposedVersion at 0 so the first render
+    // after boot always composes. SIZE_MAX is the "empty list" sentinel index.
+    uint32_t _dataVersion = 1;
+    uint32_t _lastComposedVersion = 0;
+    size_t _lastComposedIndex = SIZE_MAX;
 
     // Single-entry logo cache (loaded from /logos/<ICAO>.rgb565 on LittleFS).
     String _logoIcao;

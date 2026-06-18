@@ -201,6 +201,9 @@ static void doFetchAndRender()
                            g_settings.mode == TrackingMode::Flights ? "flights mode" : "area mode");
 
     g_lastFlights = std::move(flights);
+    // A fetch always supplies fresh data: force a recompose even if the cycled
+    // index is unchanged. The 200ms re-render path deliberately does NOT do this.
+    g_display.markFlightsUpdated();
     g_display.displayFlights(g_lastFlights);
     g_lastRenderMs = millis();
     g_firstFetchDone = true;
