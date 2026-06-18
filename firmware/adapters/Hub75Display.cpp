@@ -343,10 +343,22 @@ uint16_t Hub75Display::accentColorFor(const String &code)
 
 void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h)
 {
-    // Helicopters show the generic rotorcraft icon; everything else uses the
-    // airline's ICAO logo tile.
-    const String logoKey = f.is_helicopter ? String("_HELI") : f.operator_icao;
-    if (loadLogoFor(logoKey) && _logoValid)
+    // Logo selection priority (first that loads wins):
+    //   1. helicopter -> generic rotorcraft icon (must NOT fall to _PRIVATE)
+    //   2. private     -> generic private-jet icon
+    //   3. operator's real/badge tile (if it has one)
+    //   4. cargo       -> generic cargo icon (only when no specific operator tile)
+    //   5. text/accent fallback (below)
+    bool haveLogo = false;
+    if (f.is_helicopter)
+        haveLogo = loadLogoFor("_HELI") && _logoValid;
+    else if (f.is_private)
+        haveLogo = loadLogoFor("_PRIVATE") && _logoValid;
+    if (!haveLogo && f.operator_icao.length())
+        haveLogo = loadLogoFor(f.operator_icao) && _logoValid;
+    if (!haveLogo && f.is_cargo)
+        haveLogo = loadLogoFor("_CARGO") && _logoValid;
+    if (haveLogo)
     {
         // Integer-scale the native tile to fill the box (1x for a 32px tile in a
         // 32px box, 2x for a 16px tile, etc.).
