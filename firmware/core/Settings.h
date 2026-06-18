@@ -54,6 +54,8 @@ struct AircraftFilters
     double minAltitudeFt = 0.0;       // Hide aircraft below this altitude (ft)
     double maxAltitudeFt = 60000.0;   // Hide aircraft above this altitude (ft)
     bool excludeOnGround = true;      // Hide aircraft reporting on_ground
+    bool showGeneralAviation = false; // Show GA/private (non-airline-format) flights in leftover slots
+    bool hideCargo = false;           // Hide known cargo/freight operators
     // If non-empty, only show flights whose operator (ICAO/IATA) is in this list.
     std::vector<String> airlineAllowList;
 };

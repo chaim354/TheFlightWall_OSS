@@ -166,6 +166,8 @@ String Settings::toJson() const
     filt["minAltitudeFt"] = filters.minAltitudeFt;
     filt["maxAltitudeFt"] = filters.maxAltitudeFt;
     filt["excludeOnGround"] = filters.excludeOnGround;
+    filt["showGeneralAviation"] = filters.showGeneralAviation;
+    filt["hideCargo"] = filters.hideCargo;
     JsonArray allow = filt.createNestedArray("airlineAllowList");
     for (const auto &a : filters.airlineAllowList)
         allow.add(a);
@@ -312,6 +314,10 @@ bool Settings::fromJson(const String &in)
             filters.maxAltitudeFt = filt["maxAltitudeFt"].as<double>();
         if (filt.containsKey("excludeOnGround"))
             filters.excludeOnGround = filt["excludeOnGround"].as<bool>();
+        if (filt.containsKey("showGeneralAviation"))
+            filters.showGeneralAviation = filt["showGeneralAviation"].as<bool>();
+        if (filt.containsKey("hideCargo"))
+            filters.hideCargo = filt["hideCargo"].as<bool>();
         if (filt.containsKey("airlineAllowList"))
         {
             filters.airlineAllowList.clear();

@@ -160,6 +160,8 @@ String WebConfigServer::buildFlightsJson() const
             o["origin"] = f.origin.code_icao;
             o["destination"] = f.destination.code_icao;
             o["helicopter"] = f.is_helicopter;
+            o["cargo"] = f.is_cargo;
+            o["private"] = f.is_private;
             if (f.has_metrics)
             {
                 if (!isnan(f.altitude_ft))

@@ -150,6 +150,8 @@
       <div><label>Max altitude (ft)</label><input id="maxAltitudeFt" type="number" /></div>
     </div>
     <span class="check" style="margin-top:10px"><input type="checkbox" id="excludeOnGround"><label style="margin:0">Hide aircraft on the ground</label></span>
+    <span class="check" style="margin-top:10px"><input type="checkbox" id="showGeneralAviation"><label style="margin:0">Show general aviation / private flights (fills leftover slots)</label></span>
+    <span class="check" style="margin-top:10px"><input type="checkbox" id="hideCargo"><label style="margin:0">Hide cargo / freight flights</label></span>
     <label>Airline allow-list (comma separated ICAO/IATA, blank = all)</label>
     <input id="airlineAllowList" type="text" placeholder="UAL, DAL, AAL" />
   </div>
@@ -287,6 +289,8 @@ async function loadSettings(){
   $('minAltitudeFt').value = s.filters.minAltitudeFt;
   $('maxAltitudeFt').value = s.filters.maxAltitudeFt;
   $('excludeOnGround').checked = !!s.filters.excludeOnGround;
+  $('showGeneralAviation').checked = !!s.filters.showGeneralAviation;
+  $('hideCargo').checked = !!s.filters.hideCargo;
   $('airlineAllowList').value = (s.filters.airlineAllowList || []).join(', ');
 
   $('schedEnabled').checked = !!s.schedule.enabled;
@@ -336,7 +340,9 @@ function collect(){
     layout:Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'].map(k=>[k,$(k).checked])),
     filters:{
       minAltitudeFt:+$('minAltitudeFt').value, maxAltitudeFt:+$('maxAltitudeFt').value,
-      excludeOnGround:$('excludeOnGround').checked, airlineAllowList:lines($('airlineAllowList').value)
+      excludeOnGround:$('excludeOnGround').checked,
+      showGeneralAviation:$('showGeneralAviation').checked, hideCargo:$('hideCargo').checked,
+      airlineAllowList:lines($('airlineAllowList').value)
     },
     schedule:{
       enabled:$('schedEnabled').checked, dayBrightness:+$('dayBrightness').value, nightBrightness:+$('nightBrightness').value,
@@ -418,7 +424,7 @@ async function loadStatus(){
     $('flights').innerHTML = f.map(x=>{
       const m=[]; if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
       if('headingDeg'in x)m.push('HDG'+x.headingDeg); if('verticalRateFpm'in x)m.push(x.verticalRateFpm+'fpm');
-      return `<div class="flight"><b>${x.ident||'?'}</b> ${x.helicopter?'🚁':''} <span>${x.airline||''}</span><br>
+      return `<div class="flight"><b>${x.ident||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${x.airline||''}</span><br>
         <span>${x.origin||'?'} → ${x.destination||'?'} · ${x.aircraft||''}</span>
         ${m.length?'<br><span>'+m.join(' · ')+'</span>':''}</div>`;
     }).join('') || '<small class="help">No flights currently displayed.</small>';

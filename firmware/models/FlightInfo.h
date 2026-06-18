@@ -36,6 +36,8 @@ struct FlightInfo
     double vertical_rate_fpm = NAN; // climb (+) / descent (-) in feet per minute
     bool on_ground = false;
     bool is_helicopter = false;     // from ADS-B emitter category (rotorcraft)
+    bool is_private = false;        // positive signal: no operator + registration-shaped callsign
+    bool is_cargo = false;          // operator_icao is a known freight operator
     double distance_km = NAN;       // distance from configured center (Area mode)
     double bearing_deg = NAN;       // bearing from configured center (Area mode)
 };

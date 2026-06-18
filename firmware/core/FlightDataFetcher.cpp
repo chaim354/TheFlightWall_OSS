@@ -13,6 +13,7 @@ applied before the (relatively expensive) name enrichment where possible.
 #include "core/FlightDataFetcher.h"
 #include "core/Settings.h"
 #include "core/Filters.h"
+#include "utils/FlightClassify.h"
 
 #include <algorithm>
 
@@ -144,10 +145,13 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
               { return a.distance_km < b.distance_km; });
 
     size_t enriched = 0;
-    for (const StateVector &s : candidates)
+
+    // Enrich + classify + filter a single candidate, pushing it if it survives.
+    // Called at most once per candidate (passes are disjoint by parseAirlineIcao).
+    auto consider = [&](const StateVector &s)
     {
         if (outFlights.size() >= g_settings.maxFlights)
-            break;
+            return;
 
         // Cache key prefers the stable ICAO24, falling back to callsign.
         const String key = s.icao24.length() ? s.icao24 : s.callsign;
@@ -160,8 +164,17 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // and aircraft type fill in when the network provides them.
         applyLocalIdentity(s.callsign, info);
 
+        // POSITIVE-signal classification. is_private requires BOTH no operator AND a
+        // registration-shaped callsign — an airliner always has operator_icao from
+        // its prefix, so it can never be is_private (this was the prior bug).
+        info.is_cargo = isCargoOperator(info.operator_icao.c_str());
+        info.is_private = (info.operator_icao.length() == 0) && isTailNumber(s.callsign.c_str());
+
+        if (g_settings.filters.hideCargo && info.is_cargo)
+            return; // optional cargo hide
+
         if (!passesAirlineAllowList(info))
-            continue;
+            return;
 
         // Metrics from the live ADS-B state vector.
         double altM = !isnan(s.geo_altitude) ? s.geo_altitude : s.baro_altitude;
@@ -185,6 +198,32 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
 
         outFlights.push_back(info);
         enriched++;
+    };
+
+    // PASS 1 — airliners (airline-format callsign). Always shown; they win the slots.
+    for (const StateVector &s : candidates)
+    {
+        if (outFlights.size() >= g_settings.maxFlights)
+            break;
+        char p[4];
+        if (!parseAirlineIcao(s.callsign.c_str(), p))
+            continue; // non-airline -> pass 2
+        consider(s);
+    }
+
+    // PASS 2 — GA / private (non-airline-format), ONLY if opted in. Last priority,
+    // leftover slots only. Never enriched when disabled (split decided locally).
+    if (g_settings.filters.showGeneralAviation)
+    {
+        for (const StateVector &s : candidates)
+        {
+            if (outFlights.size() >= g_settings.maxFlights)
+                break;
+            char p[4];
+            if (parseAirlineIcao(s.callsign.c_str(), p))
+                continue; // already handled in pass 1
+            consider(s);
+        }
     }
     return enriched;
 }
@@ -210,6 +249,11 @@ size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights)
         }
 
         applyLocalIdentity(ident, info);
+
+        // Positive-signal classification (same rule as Area mode) for consistent
+        // display tagging. This is a user-curated list, so no two-pass / hide here.
+        info.is_cargo = isCargoOperator(info.operator_icao.c_str());
+        info.is_private = (info.operator_icao.length() == 0) && isTailNumber(ident.c_str());
 
         if (!passesAirlineAllowList(info))
             continue;
