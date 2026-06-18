@@ -129,6 +129,16 @@
       <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
       <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
     </div>
+    <div class="row">
+      <div><label>When no flights</label>
+        <select id="noFlightsMode">
+          <option value="dots">Dots (...)</option>
+          <option value="clock">Clock</option>
+          <option value="funfact">Fun fact</option>
+          <option value="clockfact">Clock + fun fact</option>
+        </select>
+      </div>
+    </div>
     <label>Fields to show on each card</label>
     <div class="checks">
       <span class="check"><input type="checkbox" id="showAirlineFlight"><label style="margin:0">Airline + flight</label></span>
@@ -285,6 +295,7 @@ async function loadSettings(){
 
   for (const k of ['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'])
     $(k).checked = !!s.layout[k];
+  $('noFlightsMode').value = s.layout.noFlightsMode || 'dots';
 
   $('minAltitudeFt').value = s.filters.minAltitudeFt;
   $('maxAltitudeFt').value = s.filters.maxAltitudeFt;
@@ -337,7 +348,7 @@ function collect(){
       maxFlights:+$('maxFlights').value, cycleSeconds:+$('cycleSeconds').value,
       fetchIntervalSeconds:+$('fetchIntervalSeconds').value
     },
-    layout:Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'].map(k=>[k,$(k).checked])),
+    layout:Object.assign(Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'].map(k=>[k,$(k).checked])), {noFlightsMode:$('noFlightsMode').value}),
     filters:{
       minAltitudeFt:+$('minAltitudeFt').value, maxAltitudeFt:+$('maxAltitudeFt').value,
       excludeOnGround:$('excludeOnGround').checked,

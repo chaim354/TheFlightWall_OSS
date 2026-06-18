@@ -14,9 +14,15 @@ Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
 #include <Adafruit_GFX.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <LittleFS.h>
+#include <time.h>
 #include "esp_heap_caps.h"
 #include "config/HardwareConfiguration.h"
+#include "config/FunFacts.h"
 #include "core/Settings.h"
+
+// How long each fun fact stays up / how long the clock<->fact alternation holds,
+// in milliseconds. Reused as the clock recompose granularity is per-minute.
+static const unsigned long kNoFlightsRotateMs = 7000UL;
 
 static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
 {
@@ -780,13 +786,27 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
     //    a cycle advance changes indexToShow; the empty<->non-empty transition is
     //    a change in indexToShow (SIZE_MAX vs a real index). The very first render
     //    composes because _lastComposedVersion(0) != _dataVersion(1).
+    //    Exception: the empty-list (SIZE_MAX) animated modes (clock/funfact/
+    //    clockfact) must redraw when their frame key changes (current minute for
+    //    the clock, fact index for fun facts) even though indexToShow and
+    //    _dataVersion are unchanged — otherwise the gate would freeze them.
     if (indexToShow == _lastComposedIndex && _dataVersion == _lastComposedVersion)
-        return;
+    {
+        if (indexToShow != SIZE_MAX)
+            return;
+        const long key = noFlightsFrameKey();
+        if (key < 0 || key == _lastNoFlightsKey)
+            return; // static "dots" mode (key < 0) or same frame -> nothing to do
+        _lastNoFlightsKey = key;
+        // fall through to recompose the animated no-flights screen
+    }
 
     _lastComposedIndex = indexToShow;
     _lastComposedVersion = _dataVersion;
+    if (indexToShow == SIZE_MAX)
+        _lastNoFlightsKey = noFlightsFrameKey();
 
-    // 3) Compose the card (or loading screen for an empty list).
+    // 3) Compose the card (or no-flights screen for an empty list).
     _canvas->fillScreen(0);
 
     if (indexToShow != SIZE_MAX)
@@ -795,10 +815,233 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
     }
     else
     {
-        displayLoadingScreen();
-        return; // displayLoadingScreen presents already
+        displayNoFlights();
+        return; // displayNoFlights presents already
     }
 
+    present();
+}
+
+// Frame key for the active no-flights mode: a value that changes exactly when
+// the screen should redraw. Returns -1 for the static "dots" mode (never
+// animates). For clock: the current local minute-of-day (updates each minute).
+// For funfact: the rotating fact index. For clockfact: combine the alternation
+// phase with whichever sub-screen is active.
+long Hub75Display::noFlightsFrameKey()
+{
+    const String &mode = g_settings.layout.noFlightsMode;
+    const bool wantClock = (mode == "clock" || mode == "clockfact");
+    const bool wantFact = (mode == "funfact" || mode == "clockfact");
+    if (!wantClock && !wantFact)
+        return -1; // "dots" (or unknown) -> static
+
+    long key = 0;
+    if (mode == "clockfact")
+    {
+        // Alternate every rotate interval; key must move on each phase flip and
+        // on the underlying clock-minute / fact rotation.
+        const long phase = (long)((millis() / kNoFlightsRotateMs) % 2);
+        key = phase * 1000000L;
+    }
+
+    if (wantClock && (mode != "clockfact" || (millis() / kNoFlightsRotateMs) % 2 == 0))
+    {
+        time_t now = time(nullptr);
+        if (now < 100000) // not synced -> fall back to fact rotation / dots
+            key += (long)((millis() / kNoFlightsRotateMs) % (kFunFactCount ? kFunFactCount : 1));
+        else
+        {
+            long localSecs = (long)(now % 86400L) + (long)g_settings.schedule.timezoneOffsetMinutes * 60L;
+            localSecs %= 86400L;
+            if (localSecs < 0)
+                localSecs += 86400L;
+            key += localSecs / 60L; // minute of day
+        }
+    }
+    else // fun fact (funfact mode, or clockfact on the fact phase)
+    {
+        key += (long)((millis() / kNoFlightsRotateMs) % (kFunFactCount ? kFunFactCount : 1));
+    }
+    return key;
+}
+
+// Dispatch the no-flights screen by the configured mode. Composes onto the
+// canvas and presents. Falls back to the dots/loading screen for "dots",
+// unknown values, or when a clock is requested but time isn't synced yet.
+void Hub75Display::displayNoFlights()
+{
+    const String &mode = g_settings.layout.noFlightsMode;
+    bool showClock = false, showFact = false;
+    if (mode == "clock")
+        showClock = true;
+    else if (mode == "funfact")
+        showFact = true;
+    else if (mode == "clockfact")
+    {
+        if ((millis() / kNoFlightsRotateMs) % 2 == 0)
+            showClock = true;
+        else
+            showFact = true;
+    }
+
+    if (showClock)
+    {
+        if (time(nullptr) >= 100000)
+        {
+            drawClockScreen();
+            return;
+        }
+        // Clock requested but not synced: in clockfact, show a fact instead; in
+        // plain clock mode, fall back to the dots screen.
+        if (mode == "clockfact")
+            showFact = true;
+        else
+        {
+            displayLoadingScreen();
+            return;
+        }
+    }
+
+    if (showFact)
+    {
+        drawFunFactScreen();
+        return;
+    }
+
+    displayLoadingScreen(); // "dots" / unknown
+}
+
+// Large centered HH:MM with a "Mon Jun 17" date line below. Caller guarantees
+// time is synced.
+void Hub75Display::drawClockScreen()
+{
+    const uint16_t color = textColor();
+
+    time_t now = time(nullptr);
+    long localSecs = (long)(now % 86400L) + (long)g_settings.schedule.timezoneOffsetMinutes * 60L;
+    long dayShift = 0;
+    if (localSecs < 0)
+    {
+        localSecs += 86400L;
+        dayShift = -1;
+    }
+    else if (localSecs >= 86400L)
+    {
+        localSecs -= 86400L;
+        dayShift = 1;
+    }
+    const int hh = (int)(localSecs / 3600L);
+    const int mm = (int)((localSecs % 3600L) / 60L);
+
+    char timeBuf[6];
+    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", hh, mm);
+
+    // Date line via gmtime on the offset-adjusted, day-shifted timestamp.
+    time_t local = now + (time_t)g_settings.schedule.timezoneOffsetMinutes * 60 + dayShift * 86400;
+    struct tm tmv;
+    gmtime_r(&local, &tmv);
+    char dateBuf[16];
+    strftime(dateBuf, sizeof(dateBuf), "%a %b %d", &tmv);
+
+    // Pick a clock text size that fits the panel width (6x8 glyphs scale by size).
+    uint8_t ts = 2;
+    if (_matrixWidth >= 5 * 6 * 3 && _matrixHeight >= 8 * 3 + 10)
+        ts = 3;
+    if (_matrixWidth < 5 * 6 * 2)
+        ts = 1;
+    const int tW = 5 * 6 * ts; // "HH:MM" = 5 glyphs
+    const int tH = 8 * ts;
+
+    const bool haveDate = (_matrixHeight >= tH + 10);
+    const int blockH = haveDate ? (tH + 2 + 8) : tH;
+    int16_t ty = (_matrixHeight - blockH) / 2;
+    if (ty < 0)
+        ty = 0;
+    int16_t tx = (_matrixWidth - tW) / 2;
+    if (tx < 0)
+        tx = 0;
+
+    _canvas->setTextSize(ts);
+    drawTextLine(tx, ty, String(timeBuf), color);
+    _canvas->setTextSize(1);
+
+    if (haveDate)
+    {
+        const int dW = (int)strlen(dateBuf) * 6;
+        int16_t dx = (_matrixWidth - dW) / 2;
+        if (dx < 0)
+            dx = 0;
+        drawTextLine(dx, ty + tH + 2, String(dateBuf), color);
+    }
+    present();
+}
+
+// Rotating, word-wrapped fun fact, vertically centered. Wraps on spaces into
+// lines of at most maxCols columns; a single over-long word is truncated.
+void Hub75Display::drawFunFactScreen()
+{
+    if (kFunFactCount == 0)
+    {
+        displayLoadingScreen();
+        return;
+    }
+    const uint16_t color = textColor();
+    const size_t idx = (size_t)((millis() / kNoFlightsRotateMs) % kFunFactCount);
+    const String fact = String(kFunFacts[idx]);
+
+    const int charWidth = 6, charHeight = 8, lineSpacing = 2;
+    int maxCols = (_matrixWidth - 2) / charWidth;
+    if (maxCols < 1)
+        maxCols = 1;
+
+    // Greedy word-wrap into lines of <= maxCols columns.
+    std::vector<String> lines;
+    String cur;
+    int start = 0;
+    const int n = (int)fact.length();
+    while (start < n)
+    {
+        int sp = fact.indexOf(' ', start);
+        String word = (sp < 0) ? fact.substring(start) : fact.substring(start, sp);
+        if ((int)word.length() > maxCols) // single word too long: hard-truncate
+            word = truncateToColumns(word, maxCols);
+        if (cur.length() == 0)
+            cur = word;
+        else if ((int)(cur.length() + 1 + word.length()) <= maxCols)
+            cur += " " + word;
+        else
+        {
+            lines.push_back(cur);
+            cur = word;
+        }
+        if (sp < 0)
+            break;
+        start = sp + 1;
+    }
+    if (cur.length())
+        lines.push_back(cur);
+
+    // Clamp to what fits vertically.
+    const int perLine = charHeight + lineSpacing;
+    int maxLines = (_matrixHeight + lineSpacing) / perLine;
+    if (maxLines < 1)
+        maxLines = 1;
+    if ((int)lines.size() > maxLines)
+        lines.resize(maxLines);
+
+    const int count = (int)lines.size();
+    const int totalH = count * charHeight + (count - 1) * lineSpacing;
+    int16_t y = (_matrixHeight - totalH) / 2;
+    if (y < 0)
+        y = 0;
+    for (const String &ln : lines)
+    {
+        int16_t x = (_matrixWidth - (int)ln.length() * charWidth) / 2;
+        if (x < 0)
+            x = 0;
+        drawTextLine(x, y, ln, color);
+        y += perLine;
+    }
     present();
 }
 

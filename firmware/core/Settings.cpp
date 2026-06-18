@@ -161,6 +161,7 @@ String Settings::toJson() const
     lay["showHeading"] = layout.showHeading;
     lay["showVerticalRate"] = layout.showVerticalRate;
     lay["flightNumberOverVr"] = layout.flightNumberOverVr;
+    lay["noFlightsMode"] = layout.noFlightsMode;
 
     JsonObject filt = doc.createNestedObject("filters");
     filt["minAltitudeFt"] = filters.minAltitudeFt;
@@ -303,6 +304,8 @@ bool Settings::fromJson(const String &in)
         layout.showHeading = lay["showHeading"] | layout.showHeading;
         layout.showVerticalRate = lay["showVerticalRate"] | layout.showVerticalRate;
         layout.flightNumberOverVr = lay["flightNumberOverVr"] | layout.flightNumberOverVr;
+        if (lay.containsKey("noFlightsMode"))
+            layout.noFlightsMode = lay["noFlightsMode"].as<String>();
     }
 
     if (doc.containsKey("filters"))

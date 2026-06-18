@@ -47,6 +47,9 @@ struct DisplayLayout
     bool showHeading = true;       // "HDG 094"
     bool showVerticalRate = true;  // "+1200fpm"
     bool flightNumberOverVr = false; // show the flight number in the vertical-rate slot
+    // What to show when there are zero flights:
+    //   "dots" (default), "clock", "funfact", "clockfact"
+    String noFlightsMode = "dots";
 };
 
 struct AircraftFilters

@@ -51,6 +51,12 @@ private:
     uint32_t _lastComposedVersion = 0;
     size_t _lastComposedIndex = SIZE_MAX;
 
+    // For the animated no-flights modes (clock/funfact/clockfact), the displayed
+    // index stays SIZE_MAX so the dirty-check above would never recompose. We
+    // track a per-mode "frame key" (current minute for the clock, fact index for
+    // fun facts) and force a recompose when it changes so the screen ticks.
+    long _lastNoFlightsKey = -1;
+
     // Single-entry logo cache (loaded from /logos/<ICAO>.rgb565 on LittleFS).
     String _logoIcao;
     uint16_t *_logoPixels = nullptr;
@@ -69,6 +75,10 @@ private:
     void displayStackedCard(const FlightInfo &f);    // square/tall panels: logo top, text below
     void displayTextOnlyCard(const FlightInfo &f);   // very short panels: bordered text
     void displayLoadingScreen();
+    void displayNoFlights();                                 // dispatches by g_settings.layout.noFlightsMode
+    void drawClockScreen();                                  // large HH:MM + date line
+    void drawFunFactScreen();                                // rotating word-wrapped fun fact
+    long noFlightsFrameKey();                                // recompose key for the active animated mode
     uint16_t textColor();
 
     bool loadLogoFor(const String &icao);
