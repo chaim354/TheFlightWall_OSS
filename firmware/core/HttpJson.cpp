@@ -43,8 +43,10 @@ bool HttpJson::getJson(const String &url, JsonDocument &doc,
     if (code != 200)
     {
         if (code != 404) // 404 = "not in this DB" — expected, not an error
-            Serial.printf("HttpJson: GET %d (largestFreeBlock=%u)  %s\n", code,
-                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+            // INTERNAL (not 8BIT): on the S3, 8BIT includes PSRAM and would hide the
+            // internal-RAM starvation that actually fails a TLS handshake.
+            Serial.printf("HttpJson: GET %d (largestInternal=%u)  %s\n", code,
+                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                           url.c_str());
         http.end();
         return false;

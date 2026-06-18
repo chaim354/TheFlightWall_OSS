@@ -20,18 +20,32 @@ features. Enabling PSRAM needs only the board config below; **no IDF rebuild.**
 
 ## Checklist
 
-1. **Wire the HUB75 panel** to S3 GPIOs (see pin map). Update
-   `firmware/config/HardwareConfiguration.h`.
-2. **Confirm PSRAM** at boot: add `Serial.printf("PSRAM: %u\n", ESP.getPsramSize());`
-   — expect ~8 MB. The existing `[heapdiag]` lines will then show `largest8`
-   stop being the bottleneck.
-3. **Restore full color depth**: the S3 env intentionally omits
-   `-D PIXEL_COLOR_DEPTH_BITS=6`, so it builds at 8-bit. Nothing to do.
-4. **Flash**: `pio run -e esp32s3 -t upload` then `pio run -e esp32s3 -t uploadfs`.
-5. **Re-tune signal integrity** for the S3's LCD_CAM HUB75 backend (clkphase,
-   latch_blanking, i2sspeed) — usually *better* than the original I2S path.
-6. Verify enrichment is rock-solid (no `GET -1`) and remove the `[heapdiag]`
-   instrumentation once confirmed.
+1. **HUB75 pins** are already in `firmware/config/HardwareConfiguration.h` behind a
+   `#if defined(CONFIG_IDF_TARGET_ESP32S3)` guard (the table below). **Verify they
+   match your actual wiring** before powering the panel.
+2. **Confirm PSRAM** at boot: `Serial.printf("PSRAM: %u\n", ESP.getPsramSize());` —
+   expect ~8 MB. The `[heapdiag]` lines now report **internal** RAM (`largestInternal`,
+   `psramFree`), so you'll see internal headroom *rise* once TLS spills to PSRAM. If
+   `getPsramSize()` is 0, `memory_type` is wrong → boot loop territory.
+3. **Restore full color depth**: the S3 env omits `-D PIXEL_COLOR_DEPTH_BITS=6`, so it
+   builds at 8-bit automatically. Nothing to do.
+4. **Set the panel clock for S3**: on the LCD_CAM backend, `panelI2sSpeedMhz` is
+   bucketed (≤10→10 MHz, <20→16 MHz, else ~22 MHz). The persisted default of **8**
+   lands in the *slowest* 10 MHz bucket → flicker on a 64-row panel. Set
+   **15 or 16** in the web UI (or re-seed it) after first boot.
+5. **Flash**: `pio run -e esp32s3 -t upload` then `pio run -e esp32s3 -t uploadfs`,
+   then re-enter WiFi/API creds via the `FlightWall-Setup` AP (the FS wipe is expected;
+   see settings→NVS note below to stop that for good). Ensure `config/Secrets.h` exists.
+6. **Re-tune signal integrity** for the LCD_CAM backend (clkphase, latch_blanking,
+   panel clock) — usually *better* than the original I2S path. Keep `double_buff` on.
+7. Verify enrichment is rock-solid (no `GET -1`), confirm `largestInternal` grew, then
+   remove the `[heapdiag]` instrumentation.
+
+**Config already corrected in `[env:esp32s3]`** (from the migration audit): custom
+`partitions_16MB.csv` (not the wasteful dual-6 MB `default_16MB`), `board_upload.maximum_size
+= 16777216` (the stock `esp32-s3-devkitc-1` profile is the N8/8 MB variant), `qio_opi`
+PSRAM, and a note to use **arduino-esp32 3.x** (pioarduino fork if your `espressif32`
+platform is older) — the S3 LCD_CAM + octal PSRAM paths need it.
 
 ## HUB75 pin remap (recommended starting map)
 
@@ -71,9 +85,12 @@ A safe map using only free pins (adjust to your wiring):
 - **Logo tiles cached in PSRAM** — preload the `.rgb565` tiles into a PSRAM map
   at boot instead of reading LittleFS on every render (fixes the per-frame
   `littlefs/logos/...` read + the missing-tile log spam).
-- **Framebuffer in PSRAM** — the S3 HUB75 backend can place the DMA framebuffer
-  in PSRAM for large panels; for 128×64 it's optional (internal is fine) but
-  frees ~64 KB internal if you want it.
+- **Framebuffer stays INTERNAL — do NOT move it to PSRAM.** The S3 backend *can*
+  put the DMA framebuffer in PSRAM, but PSRAM caps the pixel clock to ~10–13 MHz
+  (vs 20 MHz internal) → visible flicker, and it also overrides `panelI2sSpeedMhz`.
+  For 128×64 the framebuffer fits internal comfortably; spend PSRAM on TLS/JSON/
+  caches instead. (The library author calls the PSRAM-framebuffer path pointless
+  for anything but very long chains.)
 - **Bigger LittleFS** — swap `default_16MB.csv` for an FS-heavy custom partition
   table so all airline logos + web assets fit with room to spare (the 4 MB part
   on the plain ESP32 forced `huge_app.csv`).

@@ -173,14 +173,16 @@ static String flightsToJson(const std::vector<FlightInfo> &flights)
     return out;
 }
 
-// [heapdiag] free heap vs largest contiguous blocks. TLS needs a ~40KB-class 8BIT
-// block; if free is high but largest8 is low, the failure is fragmentation.
+// [heapdiag] INTERNAL-RAM focused. On the S3, MALLOC_CAP_8BIT / getFreeHeap() include
+// PSRAM and would hide internal starvation; INTERNAL is what TLS + DMA actually
+// contend for. psramFree is 0 on the plain ESP32 (no PSRAM).
 static void logHeap(const char *tag)
 {
-    Serial.printf("[heapdiag] %s: free=%u largest8=%u largestDMA=%u\n", tag,
-                  (unsigned)ESP.getFreeHeap(),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    Serial.printf("[heapdiag] %s: internalFree=%u largestInternal=%u largestDMA=%u psramFree=%u\n", tag,
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
 static void doFetchAndRender()
