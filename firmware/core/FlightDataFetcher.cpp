@@ -46,13 +46,13 @@ bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
     const unsigned long posTtl = (unsigned long)g_settings.enrichmentCacheSeconds * 1000UL;
     const unsigned long negTtl = 60UL * 1000UL; // retry failures after 60s, not the full TTL
 
-    auto it = _cache.find(key);
-    if (it != _cache.end())
+    CacheEntry entry;
+    if (_cache.get(key, entry))
     {
-        CacheAction act = cacheActionFor(true, it->second.valid, now - it->second.ts, posTtl, negTtl);
+        CacheAction act = cacheActionFor(true, entry.valid, now - entry.ts, posTtl, negTtl);
         if (act == CacheAction::UseValid)
         {
-            out = it->second.info;
+            out = entry.info;
             return true;
         }
         if (act == CacheAction::SkipNegative)
@@ -73,9 +73,9 @@ bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
         ok = _aeroApi->fetchFlightInfo(callsign, icao24, info);
     }
 
-    if (_cache.size() > 64) // simple bound; aircraft churn over time
-        _cache.clear();
-    _cache[key] = CacheEntry{info, ok, now};
+    // Bounded LRU (capacity intrinsic): inserts evict the least-recently-used
+    // entry instead of clearing the whole cache at a size cliff.
+    _cache.put(key, CacheEntry{info, ok, now});
 
     if (ok)
         out = info;

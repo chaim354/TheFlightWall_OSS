@@ -2,12 +2,12 @@
 
 #include <Arduino.h>
 #include <vector>
-#include <map>
 #include "interfaces/BaseStateVectorFetcher.h"
 #include "interfaces/BaseFlightFetcher.h"
 #include "models/StateVector.h"
 #include "models/FlightInfo.h"
 #include "utils/CallsignUtils.h"
+#include "utils/LruCache.h"
 
 class FlightDataFetcher
 {
@@ -35,7 +35,7 @@ private:
         bool valid;
         unsigned long ts;
     };
-    std::map<String, CacheEntry> _cache;
+    LruCache<String, CacheEntry> _cache{64};
 
     BaseFlightFetcher *activeFetcher();
     bool getEnriched(const String &key, const String &callsign,
