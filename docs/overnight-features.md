@@ -1,5 +1,14 @@
 # Overnight feature work — design decisions (for review)
 
+## STATUS: all 6 implemented, reviewed, build + host-tests green (not device-verified)
+Commits: `84082d5` classify utils · `e7681ed` two-pass private/cargo · `8158866` logo
+priority · `1e67437` 19 cargo badges · `9385296` no-flights screen+fun facts · `1a40863`
+splash. esp32dev + esp32s3 compile; test_parsers/test_classify/test_lru ALL PASS.
+**Deploy needs BOTH `-t upload` (firmware) AND `-t uploadfs`** (index.html settings +
+the 19 new cargo logo tiles live in LittleFS). See morning brief in chat.
+
+
+
 Autonomous session against the overnight chore list. Everything is **opt-in and
 reversible** (new behavior defaults OFF or matches current behavior), compile- and
 host-test-verified only — **nothing was run on the device** (it's mid-migration).
