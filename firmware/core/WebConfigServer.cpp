@@ -145,9 +145,42 @@ void WebConfigServer::handleGetStatus()
     _server.send(200, "application/json", out);
 }
 
+String WebConfigServer::buildFlightsJson() const
+{
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    if (_flights)
+    {
+        for (const auto &f : *_flights)
+        {
+            JsonObject o = arr.createNestedObject();
+            o["ident"] = f.ident.length() ? f.ident : f.ident_icao;
+            o["airline"] = f.airline_display_name_full;
+            o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+            o["origin"] = f.origin.code_icao;
+            o["destination"] = f.destination.code_icao;
+            o["helicopter"] = f.is_helicopter;
+            if (f.has_metrics)
+            {
+                if (!isnan(f.altitude_ft))
+                    o["altitudeFt"] = (long)f.altitude_ft;
+                if (!isnan(f.groundspeed_kt))
+                    o["speedKt"] = (long)f.groundspeed_kt;
+                if (!isnan(f.heading_deg))
+                    o["headingDeg"] = (long)f.heading_deg;
+                if (!isnan(f.vertical_rate_fpm))
+                    o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
+            }
+        }
+    }
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
 void WebConfigServer::handleGetFlights()
 {
-    _server.send(200, "application/json", _flightsJson);
+    _server.send(200, "application/json", buildFlightsJson());
 }
 
 void WebConfigServer::handleFramebuffer()

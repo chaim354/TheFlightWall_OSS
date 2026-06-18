@@ -144,36 +144,6 @@ static void applyBrightness()
     }
 }
 
-static String flightsToJson(const std::vector<FlightInfo> &flights)
-{
-    JsonDocument doc;
-    JsonArray arr = doc.to<JsonArray>();
-    for (const auto &f : flights)
-    {
-        JsonObject o = arr.createNestedObject();
-        o["ident"] = f.ident.length() ? f.ident : f.ident_icao;
-        o["airline"] = f.airline_display_name_full;
-        o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
-        o["origin"] = f.origin.code_icao;
-        o["destination"] = f.destination.code_icao;
-        o["helicopter"] = f.is_helicopter;
-        if (f.has_metrics)
-        {
-            if (!isnan(f.altitude_ft))
-                o["altitudeFt"] = (long)f.altitude_ft;
-            if (!isnan(f.groundspeed_kt))
-                o["speedKt"] = (long)f.groundspeed_kt;
-            if (!isnan(f.heading_deg))
-                o["headingDeg"] = (long)f.heading_deg;
-            if (!isnan(f.vertical_rate_fpm))
-                o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
-        }
-    }
-    String out;
-    serializeJson(doc, out);
-    return out;
-}
-
 // [heapdiag] INTERNAL-RAM focused. On the S3, MALLOC_CAP_8BIT / getFreeHeap() include
 // PSRAM and would hide internal starvation; INTERNAL is what TLS + DMA actually
 // contend for. psramFree is 0 on the plain ESP32 (no PSRAM).
@@ -196,7 +166,6 @@ static void doFetchAndRender()
     Serial.print("Enriched flights: ");
     Serial.println((int)enriched);
 
-    g_web.setFlightsJson(flightsToJson(flights));
     g_web.setLastFetchInfo((int)flights.size(),
                            g_settings.mode == TrackingMode::Flights ? "flights mode" : "area mode");
 
@@ -266,6 +235,10 @@ void setup()
     }
 
     g_web.setDisplay(&g_display);
+    // Point the web server at the long-lived global flights vector. Its address
+    // is fixed (global), so it stays valid across the std::move in doFetchAndRender.
+    // /api/flights serializes from this on demand instead of every fetch cycle.
+    g_web.setFlights(&g_lastFlights);
     g_web.begin(g_apMode, g_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
 
     g_adsbdb.setHttp(&g_http);
