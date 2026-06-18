@@ -22,6 +22,7 @@ public:
     void clear() override;
     void displayFlights(const std::vector<FlightInfo> &flights) override;
     void displayMessage(const String &message);
+    void displaySplash(); // branded boot screen: wordmark + plane glyph + tagline
     void showLoading();
 
     // Call right after a fresh flight list is fetched/assigned. Bumps the data

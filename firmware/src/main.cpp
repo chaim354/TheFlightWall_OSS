@@ -199,7 +199,8 @@ void setup()
     g_display.initialize();
     g_appliedBrightness = g_settings.brightness;
     g_light.begin();
-    g_display.displayMessage(String("FlightWall"));
+    g_display.displaySplash();
+    delay(1500); // hold the branded splash briefly before WiFi status takes over
 
     bool connected = connectWifiSta();
     if (connected)

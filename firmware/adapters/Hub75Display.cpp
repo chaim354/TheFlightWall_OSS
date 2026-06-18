@@ -1067,6 +1067,102 @@ void Hub75Display::displayLoadingScreen()
     present();
 }
 
+// Branded boot splash: a small plane glyph above a centered "FlightWall"
+// wordmark, with a "live flight tracker" tagline when there's vertical room.
+// Everything is laid out from _matrixWidth/_matrixHeight and clamped, so it is
+// safe on 64x32 / 128x32 / 64x64 / 128x64 (and degrades gracefully on anything
+// smaller). When space is tight we drop the tagline first, then the glyph.
+void Hub75Display::displaySplash()
+{
+    if (!_canvas)
+        return;
+
+    _canvas->fillScreen(0);
+
+    const uint16_t color = textColor();
+    const uint16_t accent = rgb565(90, 130, 200); // dimmer steel-blue for the glyph
+
+    const int charW = 6, charH = 8; // 6x8 GFX font, unscaled
+    const String wordmark = "FlightWall";
+    const String tagline = "live flight tracker";
+
+    // Pick the largest wordmark text size that fits the panel width, capped at 2.
+    // Fall back to size 1 on narrow panels (e.g. 64-wide can't fit 10 glyphs at 2x).
+    uint8_t ts = 1;
+    if (_matrixWidth >= (int)wordmark.length() * charW * 2)
+        ts = 2;
+    const int wmW = (int)wordmark.length() * charW * ts;
+    const int wmH = charH * ts;
+
+    // Glyph and tagline are optional; include them only if the combined block fits
+    // vertically. Glyph ~13px tall incl. spacing; tagline 8px + 2px gap.
+    const int glyphH = 8, glyphGap = 3;   // vertical room a glyph adds above wordmark
+    const int tagW = (int)tagline.length() * charW;
+    const bool tagFits = (tagW <= _matrixWidth);
+
+    // Decide what to include, dropping tagline then glyph until the block fits.
+    bool showTag = tagFits;
+    bool showGlyph = true;
+    auto blockHeight = [&]() {
+        int h = wmH;
+        if (showGlyph)
+            h += glyphH + glyphGap;
+        if (showTag)
+            h += charH + 2;
+        return h;
+    };
+    if (blockHeight() > _matrixHeight)
+        showTag = false;
+    if (blockHeight() > _matrixHeight)
+        showGlyph = false;
+
+    int16_t y = (int16_t)((_matrixHeight - blockHeight()) / 2);
+    if (y < 0)
+        y = 0;
+
+    // 1) Plane glyph (top-view silhouette) drawn from primitives, centered.
+    if (showGlyph)
+    {
+        const int gw = 14, gh = glyphH;            // glyph bounding box
+        int16_t gx = (int16_t)((_matrixWidth - gw) / 2);
+        if (gx < 0)
+            gx = 0;
+        const int16_t cy = (int16_t)(y + gh / 2); // fuselage centerline
+        // Fuselage (nose at right): a horizontal body with a pointed nose.
+        _canvas->fillRect(gx + 2, cy - 1, 9, 2, accent);
+        _canvas->fillTriangle(gx + 11, cy - 1, gx + 11, cy + 1, gx + 13, cy, accent);
+        // Main wings (swept back) as two triangles meeting at the fuselage.
+        _canvas->fillTriangle(gx + 6, cy, gx + 2, cy - 4, gx + 8, cy, accent);
+        _canvas->fillTriangle(gx + 6, cy, gx + 2, cy + 4, gx + 8, cy, accent);
+        // Tailplane (small fins near the tail at the left).
+        _canvas->fillTriangle(gx + 3, cy, gx + 1, cy - 2, gx + 4, cy, accent);
+        _canvas->fillTriangle(gx + 3, cy, gx + 1, cy + 2, gx + 4, cy, accent);
+        y += gh + glyphGap;
+    }
+
+    // 2) Wordmark, horizontally centered.
+    {
+        int16_t wx = (int16_t)((_matrixWidth - wmW) / 2);
+        if (wx < 0)
+            wx = 0;
+        _canvas->setTextSize(ts);
+        drawTextLine(wx, y, wordmark, color);
+        _canvas->setTextSize(1);
+        y += wmH;
+    }
+
+    // 3) Tagline (dimmer), horizontally centered, if it still fits.
+    if (showTag)
+    {
+        int16_t txx = (int16_t)((_matrixWidth - tagW) / 2);
+        if (txx < 0)
+            txx = 0;
+        drawTextLine(txx, y + 2, tagline, accent);
+    }
+
+    present();
+}
+
 void Hub75Display::displayMessage(const String &message)
 {
     if (!_canvas)
