@@ -1,11 +1,15 @@
 # 16MB layout for ESP32-S3 N16R8. Frugal but generous: 2x 3MB app slots (binary is
-# ~1.2MB, leaving >2x headroom + OTA capability) and ~9.9MB LittleFS for the logo
+# ~1.2MB, leaving >2x headroom + OTA capability) and ~9.9MB filesystem for the logo
 # library + web assets. nvs is kept separate so it survives `uploadfs` (settings
 # should move to Preferences/NVS — see docs/s3-migration.md).
+# NOTE: the FS partition uses subtype `spiffs` (0x82) and label `spiffs` — that is
+# the standard for LittleFS too (gen_esp32part.py has no `littlefs` subtype, and
+# LittleFS.begin() looks for the `spiffs` label by default). `board_build.filesystem
+# = littlefs` is what formats/mounts it as LittleFS.
 # Name,     Type, SubType,  Offset,    Size,      Flags
 nvs,        data, nvs,      0x9000,    0x5000,
 otadata,    data, ota,      0xe000,    0x2000,
 app0,       app,  ota_0,    0x10000,   0x300000,
 app1,       app,  ota_1,    0x310000,  0x300000,
-littlefs,   data, littlefs, 0x610000,  0x9E0000,
+spiffs,     data, spiffs,   0x610000,  0x9E0000,
 coredump,   data, coredump, 0xFF0000,  0x10000,
