@@ -100,8 +100,8 @@ struct Settings
     uint8_t textColorG = 255;
     uint8_t textColorB = 255;
     uint8_t maxFlights = 5;        // up to N aircraft kept/cycled
-    uint32_t cycleSeconds = 5;     // seconds per flight when cycling
-    uint32_t fetchIntervalSeconds = 10;
+    uint32_t cycleSeconds = 3;     // seconds per flight when cycling
+    uint32_t fetchIntervalSeconds = 30;
 
     DisplayLayout layout;
     AircraftFilters filters;
