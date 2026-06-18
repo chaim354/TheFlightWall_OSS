@@ -17,6 +17,7 @@ REST API:
 #pragma once
 
 #include <Arduino.h>
+#include <utility>
 #include <WebServer.h>
 #include <DNSServer.h>
 #include "interfaces/BaseDisplay.h"
@@ -30,7 +31,7 @@ public:
     void handle(); // call frequently from loop()
 
     // Pushed in from the main loop so the UI can show what's on the wall.
-    void setFlightsJson(const String &json) { _flightsJson = json; }
+    void setFlightsJson(String json) { _flightsJson = std::move(json); }
     void setLastFetchInfo(int flightCount, const String &note);
 
     // Display whose framebuffer is served as a live preview (/api/framebuffer).

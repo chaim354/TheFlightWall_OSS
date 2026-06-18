@@ -16,6 +16,7 @@ Run loop:
 - React to settings changes / restart requests from the web UI.
 */
 #include <vector>
+#include <utility>
 #include <time.h>
 #include <WiFi.h>
 // Direct includes so PlatformIO's LDF adds these bundled framework libraries to
@@ -199,7 +200,7 @@ static void doFetchAndRender()
     g_web.setLastFetchInfo((int)flights.size(),
                            g_settings.mode == TrackingMode::Flights ? "flights mode" : "area mode");
 
-    g_lastFlights = flights;
+    g_lastFlights = std::move(flights);
     g_display.displayFlights(g_lastFlights);
     g_lastRenderMs = millis();
     g_firstFetchDone = true;
