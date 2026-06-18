@@ -188,6 +188,11 @@ void setup()
     Serial.begin(115200);
     delay(200);
 
+    // [boot] Confirm PSRAM initialized: 0/false on the plain ESP32; ~8MB on the S3
+    // N16R8. A 0 here on the S3 means memory_type is wrong -> the TLS-in-PSRAM fix
+    // won't apply (and the chip may boot-loop). This is the migration's go/no-go check.
+    Serial.printf("[boot] PSRAM: size=%u found=%d\n", (unsigned)ESP.getPsramSize(), (int)psramFound());
+
     g_settings.begin();
     g_console.begin();
 
