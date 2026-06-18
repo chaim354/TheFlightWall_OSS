@@ -20,42 +20,14 @@ static String safeGetString(JsonVariant v, const char *key)
 bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, const String &icao24, FlightInfo &outInfo)
 {
     (void)icao24; // AeroAPI looks up by ident; icao24 unused
-    if (g_settings.aeroApiKey.length() == 0)
-    {
-        Serial.println("AeroAPIFetcher: No API key configured");
-        return false;
-    }
 
-    WiFiClientSecure client;
-    if (APIConfiguration::AEROAPI_INSECURE_TLS)
-    {
-        client.setInsecure();
-    }
-
-    HTTPClient http;
     String url = String(APIConfiguration::AEROAPI_BASE_URL) + "/flights/" + flightIdent;
-    http.begin(client, url);
-    http.addHeader("x-apikey", g_settings.aeroApiKey.c_str());
-    http.addHeader("Accept", "application/json");
-
-    int code = http.GET();
-    if (code != 200)
-    {
-        Serial.printf("AeroAPIFetcher: HTTP request failed with code %d for flight %s\n", code, flightIdent.c_str());
-        http.end();
-        return false;
-    }
-
-    String payload = http.getString();
-    http.end();
 
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, payload);
-    if (err)
-    {
-        Serial.printf("AeroAPIFetcher: JSON parsing failed for flight %s: %s\n", flightIdent.c_str(), err.c_str());
+    if (!_http || g_settings.aeroApiKey.length() == 0)
         return false;
-    }
+    if (!_http->getJson(url, doc, nullptr, nullptr, "x-apikey", g_settings.aeroApiKey.c_str()))
+        return false;
 
     JsonArray flights = doc["flights"].as<JsonArray>();
     if (flights.isNull() || flights.size() == 0)

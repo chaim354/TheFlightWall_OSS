@@ -266,6 +266,7 @@ void setup()
     g_web.begin(g_apMode, g_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
 
     g_adsbdb.setHttp(&g_http);
+    g_aeroApi.setHttp(&g_http);
     g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi, &g_adsbdb);
 
     logHeap("boot-done");
