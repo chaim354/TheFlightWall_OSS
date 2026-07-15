@@ -19,6 +19,7 @@ Run loop:
 #include <utility>
 #include <time.h>
 #include <WiFi.h>
+#include "esp_wifi.h"
 // Direct includes so PlatformIO's LDF adds these bundled framework libraries to
 // the build (it does not always follow them through project headers).
 #include <WebServer.h>
@@ -63,12 +64,27 @@ static const char *kSetupApSsid = "FlightWall-Setup";
 
 // ---- Helpers --------------------------------------------------------------
 
+// Allow 2.4GHz channels 1-13 (US default is 1-11) so the device can see and join
+// a router whose auto-channel landed on 12/13. MANUAL policy honors nchan=13.
+static void applyWifiRegion()
+{
+    wifi_country_t ctry = {};
+    ctry.cc[0] = 'U';
+    ctry.cc[1] = 'S';
+    ctry.cc[2] = '\0';
+    ctry.schan = 1;
+    ctry.nchan = 13;
+    ctry.policy = WIFI_COUNTRY_POLICY_MANUAL;
+    esp_wifi_set_country(&ctry);
+}
+
 static bool connectWifiSta()
 {
     if (!g_settings.hasWifi())
         return false;
 
     WiFi.mode(WIFI_STA);
+    applyWifiRegion();           // unlock ch 12-13 before associating
     WiFi.setAutoReconnect(true); // recover transient drops without a reboot
     WiFi.persistent(false);
     g_display.displayMessage(String("WiFi: ") + g_settings.wifiSsid);
@@ -89,6 +105,7 @@ static void startSetupAp()
 {
     g_apMode = true;
     WiFi.mode(WIFI_AP);
+    applyWifiRegion(); // keep region consistent (AP defaults to a 1-11 channel anyway)
     WiFi.softAP(kSetupApSsid);
     IPAddress ip = WiFi.softAPIP();
     Serial.print("Setup AP started. Connect to '");

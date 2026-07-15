@@ -8,6 +8,8 @@ Purpose: Implementation of the on-device configuration & control web server.
 #include <LittleFS.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <algorithm>
+#include <vector>
 
 static const byte kDnsPort = 53;
 
@@ -233,16 +235,42 @@ void WebConfigServer::handleGeolocate()
 void WebConfigServer::handleWifiScan()
 {
     int n = WiFi.scanNetworks();
+    std::vector<int> idx;
+    for (int i = 0; i < n; ++i)
+        idx.push_back(i);
+    // strongest first, so a strong-but-late network is never dropped by the cap
+    std::sort(idx.begin(), idx.end(), [](int a, int b)
+              { return WiFi.RSSI(a) > WiFi.RSSI(b); });
+
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
-    for (int i = 0; i < n && i < 20; ++i)
+    std::vector<String> seen;
+    const size_t cap = 40;
+    for (int i : idx)
     {
+        if (arr.size() >= cap)
+            break;
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0)
+            continue; // hidden/blank
+        bool dup = false;
+        for (auto &s : seen)
+        {
+            if (s == ssid)
+            {
+                dup = true;
+                break;
+            }
+        }
+        if (dup)
+            continue; // dedupe band-steered SSIDs
+        seen.push_back(ssid);
         JsonObject o = arr.createNestedObject();
-        o["ssid"] = WiFi.SSID(i);
+        o["ssid"] = ssid;
         o["rssi"] = WiFi.RSSI(i);
         o["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
     }
-    WiFi.scanDelete();
+    WiFi.scanDelete(); // free scan results
     String out;
     serializeJson(doc, out);
     _server.send(200, "application/json", out);
