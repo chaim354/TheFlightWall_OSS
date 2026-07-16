@@ -103,15 +103,38 @@ bool Settings::load()
 
 bool Settings::save() const
 {
-    File f = LittleFS.open(kSettingsPath, "w");
+    // Write to a temp file, verify it landed whole, THEN rename over the live file.
+    // A truncate-then-write here (the previous behavior) meant a power cut mid-save
+    // left a partial /settings.json — losing the WiFi password and API keys and
+    // dropping the device into the open setup AP. littlefs's rename atomically
+    // replaces the destination, so /settings.json is always either fully the old
+    // file or fully the new one.
+    const char *kTmpPath = "/settings.tmp";
+    String out = toJson();
+
+    File f = LittleFS.open(kTmpPath, "w");
     if (!f)
     {
-        Serial.println("Settings: failed to open settings file for write");
+        Serial.println("Settings: failed to open temp settings file for write");
         return false;
     }
-    String out = toJson();
-    f.print(out);
+    size_t written = f.print(out);
     f.close();
+
+    if (written != out.length())
+    {
+        Serial.printf("Settings: short write (%u of %u bytes); keeping previous settings\n",
+                      (unsigned)written, (unsigned)out.length());
+        LittleFS.remove(kTmpPath);
+        return false;
+    }
+
+    if (!LittleFS.rename(kTmpPath, kSettingsPath))
+    {
+        Serial.println("Settings: rename of temp settings file failed");
+        LittleFS.remove(kTmpPath);
+        return false;
+    }
     return true;
 }
 
