@@ -41,7 +41,8 @@ BaseFlightFetcher *FlightDataFetcher::activeFetcher()
 }
 
 bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
-                                    const String &icao24, FlightInfo &out)
+                                    const String &icao24, FlightInfo &out,
+                                    bool allowNetwork)
 {
     const unsigned long now = millis();
     const unsigned long posTtl = (unsigned long)g_settings.enrichmentCacheSeconds * 1000UL;
@@ -60,6 +61,12 @@ bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
             return false; // recent failure; don't re-hammer the provider yet
         // else: expired -> fall through and re-fetch
     }
+
+    // Past the cycle's enrichment budget: the cache above still answered if it could,
+    // but we will not open a connection. Reported as a miss, which callers already
+    // handle as "no route yet" rather than as an error.
+    if (!allowNetwork)
+        return false;
 
     BaseFlightFetcher *f = activeFetcher();
     FlightInfo info;
@@ -108,6 +115,7 @@ size_t FlightDataFetcher::fetchFlights(std::vector<StateVector> &outStates,
     outStates.clear();
     outFlights.clear();
     ok = false;
+    _cycleStartMs = millis(); // starts the enrichment budget (see kEnrichBudgetMs)
 
     if (g_settings.mode == TrackingMode::Flights)
         return fetchFlightsMode(outFlights, ok);
@@ -167,7 +175,9 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // Cache key prefers the stable ICAO24, falling back to callsign.
         const String key = s.icao24.length() ? s.icao24 : s.callsign;
         FlightInfo info;
-        getEnriched(key, s.callsign, s.icao24, info); // network route/aircraft (best-effort)
+        // Best-effort: once the budget is spent this serves cache-only, so the card
+        // still renders (callsign + logo below) just without a route.
+        getEnriched(key, s.callsign, s.icao24, info, withinEnrichBudget());
 
         // Local, free identity (logo) is applied whether or not the network lookup
         // succeeded — so airliners always show their logo/airline. In Area mode we
@@ -253,7 +263,9 @@ size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights, 
             continue;
 
         FlightInfo info;
-        bool ok = getEnriched(ident, ident, String(""), info);
+        // Unlike Area mode, a miss here drops the card (see below), so an exhausted
+        // budget means this ident simply waits for the next cycle.
+        bool ok = getEnriched(ident, ident, String(""), info, withinEnrichBudget());
         if (!ok)
         {
             if (g_settings.enrichmentSource == EnrichmentSource::Off)
