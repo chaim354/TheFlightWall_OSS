@@ -119,6 +119,81 @@ int main() {
         CHECK(c.size() == 3);
     }
 
+    // setCapacity() grows the bound: entries survive that the old bound would evict.
+    {
+        LruCache<std::string, int> c(2);
+        c.put("A", 1);
+        c.put("B", 2);
+        c.setCapacity(4);
+        c.put("C", 3);
+        c.put("D", 4);
+        int v = -1;
+        CHECK(c.get("A", v) == true && v == 1);
+        CHECK(c.get("B", v) == true && v == 2);
+        CHECK(c.get("C", v) == true && v == 3);
+        CHECK(c.get("D", v) == true && v == 4);
+        CHECK(c.size() == 4);
+    }
+
+    // setCapacity() shrinking evicts LRU-first and does so IMMEDIATELY — not lazily
+    // on the next put(). A shrink that deferred eviction would hold memory the
+    // caller just asked us to give back.
+    {
+        LruCache<std::string, int> c(4);
+        c.put("A", 1); // LRU
+        c.put("B", 2);
+        c.put("C", 3);
+        c.put("D", 4); // MRU
+        c.setCapacity(2);
+        CHECK(c.size() == 2);
+        int v = -1;
+        CHECK(c.get("A", v) == false); // evicted (oldest)
+        CHECK(c.get("B", v) == false); // evicted
+        CHECK(c.get("C", v) == true && v == 3);
+        CHECK(c.get("D", v) == true && v == 4);
+    }
+
+    // setCapacity() to the current value is a no-op
+    {
+        LruCache<std::string, int> c(2);
+        c.put("A", 1);
+        c.put("B", 2);
+        c.setCapacity(2);
+        int v = -1;
+        CHECK(c.size() == 2);
+        CHECK(c.get("A", v) == true);
+        CHECK(c.get("B", v) == true);
+    }
+
+    // the bound set by setCapacity() holds on subsequent puts
+    {
+        LruCache<std::string, int> c(4);
+        for (int i = 0; i < 4; ++i) c.put(std::to_string(i), i);
+        c.setCapacity(2);
+        for (int i = 10; i < 20; ++i) { c.put(std::to_string(i), i); CHECK(c.size() <= 2); }
+        CHECK(c.size() == 2);
+    }
+
+    // REGRESSION (logo tiles, 4-slot cache vs 8 cycled flights): round-robin access
+    // over a working set LARGER than capacity is the LRU worst case — it evicts
+    // precisely the entry needed next, so the hit rate is exactly zero, not merely
+    // degraded. Sizing capacity to the working set is what fixes it.
+    {
+        auto cycleHits = [](size_t capacity, int workingSet, int passes) {
+            LruCache<std::string, int> c(capacity);
+            for (int i = 0; i < workingSet; ++i) c.put(std::to_string(i), i);
+            int hits = 0, v = -1;
+            for (int p = 0; p < passes; ++p)
+                for (int i = 0; i < workingSet; ++i) {
+                    if (c.get(std::to_string(i), v)) hits++;
+                    else c.put(std::to_string(i), i); // miss -> repopulate, as the display does
+                }
+            return hits;
+        };
+        CHECK(cycleHits(4, 8, 3) == 0);  // undersized: every single access misses
+        CHECK(cycleHits(8, 8, 3) == 24); // sized to the working set: every access hits
+    }
+
     if (failures == 0) { printf("ALL PASS\n"); return 0; }
     printf("%d FAILURES\n", failures);
     return 1;

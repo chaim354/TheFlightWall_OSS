@@ -333,6 +333,7 @@ void loop()
         g_light.begin();          // re-init for new sensor type/pin/enable
         g_appliedBrightness = -1; // force re-apply
         applyBrightness();
+        g_display.applySettings();      // resize the logo pool if maxFlights changed
         g_display.markFlightsUpdated(); // recompose now so color/layout tweaks show
                                         // within 200ms, not only after the next fetch
         g_lastFetchMs = 0; // refresh promptly with new tracking/filter settings

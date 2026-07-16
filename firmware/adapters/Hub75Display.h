@@ -32,6 +32,11 @@ public:
     // so it only recomposes when the cycle advances.
     void markFlightsUpdated();
 
+    // Re-read the settings this display caches decisions from. Call after Settings
+    // load and whenever they change at runtime (maxFlights is editable from the web
+    // UI, and the logo pool is sized from it).
+    void applySettings();
+
     void setBrightness(uint8_t brightness);
     const uint16_t *framebuffer(uint16_t &w, uint16_t &h) const override;
 
@@ -67,11 +72,31 @@ private:
         uint16_t h = 0;
         std::vector<uint16_t> px; // RAII: eviction frees automatically
     };
-    // 4 tiles ~= 8KB held once, instead of a 2KB malloc/free on every recompose.
-    // A fixed pool is also kinder to fragmentation than repeated alloc/free.
-    // Capacity 4 also lets a missing operator key and the _CARGO fallback coexist,
-    // so a cargo flight with no operator tile stops re-hitting LittleFS every frame.
+    // ~2KB per tile, held once instead of a malloc/free on every recompose; a fixed
+    // pool is also kinder to fragmentation than repeated alloc/free.
+    //
+    // Capacity MUST cover the working set — the distinct logo keys among the cycled
+    // flights (<= maxFlights, plus the _CARGO/_HELI/_PRIVATE pseudo-keys). Cards
+    // cycle round-robin, which is the LRU worst case: with capacity below the
+    // working set the cache evicts precisely the tile needed next, so the hit rate
+    // is ZERO, not merely reduced, and the pool costs RAM while buying nothing.
+    // A hardcoded 4 did exactly that once maxFlights went past ~2 (see test_lru).
+    // applySettings() sizes it from maxFlights; the {4} here is only the pre-init
+    // default, since Settings aren't loaded yet when this global is constructed.
     LruCache<String, LogoTile> _logoCache{4};
+
+    // Upper bound on the tile pool. Tiles are ~2KB, which is BELOW the 4096-byte
+    // CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL threshold — so they land in INTERNAL RAM
+    // on the S3 too, and 8MB of PSRAM does not rescue them. The cap keeps a large
+    // maxFlights from eating the contiguous internal RAM the TLS handshake needs
+    // (two ~16KB blocks). The S3 has room (~143KB largest block, measured); the
+    // plain ESP32 has ~56KB after the 6-bit color-depth fix, and a big pool there
+    // risks reintroducing the `? -> ?` TLS allocation failure.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    static constexpr size_t kMaxLogoTiles = 16; // ~32KB
+#else
+    static constexpr size_t kMaxLogoTiles = 8; // ~16KB
+#endif
 
     // Whether the last drawLogoOrBadge() painted a real tile (vs. the code badge).
     // displayMiniCard() uses it to drop the redundant "Airlines/Airways" suffix.

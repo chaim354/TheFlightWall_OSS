@@ -119,7 +119,28 @@ bool Hub75Display::initialize()
     clear();
     _currentFlightIndex = 0;
     _lastCycleMs = millis();
+    applySettings();
     return true;
+}
+
+void Hub75Display::applySettings()
+{
+    // Working set = distinct logo keys among the cycled cards: at most maxFlights
+    // operator tiles, plus the three pseudo-keys (_CARGO/_HELI/_PRIVATE) that can
+    // coexist with them when an operator tile is missing. Undersizing this is not a
+    // partial win — round-robin cycling makes an undersized LRU miss every time.
+    size_t want = (size_t)g_settings.maxFlights + 3;
+    if (want < 4)
+        want = 4; // keep the old floor for tiny maxFlights
+    if (want > kMaxLogoTiles)
+        want = kMaxLogoTiles; // bounded: tiles are internal RAM on both targets
+    if (want != _logoCache.capacity())
+    {
+        // Shrinking frees the evicted tiles immediately (setCapacity trims).
+        _logoCache.setCapacity(want);
+        Serial.printf("[logo] tile cache capacity=%u (maxFlights=%u)\n",
+                      (unsigned)want, (unsigned)g_settings.maxFlights);
+    }
 }
 
 void Hub75Display::present()

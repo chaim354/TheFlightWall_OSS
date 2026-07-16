@@ -82,8 +82,29 @@ public:
 
         _items.emplace_front(key, value);
         _index[key] = _items.begin();
+        trim();
+    }
 
-        if (_index.size() > _capacity)
+    // Re-bound the cache at runtime. Callers whose working set is configurable
+    // (e.g. logo tiles vs. maxFlights) must size capacity to it: cyclic access over
+    // a working set larger than capacity evicts exactly the entry needed next, so
+    // the hit rate is zero rather than merely reduced. Shrinking evicts LRU-first
+    // immediately, so the memory is released when asked for, not on the next put().
+    void setCapacity(size_t capacity)
+    {
+        _capacity = capacity;
+        trim();
+    }
+
+    size_t capacity() const { return _capacity; }
+    size_t size() const { return _index.size(); }
+
+private:
+    // Evict LRU-first until the bound holds. Shared by put() (over by at most one)
+    // and setCapacity() (may be over by many).
+    void trim()
+    {
+        while (_index.size() > _capacity)
         {
             auto &lru = _items.back(); // least-recently-used
             _index.erase(lru.first);
@@ -91,9 +112,6 @@ public:
         }
     }
 
-    size_t size() const { return _index.size(); }
-
-private:
     size_t _capacity;
     std::list<std::pair<K, V>> _items; // front = MRU, back = LRU
     std::unordered_map<K, typename std::list<std::pair<K, V>>::iterator> _index;
