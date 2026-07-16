@@ -3,6 +3,7 @@ Purpose: Implementation of the UART configuration console (see SerialConsole.h).
 */
 #include "core/SerialConsole.h"
 #include "core/Settings.h"
+#include "adapters/LightSensor.h"
 
 #include <WiFi.h>
 
@@ -29,8 +30,57 @@ void SerialConsole::begin()
     Serial.println("FlightWall serial console ready. Type 'help' for commands.");
 }
 
+// `light` / `light watch`. Prints the reading in the SELECTED SENSOR'S units and
+// spells out the hysteresis arithmetic, because the threshold's meaning changes with
+// the sensor type (raw ADC 0-4095 / lux / raw Clear) and no single default can suit
+// all three — the numbers below are the only honest way to pick one.
+void SerialConsole::printLight(bool oneShot)
+{
+    if (!g_settings.lightSensorEnabled)
+    {
+        if (oneShot)
+            Serial.println(F("[light] sensor disabled (enable it in the web UI or via 'set')"));
+        return;
+    }
+    if (!_light)
+    {
+        if (oneShot)
+            Serial.println(F("[light] no sensor wired to the console"));
+        return;
+    }
+
+    const char *type = g_settings.lightSensorType == LightSensorType::BH1750    ? "bh1750 (lux)"
+                       : g_settings.lightSensorType == LightSensorType::TCS3472 ? "tcs3472 (raw Clear)"
+                                                                                : "analog (raw ADC 0-4095)";
+    const int lvl = _light->level();
+    const unsigned thr = g_settings.lightDarkThreshold;
+    const unsigned lit = thr + g_settings.lightHysteresis;
+
+    if (lvl < 0)
+    {
+        Serial.printf("[light] %s: NO READING (sensor absent/failed) -> reporting 'lit' (fail-safe)\n",
+                      type);
+        return;
+    }
+    if (oneShot)
+        Serial.printf("[light] %s\n  reading   : %d\n  state     : %s\n"
+                      "  goes dark : reading < %u\n  goes lit  : reading > %u  (threshold %u + hysteresis %u)\n"
+                      "  panel     : %s when dark\n",
+                      type, lvl, _light->isDark() ? "DARK" : "lit", thr, lit, thr,
+                      (unsigned)g_settings.lightHysteresis,
+                      g_settings.lightSensorDimInstead ? "dimmed" : "blanked");
+    else
+        Serial.printf("[light] %d  %s   (dark<%u, lit>%u)\n", lvl, _light->isDark() ? "DARK" : "lit", thr, lit);
+}
+
 void SerialConsole::poll()
 {
+    if (_watchLight && millis() - _lastWatchMs >= 1000)
+    {
+        _lastWatchMs = millis();
+        printLight(false);
+    }
+
     while (Serial.available() > 0)
     {
         char c = (char)Serial.read();
@@ -61,6 +111,7 @@ void SerialConsole::printHelp()
         "  enrich <adsbdb|aeroapi|off>   set enrichment source\n"
         "  mode <area|flights>           set tracking mode\n"
         "  loc <lat> <lon> <radiusKm>    set Area-mode location\n"
+        "  light [watch]                 ambient reading; 'watch' streams at 1Hz\n"
         "  get                           print settings JSON\n"
         "  set <json>                    apply a settings JSON document\n"
         "  save                          persist settings\n"
@@ -233,6 +284,26 @@ void SerialConsole::handleLine(String line)
         else
         {
             Serial.println(F("Invalid JSON."));
+        }
+    }
+    else if (cmd == "light")
+    {
+        args.trim();
+        args.toLowerCase();
+        if (args == "watch")
+        {
+            _watchLight = !_watchLight;
+            _lastWatchMs = 0; // print immediately rather than after the first second
+            Serial.println(_watchLight ? F("Watching light (type 'light watch' to stop).")
+                                       : F("Stopped watching light."));
+        }
+        else if (args.length() == 0)
+        {
+            printLight(true);
+        }
+        else
+        {
+            Serial.println(F("usage: light [watch]"));
         }
     }
     else if (cmd == "save")

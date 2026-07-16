@@ -246,6 +246,7 @@ void setup()
 
     g_settings.begin();
     g_console.begin();
+    g_console.setLightSensor(&g_light); // `light` command reads it live over serial
 
     g_display.initialize();
     g_appliedBrightness = g_settings.brightness;
