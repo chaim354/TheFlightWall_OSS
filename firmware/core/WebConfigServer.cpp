@@ -91,7 +91,26 @@ void WebConfigServer::registerRoutes()
 
 void WebConfigServer::handleRoot()
 {
-    File f = LittleFS.open("/index.html", "r");
+    // Prefer the pre-compressed page (~25KB -> ~7.5KB). That matters more here than on
+    // a normal server: loop() is single-threaded and blocks on the flight fetch, so the
+    // page can only stream during the gaps — fewer bytes is directly less time stuck.
+    // tools/gzip_web_assets.py regenerates the .gz on every build, so it cannot go
+    // stale; the uncompressed fallback below covers an FS image built without it.
+    // Do NOT sendHeader("Content-Encoding") here. streamFile() -> _streamFileCore()
+    // already adds it when the FILE NAME ends in .gz (WebServer.cpp:525). Setting it
+    // manually as well emits the header twice, which per HTTP means the body was
+    // gzipped TWICE — the browser decodes once, tries again, fails, and renders
+    // nothing. The content type stays text/html: that is what the decoded body is,
+    // and it is also what triggers the automatic header.
+    File f = LittleFS.open("/index.html.gz", "r");
+    if (f)
+    {
+        _server.streamFile(f, "text/html");
+        f.close();
+        return;
+    }
+
+    f = LittleFS.open("/index.html", "r");
     if (!f)
     {
         _server.send(200, "text/html",
@@ -148,6 +167,8 @@ void WebConfigServer::handleGetStatus()
     doc["i2cScl"] = HardwareConfiguration::I2C_SCL;
     doc["adc1Min"] = HardwareConfiguration::ADC1_PIN_MIN;
     doc["adc1Max"] = HardwareConfiguration::ADC1_PIN_MAX;
+    doc["buttonAPin"] = HardwareConfiguration::BUTTON_A_PIN;
+    doc["buttonBPin"] = HardwareConfiguration::BUTTON_B_PIN;
     String out;
     serializeJson(doc, out);
     _server.send(200, "application/json", out);

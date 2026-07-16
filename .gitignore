@@ -5,3 +5,5 @@ firmware/.pio
 
 # Local credentials baked in at flash time (never commit)
 firmware/config/Secrets.h
+# Build artifact: regenerated from data/index.html by tools/gzip_web_assets.py
+firmware/data/*.gz

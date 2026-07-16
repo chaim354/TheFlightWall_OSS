@@ -7,35 +7,58 @@
 <style>
   :root { --bg:#0b0f17; --card:#141a26; --line:#26314a; --fg:#e8edf6; --muted:#8a98b5; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
-  header { padding:18px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--bg); z-index:5;}
-  header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); font-size:15px; line-height:1.45; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:10px; position:sticky; top:0; background:var(--bg); z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.5px; white-space:nowrap; }
   .wrap { max-width:760px; margin:0 auto; padding:16px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
-  .card h2 { font-size:14px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
-  label { display:block; font-size:13px; margin:10px 0 4px; color:var(--muted); }
+  .card, details.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .card > h2 { font-size:12px; margin:0 0 14px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+  /* Section divider inside a card. The first section rides under the card's own h2,
+     so only later ones get a rule. */
+  .sec { font-size:13px; font-weight:600; color:var(--fg); margin:20px 0 6px; padding-top:16px; border-top:1px solid var(--line); }
+  label { display:block; font-size:12px; margin:10px 0 4px; color:var(--muted); }
   input[type=text],input[type=password],input[type=number],textarea,select {
     width:100%; padding:9px 10px; background:#0e1421; color:var(--fg); border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus,select:focus,textarea:focus { outline:none; border-color:var(--accent); }
   textarea { min-height:70px; resize:vertical; font-family:ui-monospace,Menlo,monospace; }
-  .row { display:flex; gap:12px; flex-wrap:wrap; }
-  .row > div { flex:1; min-width:130px; }
-  .checks { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; margin-top:6px; }
-  .check { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--fg); }
-  .check input { width:auto; }
-  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:2px; }
+  .row > div { flex:1; min-width:140px; }
+  .checks { display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; margin-top:8px; }
+  .check { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--fg); margin-top:10px; }
+  .check input { width:auto; flex:none; }
+  .check label { margin:0; font-size:14px; color:var(--fg); }
+  .checks .check { margin-top:0; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
   button.warn { background:var(--warn); }
-  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .pill { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pill { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); white-space:nowrap; }
   .pill.on { color:#fff; background:var(--ok); border-color:var(--ok); }
   .pill.off { color:#fff; background:#ef4444; border-color:#ef4444; }
   .hide { display:none; }
   .flight { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-top:8px; font-size:13px; }
   .flight b { color:#fff; } .flight span { color:var(--muted); }
-  .toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#1f2a40; border:1px solid var(--line); padding:10px 16px; border-radius:8px; opacity:0; transition:.2s; }
+  .toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#1f2a40; border:1px solid var(--line); padding:10px 16px; border-radius:8px; opacity:0; transition:.2s; pointer-events:none; }
   .toast.show { opacity:1; }
-  small.help { color:var(--muted); display:block; margin-top:4px; }
+  small.help { color:var(--muted); display:block; margin-top:6px; font-size:12px; line-height:1.5; }
   .scanlist button { display:block; width:100%; text-align:left; margin-top:6px; background:#0e1421; border:1px solid var(--line); }
+  summary { cursor:pointer; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-weight:600; list-style:none; display:flex; align-items:center; gap:8px; }
+  summary::-webkit-details-marker { display:none; }
+  summary::before { content:'\25B8'; transition:transform .15s; }
+  details[open] > summary { margin-bottom:14px; }
+  details[open] > summary::before { transform:rotate(90deg); }
+  /* Real breakpoint. Previously the page relied only on flex-wrap + a 130px min-width,
+     which squeezed three fields into a phone width rather than stacking them. */
+  @media (max-width:560px) {
+    body { font-size:14px; }
+    .wrap { padding:12px; }
+    header { padding:10px 12px; }
+    header h1 { font-size:16px; }
+    .row { display:block; }
+    .row > div { min-width:0; margin-bottom:2px; }
+    .checks { grid-template-columns:1fr; }
+    .card, details.card { padding:14px; }
+  }
 </style>
 </head>
 <body>
@@ -44,6 +67,8 @@
   <div class="bar">
     <span id="connPill" class="pill">…</span>
     <button class="ghost" onclick="loadAll()">Refresh</button>
+    <button onclick="save()">Save</button>
+    <button class="warn" onclick="restart()">Restart</button>
   </div>
 </header>
 
@@ -56,8 +81,9 @@
   </div>
 
   <div class="card">
-    <h2>WiFi</h2>
-    <label>Network (SSID)</label>
+    <h2>Setup</h2>
+
+    <label>WiFi network (SSID)</label>
     <input id="wifiSsid" type="text" placeholder="Your WiFi name" />
     <label>Password</label>
     <input id="wifiPassword" type="password" placeholder="••••••••" />
@@ -66,13 +92,11 @@
     </div>
     <div id="scanlist" class="scanlist"></div>
     <small class="help">Changing WiFi takes effect after a restart.</small>
-  </div>
 
-  <div class="card">
-    <h2>API Keys</h2>
-    <label>OpenSky Client ID</label>
+    <div class="sec">API keys</div>
+    <label>OpenSky client ID</label>
     <input id="openSkyClientId" type="text" />
-    <label>OpenSky Client Secret</label>
+    <label>OpenSky client secret</label>
     <input id="openSkyClientSecret" type="password" />
 
     <label>Flight enrichment source (route · airline · aircraft)</label>
@@ -83,13 +107,14 @@
     </select>
     <small class="help">adsbdb.com is free and needs no key. Results are cached per aircraft to minimize requests.</small>
 
-    <label>FlightAware AeroAPI Key <span style="color:var(--muted)">(for AeroAPI source or backup)</span></label>
+    <label>FlightAware AeroAPI key <span style="color:var(--muted)">(for AeroAPI source or backup)</span></label>
     <input id="aeroApiKey" type="password" />
-    <span class="check" style="margin-top:8px"><input type="checkbox" id="enrichmentFallbackToAeroApi"><label style="margin:0">Use AeroAPI as backup when adsbdb misses a flight (needs key)</label></span>
+    <span class="check"><input type="checkbox" id="enrichmentFallbackToAeroApi"><label>Use AeroAPI as backup when adsbdb misses a flight (needs key)</label></span>
   </div>
 
   <div class="card">
     <h2>Tracking</h2>
+
     <label>Mode</label>
     <select id="mode" onchange="toggleMode()">
       <option value="area">Area — everything near a location</option>
@@ -102,21 +127,33 @@
         <div><label>Center longitude</label><input id="centerLon" type="number" step="0.0001" /></div>
         <div><label>Radius (km)</label><input id="radiusKm" type="number" step="0.5" /></div>
       </div>
-      <div class="bar" style="margin-top:8px">
+      <div class="bar" style="margin-top:10px">
         <button class="ghost" type="button" onclick="geolocate()">Auto-detect my location</button>
-        <small class="help" id="geoNote" style="margin:0">Uses your IP (approximate). Review before saving.</small>
       </div>
-      <span class="check" style="margin-top:8px"><input type="checkbox" id="autoLocateOnBoot"><label style="margin:0">Auto-detect location on every boot</label></span>
+      <small class="help" id="geoNote">Uses your IP (approximate). Review before saving.</small>
+      <span class="check"><input type="checkbox" id="autoLocateOnBoot"><label>Auto-detect location on every boot</label></span>
     </div>
 
     <div id="flightsBox" class="hide">
       <label>Flights to track (one per line — flight #, callsign, or tail)</label>
       <textarea id="trackedFlights" placeholder="UAL123&#10;N172SP&#10;BAW286"></textarea>
     </div>
+
+    <div class="sec">Filters</div>
+    <div class="row">
+      <div><label>Min altitude (ft)</label><input id="minAltitudeFt" type="number" /></div>
+      <div><label>Max altitude (ft)</label><input id="maxAltitudeFt" type="number" /></div>
+    </div>
+    <span class="check"><input type="checkbox" id="excludeOnGround"><label>Hide aircraft on the ground</label></span>
+    <span class="check"><input type="checkbox" id="showGeneralAviation"><label>Show general aviation / private flights (fills leftover slots)</label></span>
+    <span class="check"><input type="checkbox" id="hideCargo"><label>Hide cargo / freight flights</label></span>
+    <label>Airline allow-list (comma separated ICAO/IATA, blank = all)</label>
+    <input id="airlineAllowList" type="text" placeholder="UAL, DAL, AAL" />
   </div>
 
   <div class="card">
     <h2>Display</h2>
+
     <div class="row">
       <div><label>Brightness (0–255)</label><input id="brightness" type="number" min="0" max="255" /></div>
       <div><label>Text color</label><input id="textColor" type="color" /></div>
@@ -136,36 +173,22 @@
         </select>
       </div>
     </div>
-    <label>Fields to show on each card</label>
+
+    <div class="sec">Fields on each card</div>
     <div class="checks">
-      <span class="check"><input type="checkbox" id="showAirlineFlight"><label style="margin:0">Airline + flight</label></span>
-      <span class="check"><input type="checkbox" id="showRoute"><label style="margin:0">Route</label></span>
-      <span class="check"><input type="checkbox" id="showAircraft"><label style="margin:0">Aircraft type</label></span>
-      <span class="check"><input type="checkbox" id="showAltitude"><label style="margin:0">Altitude</label></span>
-      <span class="check"><input type="checkbox" id="showSpeed"><label style="margin:0">Speed</label></span>
-      <span class="check"><input type="checkbox" id="showHeading"><label style="margin:0">Heading</label></span>
-      <span class="check"><input type="checkbox" id="showVerticalRate"><label style="margin:0">Vertical rate</label></span>
-      <span class="check"><input type="checkbox" id="flightNumberOverVr"><label style="margin:0">Flight # (instead of vertical rate)</label></span>
+      <span class="check"><input type="checkbox" id="showAirlineFlight"><label>Airline + flight</label></span>
+      <span class="check"><input type="checkbox" id="showRoute"><label>Route</label></span>
+      <span class="check"><input type="checkbox" id="showAircraft"><label>Aircraft type</label></span>
+      <span class="check"><input type="checkbox" id="showAltitude"><label>Altitude</label></span>
+      <span class="check"><input type="checkbox" id="showSpeed"><label>Speed</label></span>
+      <span class="check"><input type="checkbox" id="showHeading"><label>Heading</label></span>
+      <span class="check"><input type="checkbox" id="showVerticalRate"><label>Vertical rate</label></span>
+      <span class="check"><input type="checkbox" id="flightNumberOverVr"><label>Flight # (instead of vertical rate)</label></span>
     </div>
     <small class="help">Only as many lines as physically fit on the panel are drawn.</small>
-  </div>
 
-  <div class="card">
-    <h2>Filters</h2>
-    <div class="row">
-      <div><label>Min altitude (ft)</label><input id="minAltitudeFt" type="number" /></div>
-      <div><label>Max altitude (ft)</label><input id="maxAltitudeFt" type="number" /></div>
-    </div>
-    <span class="check" style="margin-top:10px"><input type="checkbox" id="excludeOnGround"><label style="margin:0">Hide aircraft on the ground</label></span>
-    <span class="check" style="margin-top:10px"><input type="checkbox" id="showGeneralAviation"><label style="margin:0">Show general aviation / private flights (fills leftover slots)</label></span>
-    <span class="check" style="margin-top:10px"><input type="checkbox" id="hideCargo"><label style="margin:0">Hide cargo / freight flights</label></span>
-    <label>Airline allow-list (comma separated ICAO/IATA, blank = all)</label>
-    <input id="airlineAllowList" type="text" placeholder="UAL, DAL, AAL" />
-  </div>
-
-  <div class="card">
-    <h2>Brightness Schedule</h2>
-    <span class="check"><input type="checkbox" id="schedEnabled"><label style="margin:0">Enable day/night brightness</label></span>
+    <div class="sec">Brightness schedule</div>
+    <span class="check"><input type="checkbox" id="schedEnabled"><label>Enable day/night brightness</label></span>
     <div class="row">
       <div><label>Day brightness</label><input id="dayBrightness" type="number" min="0" max="255" /></div>
       <div><label>Night brightness</label><input id="nightBrightness" type="number" min="0" max="255" /></div>
@@ -177,9 +200,16 @@
     </div>
   </div>
 
-  <div class="card">
-    <h2>Light Sensor (auto-off in the dark)</h2>
-    <span class="check"><input type="checkbox" id="lightSensorEnabled"><label style="margin:0">Enable ambient light sensor</label></span>
+  <details class="card">
+    <summary>Advanced</summary>
+
+    <span class="check" style="margin-top:0"><input type="checkbox" id="buttonsEnabled"><label>Enable physical buttons</label></span>
+    <small class="help">Two momentary buttons to GND on <b><span id="btnPins">…</span></b>.<br>
+      <b>A:</b> click = panel off/on · hold = brighter &nbsp;|&nbsp; <b>B:</b> click = cycle no-flights mode · hold = dimmer<br>
+      A held brightness overrides the schedule and the light sensor until the next automatic change.</small>
+
+    <div class="sec">Light sensor (auto-off in the dark)</div>
+    <span class="check" style="margin-top:0"><input type="checkbox" id="lightSensorEnabled"><label>Enable ambient light sensor</label></span>
     <div class="row">
       <div><label>Sensor type</label>
         <select id="lightSensorType">
@@ -197,21 +227,19 @@
       <div><label>Dark threshold</label><input id="lightDarkThreshold" type="number" /></div>
       <div><label>Hysteresis</label><input id="lightHysteresis" type="number" /></div>
     </div>
-    <span class="check" style="margin-top:8px"><input type="checkbox" id="lightSensorDimInstead"><label style="margin:0">Dim instead of fully off</label></span>
+    <span class="check"><input type="checkbox" id="lightSensorDimInstead"><label>Dim instead of fully off</label></span>
     <div class="row"><div><label>Dim brightness (0–255)</label><input id="lightDimBrightness" type="number" min="0" max="255" /></div></div>
-    <small class="help" id="lightLive">Live reading appears here when enabled — set the threshold just above the dark value.</small>
-  </div>
+    <small class="help" id="lightLive">Live reading appears here when enabled — set the threshold just above the dark value. The units depend on the sensor type, so tune against this number rather than guessing.</small>
 
-  <div class="card">
-    <h2>Hardware — HUB75 (Advanced)</h2>
-    <small class="help" style="color:var(--warn)">⚠ Advanced — these must match your panel hardware. Wrong values can blank or scramble the display. Defaults suit a 128×64 panel.</small>
-    <label style="margin-top:10px">Presets</label>
-    <div class="bar" style="margin-bottom:6px">
+    <div class="sec">HUB75 panel</div>
+    <small class="help" style="color:var(--warn)">⚠ These must match your panel hardware. Wrong values can blank or scramble the display. Defaults suit a 128×64 panel.</small>
+    <label>Presets</label>
+    <div class="bar">
       <button class="ghost" type="button" onclick="setPanel(64,32,1)">64×32</button>
       <button class="ghost" type="button" onclick="setPanel(64,64,1)">64×64</button>
       <button class="ghost" type="button" onclick="setPanel(64,64,2)">128×64 (Mini)</button>
     </div>
-    <div class="row">
+    <div class="row" style="margin-top:8px">
       <div><label>Panel width (px)</label><input id="panelResX" type="number" /></div>
       <div><label>Panel height (px)</label><input id="panelResY" type="number" /></div>
       <div><label>Panels chained</label><input id="panelChain" type="number" min="1" /></div>
@@ -219,8 +247,8 @@
     <small class="help">Matrix width = panel width × panels chained (e.g. 64 × 2 = 128 wide). Wide panels use a logo-left card; square panels (64×64) use a stacked logo-on-top card. Changes take effect after a restart.</small>
 
     <label style="margin-top:14px">Signal tuning — if pixels flicker or shift by one</label>
-    <span class="check"><input type="checkbox" id="panelClkPhase"><label style="margin:0">Clock phase (uncheck first to fix an off-by-one shift)</label></span>
-    <div class="row" style="margin-top:6px">
+    <span class="check" style="margin-top:0"><input type="checkbox" id="panelClkPhase"><label>Clock phase (uncheck first to fix an off-by-one shift)</label></span>
+    <div class="row" style="margin-top:8px">
       <div><label>Driver chip</label>
         <select id="panelDriverChip">
           <option value="shift">Generic shift register (default)</option>
@@ -236,14 +264,7 @@
       <div><label>Latch blanking</label><input id="panelLatchBlanking" type="number" min="1" max="4" /></div>
     </div>
     <small class="help">Start with: uncheck Clock phase. Still bad? Try driver = FM6126A. These apply after a restart. A 74HCT245 level shifter is the robust hardware fix.</small>
-  </div>
-
-  <div class="card">
-    <div class="bar">
-      <button onclick="save()">Save settings</button>
-      <button class="warn" onclick="restart()">Restart device</button>
-    </div>
-  </div>
+  </details>
 
 </div>
 
@@ -312,6 +333,7 @@ async function loadSettings(){
   $('nightEndHour').value = s.schedule.nightEndHour;
   $('timezoneOffsetMinutes').value = s.schedule.timezoneOffsetMinutes;
 
+  $('buttonsEnabled').checked = !!(s.buttons && s.buttons.enabled);
   $('lightSensorEnabled').checked = !!s.light.enabled;
   $('lightSensorType').value = s.light.type;
   $('lightSensorPin').value = s.light.pin;
@@ -360,6 +382,7 @@ function collect(){
       enabled:$('schedEnabled').checked, dayBrightness:+$('dayBrightness').value, nightBrightness:+$('nightBrightness').value,
       nightStartHour:+$('nightStartHour').value, nightEndHour:+$('nightEndHour').value, timezoneOffsetMinutes:+$('timezoneOffsetMinutes').value
     },
+    buttons:{ enabled:$('buttonsEnabled').checked },
     light:{
       enabled:$('lightSensorEnabled').checked, type:$('lightSensorType').value, pin:+$('lightSensorPin').value,
       darkThreshold:+$('lightDarkThreshold').value, hysteresis:+$('lightHysteresis').value,
@@ -429,6 +452,7 @@ async function loadStatus(){
     // Board-specific pins, reported by the device (the ESP32 and S3 maps differ).
     if('i2cSda' in s){ const p=$('i2cPins'); if(p) p.textContent = `SDA ${s.i2cSda} / SCL ${s.i2cScl}`; }
     if('adc1Min' in s){ const a=$('adc1Range'); if(a) a.textContent = `${s.adc1Min}-${s.adc1Max}`; }
+    if('buttonAPin' in s){ const b=$('btnPins'); if(b) b.textContent = `GPIO ${s.buttonAPin} (A) and GPIO ${s.buttonBPin} (B)`; }
     if('lightLevel' in s && s.lightLevel >= 0){
       const el = $('lightLive');
       if(el) el.textContent = `Live reading: ${s.lightLevel}  ·  panel ${s.lightDark ? 'OFF (dark)' : 'on (lit)'} — set the threshold just above the dark value.`;
