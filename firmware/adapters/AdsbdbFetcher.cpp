@@ -141,23 +141,31 @@ bool AdsbdbFetcher::fetchFlightInfo(const String &flightIdent, const String &ica
 {
     bool gotNetworkData = false;
 
-    // Route: adsbdb first (also gives airline name), then hexdb.io fallback.
-    if (flightIdent.length())
+    // Batch by HOST, not by field. The shared HttpJson holds ONE persistent TLS
+    // connection, so alternating adsbdb/hexdb (A,B,A,B) forces a full renegotiation
+    // on every call. Doing both adsbdb lookups first and only then the hexdb
+    // fallbacks (A,A,B,B) keeps keep-alive working, and lets consecutive flights
+    // reuse the already-open adsbdb connection.
+    bool haveRoute = false;
+    bool haveAircraft = false;
+
+    // adsbdb (host A) — route also supplies the airline name.
+    if (flightIdent.length() && fetchRoute(flightIdent, outInfo))
     {
-        if (fetchRoute(flightIdent, outInfo))
-            gotNetworkData = true;
-        else if (fetchRouteHexdb(flightIdent, outInfo))
-            gotNetworkData = true;
+        haveRoute = true;
+        gotNetworkData = true;
+    }
+    if (icao24.length() && fetchAircraft(icao24, outInfo))
+    {
+        haveAircraft = true;
+        gotNetworkData = true;
     }
 
-    // Aircraft type: adsbdb first, then hexdb.io fallback.
-    if (icao24.length())
-    {
-        if (fetchAircraft(icao24, outInfo))
-            gotNetworkData = true;
-        else if (fetchAircraftHexdb(icao24, outInfo))
-            gotNetworkData = true;
-    }
+    // hexdb.io (host B) — only for whatever adsbdb missed.
+    if (!haveRoute && flightIdent.length() && fetchRouteHexdb(flightIdent, outInfo))
+        gotNetworkData = true;
+    if (!haveAircraft && icao24.length() && fetchAircraftHexdb(icao24, outInfo))
+        gotNetworkData = true;
 
     // NOTE: callsign-prefix -> operator_icao is applied by the orchestrator
     // (FlightDataFetcher), NOT here, so prefix-only does not count as a network
