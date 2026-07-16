@@ -21,7 +21,6 @@ REST API:
 #include <vector>
 #include <WebServer.h>
 #include <DNSServer.h>
-#include "interfaces/BaseDisplay.h"
 #include "models/FlightInfo.h"
 
 class WebConfigServer
@@ -37,9 +36,6 @@ public:
     // it on demand in handleGetFlights(), rather than re-serializing every fetch.
     void setFlights(const std::vector<FlightInfo> *flights) { _flights = flights; }
     void setLastFetchInfo(int flightCount, const String &note);
-
-    // Display whose framebuffer is served as a live preview (/api/framebuffer).
-    void setDisplay(BaseDisplay *display) { _display = display; }
 
     // Latest ambient light reading, surfaced in /api/status for calibration.
     void setLightStatus(int level, bool dark)
@@ -60,7 +56,6 @@ private:
     const std::vector<FlightInfo> *_flights = nullptr;
     int _lastFlightCount = 0;
     String _lastNote;
-    BaseDisplay *_display = nullptr;
     int _lightLevel = -1;
     bool _lightDark = false;
 
@@ -73,7 +68,6 @@ private:
     void handleGetStatus();
     void handleGetFlights();
     String buildFlightsJson() const;
-    void handleFramebuffer();
     void handleGeolocate();
     void handleWifiScan();
     void handleRestart();

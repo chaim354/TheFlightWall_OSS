@@ -283,7 +283,6 @@ void setup()
         startSetupAp();
     }
 
-    g_web.setDisplay(&g_display);
     // Point the web server at the long-lived global flights vector. Its address
     // is fixed (global), so it stays valid across the std::move in doFetchAndRender.
     // /api/flights serializes from this on demand instead of every fetch cycle.

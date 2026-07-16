@@ -35,7 +35,6 @@
   .toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#1f2a40; border:1px solid var(--line); padding:10px 16px; border-radius:8px; opacity:0; transition:.2s; }
   .toast.show { opacity:1; }
   small.help { color:var(--muted); display:block; margin-top:4px; }
-  #preview { width:100%; height:auto; margin-top:6px; border:1px solid var(--line); border-radius:8px; background:#000; image-rendering:pixelated; image-rendering:crisp-edges; display:block; }
   .scanlist button { display:block; width:100%; text-align:left; margin-top:6px; background:#0e1421; border:1px solid var(--line); }
 </style>
 </head>
@@ -53,8 +52,6 @@
   <div class="card">
     <h2>Status</h2>
     <div id="status" class="bar"><span class="pill">loading…</span></div>
-    <label style="margin-top:12px">Live matrix preview</label>
-    <canvas id="preview" width="128" height="64"></canvas>
     <div id="flights"></div>
   </div>
 
@@ -433,7 +430,9 @@ async function loadStatus(){
   try{
     const f = await (await fetch('/api/flights')).json();
     $('flights').innerHTML = f.map(x=>{
-      const m=[]; if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
+      // Distance leads: the list is ordered nearest-first, so it reads as the sort key.
+      const m=[]; if('distanceKm'in x)m.push(x.distanceKm.toFixed(1)+'km');
+      if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
       if('headingDeg'in x)m.push('HDG'+x.headingDeg); if('verticalRateFpm'in x)m.push(x.verticalRateFpm+'fpm');
       return `<div class="flight"><b>${x.ident||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${x.airline||''}</span><br>
         <span>${x.origin||'?'} → ${x.destination||'?'} · ${x.aircraft||''}</span>
@@ -442,48 +441,9 @@ async function loadStatus(){
   }catch(e){}
 }
 
-let _previewOff = null; // offscreen w×h canvas, recreated when dimensions change
-async function loadPreview(){
-  try{
-    const res = await fetch('/api/framebuffer');
-    if(!res.ok) return; // 503 in AP/setup mode
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if(buf.length < 4) return;
-    const w = buf[0] | (buf[1]<<8), h = buf[2] | (buf[3]<<8);
-    if(w<=0 || h<=0 || buf.length < 4 + w*h*2) return;
-
-    if(!_previewOff || _previewOff.width!==w || _previewOff.height!==h){
-      _previewOff = document.createElement('canvas');
-      _previewOff.width = w; _previewOff.height = h;
-    }
-    const octx = _previewOff.getContext('2d');
-    const img = octx.createImageData(w, h);
-    for(let i=0;i<w*h;i++){
-      const lo = buf[4 + i*2], hi = buf[4 + i*2 + 1];
-      const v = lo | (hi<<8);
-      const r = (v>>11)&0x1f, g = (v>>5)&0x3f, b = v&0x1f;
-      const o = i*4;
-      img.data[o]   = (r*255/31)|0;
-      img.data[o+1] = (g*255/63)|0;
-      img.data[o+2] = (b*255/31)|0;
-      img.data[o+3] = 255;
-    }
-    octx.putImageData(img, 0, 0);
-
-    const cv = $('preview');
-    // Keep aspect ratio; scale up with nearest-neighbor for a crisp pixel look.
-    if(cv.width!==w || cv.height!==h){ cv.width=w; cv.height=h; }
-    const ctx = cv.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0,0,w,h);
-    ctx.drawImage(_previewOff, 0, 0);
-  }catch(e){}
-}
-
-function loadAll(){ loadSettings(); loadStatus(); loadPreview(); }
+function loadAll(){ loadSettings(); loadStatus(); }
 loadAll();
 setInterval(loadStatus, 5000);
-setInterval(loadPreview, 1500);
 </script>
 </body>
 </html>

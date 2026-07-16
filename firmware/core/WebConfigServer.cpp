@@ -78,8 +78,6 @@ void WebConfigServer::registerRoutes()
                { handleGetStatus(); });
     _server.on("/api/flights", HTTP_GET, [this]()
                { handleGetFlights(); });
-    _server.on("/api/framebuffer", HTTP_GET, [this]()
-               { handleFramebuffer(); });
     _server.on("/api/geolocate", HTTP_GET, [this]()
                { handleGeolocate(); });
     _server.on("/api/wifiscan", HTTP_GET, [this]()
@@ -166,6 +164,12 @@ String WebConfigServer::buildFlightsJson() const
             o["private"] = f.is_private;
             if (f.has_metrics)
             {
+                // Distance from the configured center — the key the list is already
+                // ordered by (FlightDataFetcher sorts candidates nearest-first). NAN in
+                // Flights mode, which has no center to measure from, so the guard omits
+                // the key there rather than emitting null.
+                if (!isnan(f.distance_km))
+                    o["distanceKm"] = round(f.distance_km * 10.0) / 10.0;
                 if (!isnan(f.altitude_ft))
                     o["altitudeFt"] = (long)f.altitude_ft;
                 if (!isnan(f.groundspeed_kt))
@@ -185,29 +189,6 @@ String WebConfigServer::buildFlightsJson() const
 void WebConfigServer::handleGetFlights()
 {
     _server.send(200, "application/json", buildFlightsJson());
-}
-
-void WebConfigServer::handleFramebuffer()
-{
-    uint16_t w = 0, h = 0;
-    const uint16_t *fb = _display ? _display->framebuffer(w, h) : nullptr;
-    if (!fb || w == 0 || h == 0)
-    {
-        _server.send(503, "application/octet-stream", "");
-        return;
-    }
-
-    // Body: 4-byte header (w, h little-endian) + w*h little-endian RGB565 pixels.
-    const size_t pxBytes = (size_t)w * (size_t)h * sizeof(uint16_t);
-    uint8_t hdr[4] = {(uint8_t)(w & 0xFF), (uint8_t)(w >> 8),
-                      (uint8_t)(h & 0xFF), (uint8_t)(h >> 8)};
-
-    _server.setContentLength(sizeof(hdr) + pxBytes);
-    _server.send(200, "application/octet-stream", "");
-
-    WiFiClient client = _server.client();
-    client.write(hdr, sizeof(hdr));
-    client.write((const uint8_t *)fb, pxBytes); // ESP32 is little-endian: bytes match RGB565 LE
 }
 
 void WebConfigServer::handleGeolocate()
