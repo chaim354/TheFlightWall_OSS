@@ -90,6 +90,14 @@ static bool connectWifiSta()
     applyWifiRegion();           // unlock ch 12-13 before associating
     WiFi.setAutoReconnect(true); // recover transient drops without a reboot
     WiFi.persistent(false);
+    // Modem sleep OFF. arduino-esp32 defaults _sleepEnabled to WIFI_PS_MIN_MODEM on
+    // every target except the S2 (WiFiGeneric.cpp: the #if CONFIG_IDF_TARGET_ESP32S2
+    // branch is the ONLY one that gets WIFI_PS_NONE), so the S3 sleeps between DTIM
+    // beacons unless told otherwise. That parks the radio mid-TLS-handshake and is a
+    // prime suspect for the outbound connect timeouts and mid-handshake resets we
+    // see while inbound LAN requests are unaffected. This is mains-powered on a wall;
+    // the ~20-30mA it costs buys nothing here.
+    WiFi.setSleep(false);
     g_display.displayMessage(String("WiFi: ") + g_settings.wifiSsid);
     WiFi.begin(g_settings.wifiSsid.c_str(), g_settings.wifiPassword.c_str());
     Serial.print("Connecting to WiFi");
