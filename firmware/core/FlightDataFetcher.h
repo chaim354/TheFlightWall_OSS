@@ -18,8 +18,11 @@ public:
 
     // Fetches according to the current tracking mode in g_settings, applies
     // filters, caps to maxFlights, and enriches with friendly names + metrics.
+    // `ok` distinguishes a genuine "0 flights overhead" (ok=true, returns 0) from
+    // a failed fetch (ok=false) — callers must not blank the display on failure.
     size_t fetchFlights(std::vector<StateVector> &outStates,
-                        std::vector<FlightInfo> &outFlights);
+                        std::vector<FlightInfo> &outFlights,
+                        bool &ok);
 
 private:
     BaseStateVectorFetcher *_stateFetcher;
@@ -42,8 +45,9 @@ private:
                      const String &icao24, FlightInfo &out);
 
     size_t fetchAreaMode(std::vector<StateVector> &outStates,
-                         std::vector<FlightInfo> &outFlights);
-    size_t fetchFlightsMode(std::vector<FlightInfo> &outFlights);
+                         std::vector<FlightInfo> &outFlights,
+                         bool &ok);
+    size_t fetchFlightsMode(std::vector<FlightInfo> &outFlights, bool &ok);
 
     void applyLocalIdentity(const String &callsign, FlightInfo &info);
     bool passesAirlineAllowList(const FlightInfo &info);

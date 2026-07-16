@@ -102,26 +102,37 @@ bool FlightDataFetcher::passesAirlineAllowList(const FlightInfo &info)
 }
 
 size_t FlightDataFetcher::fetchFlights(std::vector<StateVector> &outStates,
-                                       std::vector<FlightInfo> &outFlights)
+                                       std::vector<FlightInfo> &outFlights,
+                                       bool &ok)
 {
     outStates.clear();
     outFlights.clear();
+    ok = false;
 
     if (g_settings.mode == TrackingMode::Flights)
-        return fetchFlightsMode(outFlights);
-    return fetchAreaMode(outStates, outFlights);
+        return fetchFlightsMode(outFlights, ok);
+    return fetchAreaMode(outStates, outFlights, ok);
 }
 
 size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
-                                        std::vector<FlightInfo> &outFlights)
+                                        std::vector<FlightInfo> &outFlights,
+                                        bool &ok)
 {
-    bool ok = _stateFetcher->fetchStateVectors(
-        g_settings.centerLat,
-        g_settings.centerLon,
-        g_settings.radiusKm,
-        outStates);
-    if (!ok)
+    if (!_stateFetcher->fetchStateVectors(
+            g_settings.centerLat,
+            g_settings.centerLon,
+            g_settings.radiusKm,
+            outStates))
+    {
+        // The state fetch itself failed (network/API). Report it so the caller can
+        // keep the last known flights instead of treating this as "sky is empty".
+        ok = false;
         return 0;
+    }
+
+    // The state fetch succeeded. Everything below only ever filters the result, so
+    // ending with 0 flights from here is a legitimate "nothing overhead", not a failure.
+    ok = true;
 
     // Pre-filter state vectors by on-ground and altitude band before enrichment.
     std::vector<StateVector> candidates;
@@ -228,8 +239,11 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
     return enriched;
 }
 
-size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights)
+size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights, bool &ok)
 {
+    // A per-flight enrichment miss is a partial result, not a total failure: the
+    // tracked list is user-curated and an ident simply may not be airborne now.
+    ok = true;
     size_t enriched = 0;
     for (const String &ident : g_settings.trackedFlights)
     {

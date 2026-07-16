@@ -30,6 +30,7 @@ Run loop:
 #include "core/Settings.h"
 #include "core/HttpJson.h"
 #include "esp_heap_caps.h"
+#include "esp_task_wdt.h"
 #include "adapters/OpenSkyFetcher.h"
 #include "adapters/AeroAPIFetcher.h"
 #include "adapters/AdsbdbFetcher.h"
@@ -59,6 +60,8 @@ static unsigned long g_lastRenderMs = 0;
 static bool g_firstFetchDone = false;
 static int g_appliedBrightness = -1;
 static std::vector<FlightInfo> g_lastFlights;
+static uint8_t g_consecutiveFailures = 0;      // drives the fetch backoff
+static unsigned long g_lastGoodFetchMs = 0;    // for the stale-data cutoff
 
 static const char *kSetupApSsid = "FlightWall-Setup";
 
@@ -178,7 +181,30 @@ static void doFetchAndRender()
     logHeap("cycle-start");
     std::vector<StateVector> states;
     std::vector<FlightInfo> flights;
-    size_t enriched = g_fetcher->fetchFlights(states, flights);
+    bool ok = false;
+    size_t enriched = g_fetcher->fetchFlights(states, flights, ok);
+    if (!ok)
+    {
+        if (g_consecutiveFailures < 255)
+            g_consecutiveFailures++;
+        Serial.printf("Fetch FAILED (%u consecutive) — keeping last flights\n", (unsigned)g_consecutiveFailures);
+        g_web.setLastFetchInfo((int)g_lastFlights.size(), "fetch failed - showing last known");
+        // Keep showing the last good list rather than blanking the wall, but don't
+        // show hours-old data forever: clear it once it's clearly stale.
+        const unsigned long staleMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
+        if (g_lastGoodFetchMs != 0 && (millis() - g_lastGoodFetchMs) > staleMs && !g_lastFlights.empty())
+        {
+            Serial.println("Last flights are stale; clearing");
+            g_lastFlights.clear();
+            g_display.markFlightsUpdated();
+            g_display.displayFlights(g_lastFlights);
+        }
+        g_firstFetchDone = true; // so the loop keeps its cadence/backoff rather than hot-looping
+        g_lastRenderMs = millis();
+        return;
+    }
+    g_consecutiveFailures = 0;
+    g_lastGoodFetchMs = millis();
 
     Serial.print("Enriched flights: ");
     Serial.println((int)enriched);
@@ -268,6 +294,14 @@ void setup()
     g_aeroApi.setHttp(&g_http);
     g_fetcher = new FlightDataFetcher(&g_openSky, &g_aeroApi, &g_adsbdb);
 
+    // Liveness backstop. loopTask runs on core 1, whose idle task arduino does NOT
+    // watch, and loopTask isn't auto-subscribed — so today a hung loop() is silent.
+    // The timeout is deliberately generous: a healthy fetch can legitimately block
+    // for seconds, and CONFIG_ESP_TASK_WDT_PANIC=y means a trip REBOOTS. 120s only
+    // fires on a genuine hang, never on a slow-but-progressing cycle.
+    esp_task_wdt_init(120, true); // reconfigures; the TWDT is already auto-inited
+    enableLoopWDT();
+
     logHeap("boot-done");
 }
 
@@ -335,7 +369,16 @@ void loop()
         return;
     }
 
-    const unsigned long intervalMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL;
+    unsigned long intervalMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL;
+    if (g_consecutiveFailures > 0)
+    {
+        // Exponential backoff on consecutive failures: 2x per failure, capped at 5 min.
+        // Protects the OpenSky daily credit budget when the API or WiFi is down.
+        uint8_t shift = g_consecutiveFailures > 4 ? 4 : g_consecutiveFailures;
+        unsigned long backoff = intervalMs << shift;
+        const unsigned long kMaxBackoffMs = 300000UL;
+        intervalMs = backoff > kMaxBackoffMs ? kMaxBackoffMs : backoff;
+    }
     const unsigned long now = millis();
     if (!g_firstFetchDone || (now - g_lastFetchMs >= intervalMs))
     {
