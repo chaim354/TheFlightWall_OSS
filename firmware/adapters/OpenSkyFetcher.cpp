@@ -31,6 +31,20 @@ WiFiClientSecure &OpenSkyFetcher::secureClient()
         m_secure.setHandshakeTimeout(15); // seconds
         m_secureInit = true;
     }
+    // Close anything left open by the previous call before handing the client over.
+    //
+    // OpenSky spans TWO hosts — auth.opensky-network.org for the token, then
+    // opensky-network.org for the states — and HTTPClient::connect() short-circuits on
+    // `if (connected()) return true;` WITHOUT comparing hosts. fetchToken() does not
+    // call useHTTP10(), so its _reuse stays true and end() deliberately KEEPS its
+    // socket open; the states GET would then be sent down that auth connection.
+    //
+    // begin(url) could not hit this because it built a fresh client inside each
+    // HTTPClient. Sharing one client (needed to bound the handshake) reintroduced the
+    // "one persistent client can hold one host" hazard, so pay a handshake per call —
+    // exactly what the old code did. useHTTP10(true) already disables keep-alive on
+    // the states path anyway, so this costs nothing there.
+    m_secure.stop();
     return m_secure;
 }
 
