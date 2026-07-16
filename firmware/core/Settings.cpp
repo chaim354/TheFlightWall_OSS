@@ -12,6 +12,37 @@ Purpose: Implementation of the runtime Settings store (LittleFS + ArduinoJson).
 #include "config/HardwareConfiguration.h"
 #include "config/APIConfiguration.h"
 
+// Name <-> enum for the light sensor type. A switch rather than a ternary chain so a
+// new type is a visible edit here instead of silently serializing as "analog" — the
+// same fall-through hazard LightSensor's dispatch had.
+static const char *lightSensorTypeName(LightSensorType t)
+{
+    switch (t)
+    {
+    case LightSensorType::BH1750:
+        return "bh1750";
+    case LightSensorType::TCS3472:
+        return "tcs3472";
+    case LightSensorType::Analog:
+        break;
+    }
+    return "analog";
+}
+
+static LightSensorType lightSensorTypeFromName(const char *name)
+{
+    if (name)
+    {
+        const String n(name);
+        if (n == "bh1750")
+            return LightSensorType::BH1750;
+        if (n == "tcs3472")
+            return LightSensorType::TCS3472;
+    }
+    // Unknown/absent -> Analog: the one type that needs no bus and no extra hardware.
+    return LightSensorType::Analog;
+}
+
 Settings g_settings;
 
 static const char *kSettingsPath = "/settings.json";
@@ -50,7 +81,7 @@ void Settings::seedDefaults()
 
     lightSensorEnabled = false;
     lightSensorType = LightSensorType::Analog;
-    lightSensorPin = 34;
+    lightSensorPin = HardwareConfiguration::LIGHT_ANALOG_PIN;
     lightDarkThreshold = 500;
     lightHysteresis = 150;
     lightSensorDimInstead = false;
@@ -206,7 +237,7 @@ String Settings::toJson() const
 
     JsonObject light = doc.createNestedObject("light");
     light["enabled"] = lightSensorEnabled;
-    light["type"] = (lightSensorType == LightSensorType::BH1750) ? "bh1750" : "analog";
+    light["type"] = lightSensorTypeName(lightSensorType);
     light["pin"] = lightSensorPin;
     light["darkThreshold"] = lightDarkThreshold;
     light["hysteresis"] = lightHysteresis;
@@ -381,9 +412,7 @@ bool Settings::fromJson(const String &in)
         if (light.containsKey("enabled"))
             lightSensorEnabled = light["enabled"].as<bool>();
         if (light.containsKey("type"))
-            lightSensorType = (String(light["type"].as<const char *>()) == "bh1750")
-                                  ? LightSensorType::BH1750
-                                  : LightSensorType::Analog;
+            lightSensorType = lightSensorTypeFromName(light["type"].as<const char *>());
         if (light.containsKey("pin"))
             lightSensorPin = light["pin"].as<uint8_t>();
         if (light.containsKey("darkThreshold"))

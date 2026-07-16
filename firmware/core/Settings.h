@@ -16,6 +16,7 @@ Flow:
 
 #include <Arduino.h>
 #include <vector>
+#include "config/HardwareConfiguration.h" // board-guarded default light-sensor pin
 
 enum class TrackingMode : uint8_t
 {
@@ -32,9 +33,15 @@ enum class EnrichmentSource : uint8_t
 
 enum class LightSensorType : uint8_t
 {
-    Analog = 0, // photoresistor/LDR on an ADC1 pin (analogRead)
-    BH1750 = 1  // I2C lux sensor on SDA=21 / SCL=22
+    Analog = 0,  // photoresistor/LDR on an ADC1 pin (analogRead)
+    BH1750 = 1,  // I2C lux sensor; reading is lux
+    TCS3472 = 2, // I2C RGBC sensor (TCS34725/27); reading is the raw Clear channel
 };
+// I2C pins for BH1750/TCS3472 come from HardwareConfiguration (board-guarded).
+// NOTE: lightDarkThreshold's UNITS depend on this type — raw ADC counts (0-4095),
+// lux, or raw Clear counts respectively. They are not interchangeable, and the 500
+// default only ever made sense for Analog (500 lux is a lit office). Tune it against
+// the live `lightLevel` in /api/status rather than by reasoning about the number.
 
 // Which fields are rendered on each flight card, in order. Toggled from web UI.
 struct DisplayLayout
@@ -115,8 +122,10 @@ struct Settings
     // ---- Ambient light sensor (auto-off / dim when the room is dark) ----
     bool lightSensorEnabled = false;
     LightSensorType lightSensorType = LightSensorType::Analog;
-    uint8_t lightSensorPin = 34;        // ADC1 pin for analog sensor (34/35/36/39/33)
-    uint16_t lightDarkThreshold = 500;  // below this reading = dark (0-4095 analog, or lux)
+    // ADC1 pin for the analog sensor. Board-guarded default: 34 is ADC1 on the classic
+    // ESP32 but is octal PSRAM on an S3 N16R8. LightSensor::begin() range-checks it.
+    uint8_t lightSensorPin = HardwareConfiguration::LIGHT_ANALOG_PIN;
+    uint16_t lightDarkThreshold = 500;  // below this = dark; UNITS depend on sensor type
     uint16_t lightHysteresis = 150;     // must rise this far above threshold to turn back on
     bool lightSensorDimInstead = false; // false = blank the panel, true = dim it
     uint8_t lightDimBrightness = 3;     // brightness used when dimming in the dark

@@ -184,10 +184,14 @@
       <div><label>Sensor type</label>
         <select id="lightSensorType">
           <option value="analog">Analog LDR (ADC1 pin)</option>
-          <option value="bh1750">BH1750 lux (I2C 21/22)</option>
+          <option value="bh1750">BH1750 lux (I2C)</option>
+          <option value="tcs3472">TCS3472 / TCS34725 (I2C)</option>
         </select>
+        <!-- Pins come from the device: one index.html serves both the ESP32 and the
+             S3, whose maps differ (the S3 has no GPIO 22 at all). -->
+        <small class="help">I2C on this board: <span id="i2cPins">…</span></small>
       </div>
-      <div><label>Analog pin (ADC1: 34/35/36/39/33)</label><input id="lightSensorPin" type="number" /></div>
+      <div><label>Analog pin (ADC1: <span id="adc1Range">…</span>)</label><input id="lightSensorPin" type="number" /></div>
     </div>
     <div class="row">
       <div><label>Dark threshold</label><input id="lightDarkThreshold" type="number" /></div>
@@ -422,6 +426,9 @@ async function loadStatus(){
       `<span class="pill">${s.mode} mode</span>`+
       `<span class="pill">${s.flightCount} flights</span>`+
       `<span class="pill">heap ${Math.round(s.freeHeap/1024)}k</span>`;
+    // Board-specific pins, reported by the device (the ESP32 and S3 maps differ).
+    if('i2cSda' in s){ const p=$('i2cPins'); if(p) p.textContent = `SDA ${s.i2cSda} / SCL ${s.i2cScl}`; }
+    if('adc1Min' in s){ const a=$('adc1Range'); if(a) a.textContent = `${s.adc1Min}-${s.adc1Max}`; }
     if('lightLevel' in s && s.lightLevel >= 0){
       const el = $('lightLive');
       if(el) el.textContent = `Live reading: ${s.lightLevel}  ·  panel ${s.lightDark ? 'OFF (dark)' : 'on (lit)'} — set the threshold just above the dark value.`;

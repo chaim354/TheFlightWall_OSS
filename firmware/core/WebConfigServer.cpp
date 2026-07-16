@@ -3,6 +3,7 @@ Purpose: Implementation of the on-device configuration & control web server.
 */
 #include "core/WebConfigServer.h"
 #include "core/Settings.h"
+#include "config/HardwareConfiguration.h" // board-guarded pins reported in /api/status
 #include "adapters/GeoLocator.h"
 
 #include <LittleFS.h>
@@ -140,6 +141,13 @@ void WebConfigServer::handleGetStatus()
     doc["freeHeap"] = (uint32_t)ESP.getFreeHeap();
     doc["lightLevel"] = _lightLevel;
     doc["lightDark"] = _lightDark;
+    // Board-specific pins so the (single, board-agnostic) web UI can label the light
+    // sensor controls truthfully. Hardcoding them in index.html got it wrong on the
+    // S3, which has no GPIO 22 and whose ADC1 is 1-10 rather than 32-39.
+    doc["i2cSda"] = HardwareConfiguration::I2C_SDA;
+    doc["i2cScl"] = HardwareConfiguration::I2C_SCL;
+    doc["adc1Min"] = HardwareConfiguration::ADC1_PIN_MIN;
+    doc["adc1Max"] = HardwareConfiguration::ADC1_PIN_MAX;
     String out;
     serializeJson(doc, out);
     _server.send(200, "application/json", out);
