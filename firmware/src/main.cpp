@@ -299,8 +299,18 @@ void setup()
     // The timeout is deliberately generous: a healthy fetch can legitimately block
     // for seconds, and CONFIG_ESP_TASK_WDT_PANIC=y means a trip REBOOTS. 120s only
     // fires on a genuine hang, never on a slow-but-progressing cycle.
-    esp_task_wdt_init(120, true); // reconfigures; the TWDT is already auto-inited
-    enableLoopWDT();
+    // Only subscribe if the timeout actually took. If the reconfigure fails we would
+    // otherwise be subscribing loopTask to the 5s DEFAULT, and a healthy multi-second
+    // fetch would reboot-loop the device — worse than the silent hang we're fixing.
+    esp_err_t wdtErr = esp_task_wdt_init(120, true); // reconfigures; TWDT is auto-inited
+    if (wdtErr == ESP_OK)
+    {
+        enableLoopWDT();
+    }
+    else
+    {
+        Serial.printf("[wdt] timeout reconfigure failed (%d); leaving loop WDT off\n", (int)wdtErr);
+    }
 
     logHeap("boot-done");
 }
