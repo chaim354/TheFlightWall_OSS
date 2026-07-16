@@ -11,6 +11,29 @@ Outputs: Populates outStateVectors with filtered results (distance_km, bearing_d
 #include "adapters/OpenSkyFetcher.h"
 #include "core/Settings.h"
 
+// The TLS client for every OpenSky call. Configured once, lazily (a global fetcher
+// is constructed before WiFi/Settings exist).
+//
+// setHandshakeTimeout(15) is the load-bearing line. Without our own client,
+// HTTPClient::begin(url) constructs a WiFiClientSecure internally whose
+// handshake_timeout is the 120000ms default — identical to the loop watchdog — so a
+// stalled handshake reboots the board instead of failing. 15s matches HttpJson, and
+// leaves room for the enrichment calls later in the same fetch cycle.
+//
+// setInsecure() preserves existing behavior: begin(url) reached the same state via
+// TLSTraits::verify() (CA == nullptr -> setInsecure), so this is not a downgrade.
+// The coredump confirms it: `insecure=true` in the captured start_ssl_client frame.
+WiFiClientSecure &OpenSkyFetcher::secureClient()
+{
+    if (!m_secureInit)
+    {
+        m_secure.setInsecure();
+        m_secure.setHandshakeTimeout(15); // seconds
+        m_secureInit = true;
+    }
+    return m_secure;
+}
+
 static String urlEncodeForm(const String &value)
 {
     String out;
@@ -86,7 +109,7 @@ bool OpenSkyFetcher::requestAccessToken(String &outToken, unsigned long &outExpi
     HTTPClient http;
     Serial.print("OpenSkyFetcher: Token URL: ");
     Serial.println(APIConfiguration::OPENSKY_TOKEN_URL);
-    http.begin(APIConfiguration::OPENSKY_TOKEN_URL);
+    http.begin(secureClient(), APIConfiguration::OPENSKY_TOKEN_URL);
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     http.addHeader("Accept", "application/json");
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -183,7 +206,9 @@ bool OpenSkyFetcher::fetchStateVectors(double centerLat,
                  "&extended=1"; // include ADS-B emitter category (index 17; 8 = rotorcraft)
 
     HTTPClient http;
-    http.begin(url); // OpenSky uses its own transport (Bearer token, not via HttpJson)
+    // OpenSky uses its own transport (Bearer token, not via HttpJson) — but it must
+    // still pass OUR client, so the TLS handshake is bounded. See secureClient().
+    http.begin(secureClient(), url);
     http.useHTTP10(true); // unchunked body so we can stream-parse the states array
     http.setTimeout(15000);
     http.addHeader("Authorization", String("Bearer ") + m_accessToken);
@@ -192,7 +217,7 @@ bool OpenSkyFetcher::fetchStateVectors(double centerLat,
     if (code == 401 && m_accessToken.length() > 0 && ensureAccessToken(true))
     {
         http.end();
-        http.begin(url);
+        http.begin(secureClient(), url);
         http.useHTTP10(true);
         http.setTimeout(15000);
         http.addHeader("Authorization", String("Bearer ") + m_accessToken);
