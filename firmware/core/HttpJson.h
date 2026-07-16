@@ -5,9 +5,12 @@ Purpose: One shared HTTPS+JSON client for all fetchers.
   allocated once (early), not per request. Repeated per-request allocation is
   what fragments the heap and makes later TLS handshakes fail with adequate
   total free heap but no contiguous block.
-- Streams the response body directly into ArduinoJson (no whole-body String),
-  and forces HTTP/1.0 so servers return an unchunked Content-Length body the
-  stream parser can consume (OpenSky's chunked body breaks raw getStream()).
+- Streams the response body directly into ArduinoJson (no whole-body String).
+- Uses HTTP/1.1 keep-alive so ONE TLS handshake serves many same-host calls.
+  (It deliberately does NOT force HTTP/1.0: that would disable keep-alive, and
+  adsbdb/hexdb both return Content-Length, so the stream parser is happy on 1.1.
+  OpenSky's body IS chunked and does need useHTTP10 — but OpenSky uses its own
+  HTTPClient, not this class.)
 */
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
