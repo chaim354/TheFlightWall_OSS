@@ -145,8 +145,35 @@ void Hub75Display::applySettings()
 
 void Hub75Display::present()
 {
-    if (_panel && _canvas)
-        _panel->drawRGBBitmap(0, 0, _canvas->getBuffer(), _matrixWidth, _matrixHeight);
+    if (!_panel || !_canvas)
+        return;
+    // Overlay here rather than in each compose path: present() is the single blit
+    // point every screen funnels through (flight cards, all four no-flights modes,
+    // splash, messages), so the toast works over all of them for free.
+    drawToastIfActive();
+    _panel->drawRGBBitmap(0, 0, _canvas->getBuffer(), _matrixWidth, _matrixHeight);
+}
+
+void Hub75Display::showToast(const String &text, unsigned long durationMs)
+{
+    _toastText = text;
+    _toastUntilMs = millis() + durationMs;
+    // Force a recompose so it appears on the next ~200ms tick instead of waiting for
+    // the cycle to advance or a fetch to land.
+    markFlightsUpdated();
+}
+
+void Hub75Display::drawToastIfActive()
+{
+    if (_toastUntilMs == 0 || millis() >= _toastUntilMs || !_canvas)
+        return;
+    // Bottom strip, blacked out and rimmed: readable over any card without needing to
+    // know that card's layout.
+    const int16_t h = 9;
+    const int16_t y = (int16_t)_matrixHeight - h;
+    _canvas->fillRect(0, y, _matrixWidth, h, 0);
+    _canvas->drawFastHLine(0, y, _matrixWidth, 0x39E7); // dim rule to lift it off the card
+    drawTextLine(2, y + 2, _toastText, 0xFFFF);
 }
 
 const uint16_t *Hub75Display::framebuffer(uint16_t &w, uint16_t &h) const
@@ -810,6 +837,16 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
     //    clockfact) must redraw when their frame key changes (current minute for
     //    the clock, fact index for fun facts) even though indexToShow and
     //    _dataVersion are unchanged — otherwise the gate would freeze them.
+    // A toast must ERASE itself, not merely appear. showToast() bumps _dataVersion so
+    // it paints; without this, expiry changes neither the index nor the version, the
+    // gate below returns early, and the toast stays burned on screen until the next
+    // cycle advance. Same class of exception as the animated no-flights modes.
+    if (_toastUntilMs != 0 && millis() >= _toastUntilMs)
+    {
+        _toastUntilMs = 0;
+        ++_dataVersion; // one more recompose, now without the overlay
+    }
+
     if (indexToShow == _lastComposedIndex && _dataVersion == _lastComposedVersion)
     {
         if (indexToShow != SIZE_MAX)

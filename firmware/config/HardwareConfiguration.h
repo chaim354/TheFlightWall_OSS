@@ -42,6 +42,31 @@ namespace HardwareConfiguration
     static const int8_t HUB75_CLK = 16;
 #endif
 
+    // ---- Physical buttons (momentary to GND, INPUT_PULLUP, active LOW) --------
+    // Board-guarded, and it MUST be. An earlier version hardcoded 18/21 for both
+    // targets after checking only the HUB75 map — but on the classic ESP32, GPIO 21
+    // is I2C_SDA (forty lines below, same file). With buttons and an I2C light sensor
+    // both enabled there, pinMode(21, INPUT_PULLUP) and Wire.begin(21, 22) would fight
+    // over one pin. The S3 was unaffected (its I2C is 41/42), which is exactly how the
+    // bug survived: it worked on the board being tested.
+    // An unwired pin reads HIGH (= released), so enabling buttons with no hardware
+    // attached is inert rather than a stream of phantom presses.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    // I2C is on 41/42 here, so 21 is genuinely free.
+    static const int8_t BUTTON_A_PIN = 18;
+    static const int8_t BUTTON_B_PIN = 21;
+#else
+    // The classic ESP32's budget is nearly exhausted: HUB75 takes 14 pins, SPI flash
+    // 6, UART0 2, I2C 2. Free WITH an internal pull-up is exactly {0, 2, 18, 33} —
+    // GPIO 34-39 are input-only with NO internal pull-up, so they would need external
+    // resistors. 0 and 2 are strapping pins (a button on GPIO 0 held during reset
+    // drops the board into download mode). That leaves 18 and 33.
+    // CAVEAT: 33 is also a valid ADC1 pin for the analog light sensor, so the two
+    // cannot coexist on this target. LightSensor::begin() cross-checks and refuses.
+    static const int8_t BUTTON_A_PIN = 18;
+    static const int8_t BUTTON_B_PIN = 33;
+#endif
+
     // ---- Ambient light sensor -------------------------------------------------
     // Board-guarded for the same reason the HUB75 map above is: the ESP32 values are
     // physically wrong on the S3, silently.

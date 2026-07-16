@@ -37,6 +37,12 @@ public:
     // UI, and the logo pool is sized from it).
     void applySettings();
 
+    // Briefly overlay a line of text on whatever is on screen. Used by the mode
+    // button: noFlightsMode only renders when the sky is EMPTY, so pressing it while
+    // flights are up changes a setting you cannot see change — which reads as a
+    // broken button. The toast is the acknowledgement.
+    void showToast(const String &text, unsigned long durationMs = 2000);
+
     void setBrightness(uint8_t brightness);
     const uint16_t *framebuffer(uint16_t &w, uint16_t &h) const override;
 
@@ -63,6 +69,11 @@ private:
     // track a per-mode "frame key" (current minute for the clock, fact index for
     // fun facts) and force a recompose when it changes so the screen ticks.
     long _lastNoFlightsKey = -1;
+
+    // Transient overlay (see showToast). _toastUntilMs == 0 means inactive.
+    String _toastText;
+    unsigned long _toastUntilMs = 0;
+    void drawToastIfActive();
 
     // Decoded logo tiles (from /logos/<key>.rgb565 on LittleFS), keyed by the
     // logo key (operator ICAO or a "_HELI"/"_PRIVATE"/"_CARGO" pseudo-key).

@@ -79,8 +79,9 @@ void Settings::seedDefaults()
     filters = AircraftFilters();
     schedule = BrightnessSchedule();
 
-    lightSensorEnabled = false;
-    lightSensorType = LightSensorType::Analog;
+    buttonsEnabled = true;
+    lightSensorEnabled = true;
+    lightSensorType = LightSensorType::TCS3472;
     lightSensorPin = HardwareConfiguration::LIGHT_ANALOG_PIN;
     lightDarkThreshold = 500;
     lightHysteresis = 150;
@@ -234,6 +235,9 @@ String Settings::toJson() const
     sch["nightStartHour"] = schedule.nightStartHour;
     sch["nightEndHour"] = schedule.nightEndHour;
     sch["timezoneOffsetMinutes"] = schedule.timezoneOffsetMinutes;
+
+    JsonObject btn = doc.createNestedObject("buttons");
+    btn["enabled"] = buttonsEnabled;
 
     JsonObject light = doc.createNestedObject("light");
     light["enabled"] = lightSensorEnabled;
@@ -404,6 +408,13 @@ bool Settings::fromJson(const String &in)
             schedule.nightEndHour = sch["nightEndHour"].as<uint8_t>();
         if (sch.containsKey("timezoneOffsetMinutes"))
             schedule.timezoneOffsetMinutes = sch["timezoneOffsetMinutes"].as<int16_t>();
+    }
+
+    if (doc.containsKey("buttons"))
+    {
+        JsonObject btn = doc["buttons"];
+        if (btn.containsKey("enabled"))
+            buttonsEnabled = btn["enabled"].as<bool>();
     }
 
     if (doc.containsKey("light"))

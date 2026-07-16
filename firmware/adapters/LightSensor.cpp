@@ -117,6 +117,22 @@ void LightSensor::begin()
     }
 
     case LightSensorType::Analog:
+        // Cross-check against the buttons. On the classic ESP32 the free-pin budget is
+        // so thin that BUTTON_B lands on 33 — a legitimate ADC1 pin — so this
+        // collision is reachable straight from the web UI. Two subsystems silently
+        // fighting over one pin is exactly the bug that produced the 18/21 mistake;
+        // say so out loud instead of letting it be debugged twice.
+        if (g_settings.buttonsEnabled &&
+            (g_settings.lightSensorPin == (uint8_t)HardwareConfiguration::BUTTON_A_PIN ||
+             g_settings.lightSensorPin == (uint8_t)HardwareConfiguration::BUTTON_B_PIN))
+        {
+            Serial.printf("LightSensor: pin %u is already a button (A=%d, B=%d); "
+                          "analog sensor disabled. Disable buttons or pick another pin.\n",
+                          (unsigned)g_settings.lightSensorPin,
+                          (int)HardwareConfiguration::BUTTON_A_PIN,
+                          (int)HardwareConfiguration::BUTTON_B_PIN);
+            break;
+        }
         if (!isValidAdc1Pin(g_settings.lightSensorPin))
         {
             Serial.printf("LightSensor: pin %u is not ADC1 on this board (valid %u-%u); "

@@ -39,6 +39,8 @@ Run loop:
 #include "core/SerialConsole.h"
 #include "adapters/Hub75Display.h"
 #include "adapters/LightSensor.h"
+#include "adapters/Buttons.h"
+#include "utils/BrightnessLadder.h"
 #include "adapters/GeoLocator.h"
 
 static HttpJson g_http;
@@ -50,6 +52,12 @@ static Hub75Display g_display;
 static WebConfigServer g_web;
 static SerialConsole g_console;
 static LightSensor g_light;
+static Buttons g_buttons;
+// Button state. g_manualBrightness == -1 means "no override".
+static int g_manualBrightness = -1;
+static bool g_panelOff = false;
+static uint32_t g_lastAutoStateKey = 0;
+static unsigned long g_settingsDirtyMs = 0;
 static unsigned long g_lastLightMs = 0;
 
 static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
@@ -151,8 +159,38 @@ static bool isNightHour(int hour)
     return hour >= s.nightStartHour || hour < s.nightEndHour;
 }
 
+// A key describing the AUTOMATIC sources' current state. A manual (button) override
+// lasts until this changes — i.e. until the wall would have changed brightness on its
+// own: a schedule day/night boundary, or the light sensor flipping dark<->lit.
+//
+// Why not "manual wins until reboot": the panel would silently stop auto-dimming at
+// night and you would never connect that to a button you pressed last week. Why not
+// "auto always wins": then the button visibly does nothing whenever the schedule or
+// sensor is active, which reads as broken hardware. Expiring at the next transition
+// makes the override real but self-healing — the same bargain a thermostat's
+// temporary hold makes.
+static uint32_t autoStateKey()
+{
+    uint32_t k = 1;
+    if (g_settings.schedule.enabled)
+    {
+        const int hour = localHourNow();
+        k = k * 3 + (hour < 0 ? 0u : (isNightHour(hour) ? 1u : 2u));
+    }
+    if (g_settings.lightSensorEnabled)
+        k = k * 3 + (g_light.isDark() ? 1u : 2u);
+    return k;
+}
+
 static void applyBrightness()
 {
+    const uint32_t key = autoStateKey();
+    if (key != g_lastAutoStateKey)
+    {
+        g_lastAutoStateKey = key;
+        g_manualBrightness = -1; // an automatic transition retires the override
+    }
+
     uint8_t target = g_settings.brightness;
     if (g_settings.schedule.enabled)
     {
@@ -165,10 +203,77 @@ static void applyBrightness()
     if (g_settings.lightSensorEnabled && g_light.isDark())
         target = g_settings.lightSensorDimInstead ? g_settings.lightDimBrightness : 0;
 
+    // A button ramp outranks both automatic sources, until the next transition above.
+    if (g_manualBrightness >= 0)
+        target = (uint8_t)g_manualBrightness;
+    // The off toggle outranks everything, including a manual brightness.
+    if (g_panelOff)
+        target = 0;
+
     if ((int)target != g_appliedBrightness)
     {
         g_display.setBrightness(target);
         g_appliedBrightness = target;
+    }
+}
+
+// Mark settings for a deferred save. A brightness ramp changes g_settings.brightness
+// on every rung, and Settings::save() atomically rewrites the WHOLE file (tmp+rename)
+// — so saving per step would mean ~15 full flash rewrites per hold. Coalesce instead.
+static void markSettingsDirty()
+{
+    g_settingsDirtyMs = millis();
+}
+
+static void setManualBrightness(uint8_t v)
+{
+    g_manualBrightness = v;
+    g_settings.brightness = v; // persist the base so a ramp survives a reboot
+    g_panelOff = false;        // reaching for brightness means you want it visible
+    markSettingsDirty();
+    g_appliedBrightness = -1;
+    applyBrightness();
+}
+
+static void handleButtons()
+{
+    if (!g_settings.buttonsEnabled)
+        return;
+
+    const ButtonEvents e = g_buttons.poll(millis());
+    if (!(e.clickA || e.rampA || e.clickB || e.rampB))
+        return;
+
+    // Ramp from what is actually ON the panel, not from the stored base: if the
+    // schedule or the sensor has dimmed it, "up" should step from what you can see.
+    const uint8_t cur = g_appliedBrightness >= 0 ? (uint8_t)g_appliedBrightness
+                                                 : g_settings.brightness;
+    if (e.rampA)
+        setManualBrightness(brightnessUp(cur));
+    if (e.rampB)
+        setManualBrightness(brightnessDown(cur));
+
+    if (e.clickA)
+    {
+        // Deliberately NOT persisted: a panel that boots dark because of a button
+        // pressed last week is indistinguishable from a dead board.
+        g_panelOff = !g_panelOff;
+        g_appliedBrightness = -1;
+        applyBrightness();
+    }
+
+    if (e.clickB)
+    {
+        static const char *kModes[] = {"dots", "clock", "funfact", "clockfact"};
+        size_t i = 0;
+        while (i < 4 && g_settings.layout.noFlightsMode != kModes[i])
+            ++i;
+        if (i >= 4)
+            i = 0; // unknown value -> land on a known one rather than guessing
+        g_settings.layout.noFlightsMode = kModes[(i + 1) % 4];
+        markSettingsDirty();
+        g_display.markFlightsUpdated();
+        g_display.showToast(g_settings.layout.noFlightsMode);
     }
 }
 
@@ -251,6 +356,7 @@ void setup()
     g_display.initialize();
     g_appliedBrightness = g_settings.brightness;
     g_light.begin();
+    g_buttons.begin();
     g_display.displaySplash();
     delay(1500); // hold the branded splash briefly before WiFi status takes over
 
@@ -326,6 +432,16 @@ void setup()
 void loop()
 {
     g_console.poll();
+    handleButtons();
+
+    // Flush button-driven settings ~10s after the last change. See markSettingsDirty:
+    // a ramp touches g_settings.brightness on every rung and save() rewrites the whole
+    // file, so this coalesces a hold into one write instead of ~15.
+    if (g_settingsDirtyMs != 0 && millis() - g_settingsDirtyMs >= 10000)
+    {
+        g_settingsDirtyMs = 0;
+        g_settings.save();
+    }
     g_web.handle();
 
     if (g_web.consumeRestartRequested())
@@ -340,6 +456,7 @@ void loop()
         // Re-apply runtime-tunable settings immediately. Hardware/WiFi changes
         // take effect on next reboot.
         g_light.begin();          // re-init for new sensor type/pin/enable
+        g_buttons.begin();        // re-init for the new enable flag
         g_appliedBrightness = -1; // force re-apply
         applyBrightness();
         g_display.applySettings();      // resize the logo pool if maxFlights changed

@@ -119,9 +119,18 @@ struct Settings
     AircraftFilters filters;
     BrightnessSchedule schedule;
 
+    // ---- Physical buttons ----
+    // Pins are compile-time in HardwareConfiguration (a wiring choice, like HUB75 —
+    // not runtime-editable, so the web UI cannot point them at something harmful).
+    // Default ON. Safe with no hardware attached: INPUT_PULLUP makes an unwired pin
+    // read HIGH (= released), so it produces no events.
+    bool buttonsEnabled = true;
+
     // ---- Ambient light sensor (auto-off / dim when the room is dark) ----
-    bool lightSensorEnabled = false;
-    LightSensorType lightSensorType = LightSensorType::Analog;
+    // Default ON as a TCS3472. Safe with no sensor attached: the chip-ID check fails,
+    // readSensor() returns -1, and update() fail-safes to "lit" so the panel stays on.
+    bool lightSensorEnabled = true;
+    LightSensorType lightSensorType = LightSensorType::TCS3472;
     // ADC1 pin for the analog sensor. Board-guarded default: 34 is ADC1 on the classic
     // ESP32 but is octal PSRAM on an S3 N16R8. LightSensor::begin() range-checks it.
     uint8_t lightSensorPin = HardwareConfiguration::LIGHT_ANALOG_PIN;
