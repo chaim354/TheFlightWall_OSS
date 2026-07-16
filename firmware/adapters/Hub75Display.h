@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <vector>
 #include "interfaces/BaseDisplay.h"
+#include "utils/LruCache.h"
 
 class MatrixPanel_I2S_DMA;
 class GFXcanvas16;
@@ -58,12 +59,23 @@ private:
     // fun facts) and force a recompose when it changes so the screen ticks.
     long _lastNoFlightsKey = -1;
 
-    // Single-entry logo cache (loaded from /logos/<ICAO>.rgb565 on LittleFS).
-    String _logoIcao;
-    uint16_t *_logoPixels = nullptr;
-    int _logoW = 0;
-    int _logoH = 0;
-    bool _logoValid = false;
+    // Decoded logo tiles (from /logos/<key>.rgb565 on LittleFS), keyed by the
+    // logo key (operator ICAO or a "_HELI"/"_PRIVATE"/"_CARGO" pseudo-key).
+    struct LogoTile
+    {
+        uint16_t w = 0;           // w==0 marks a KNOWN-MISSING tile (negative cache)
+        uint16_t h = 0;
+        std::vector<uint16_t> px; // RAII: eviction frees automatically
+    };
+    // 4 tiles ~= 8KB held once, instead of a 2KB malloc/free on every recompose.
+    // A fixed pool is also kinder to fragmentation than repeated alloc/free.
+    // Capacity 4 also lets a missing operator key and the _CARGO fallback coexist,
+    // so a cargo flight with no operator tile stops re-hitting LittleFS every frame.
+    LruCache<String, LogoTile> _logoCache{4};
+
+    // Whether the last drawLogoOrBadge() painted a real tile (vs. the code badge).
+    // displayMiniCard() uses it to drop the redundant "Airlines/Airways" suffix.
+    bool _lastDrewLogo = false;
 
     void present(); // blit the canvas to the panel
 
@@ -82,7 +94,10 @@ private:
     long noFlightsFrameKey();                                // recompose key for the active animated mode
     uint16_t textColor();
 
-    bool loadLogoFor(const String &icao);
+    // Cache-or-load the tile for `key`. Returns nullptr only if `key` is empty;
+    // otherwise the returned tile may be a negative entry (w==0 == "no tile").
+    // The pointer is valid until the next tileFor() call.
+    const LogoTile *tileFor(const String &key);
     uint16_t accentColorFor(const String &code);
     // Draws the logo (auto-fit to the box by integer scale) or a code badge fallback.
     void drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h);

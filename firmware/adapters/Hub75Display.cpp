@@ -43,11 +43,6 @@ Hub75Display::~Hub75Display()
         delete _panel;
         _panel = nullptr;
     }
-    if (_logoPixels)
-    {
-        delete[] _logoPixels;
-        _logoPixels = nullptr;
-    }
 }
 
 bool Hub75Display::initialize()
@@ -282,55 +277,50 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
     }
 }
 
-bool Hub75Display::loadLogoFor(const String &icao)
+// Cache-or-load the decoded tile for `key`. A failed load is cached as an empty
+// LogoTile (w==0) — that negative entry is what keeps a flight with no operator
+// tile from re-opening LittleFS on every single recompose.
+const Hub75Display::LogoTile *Hub75Display::tileFor(const String &key)
 {
-    if (icao.length() == 0)
-        return false;
-    if (icao == _logoIcao)
-        return _logoValid; // cached
+    if (key.length() == 0)
+        return nullptr;
+    if (LogoTile *hit = _logoCache.find(key))
+        return hit; // hit — including a cached miss (w==0)
 
-    _logoIcao = icao;
-    _logoValid = false;
-    if (_logoPixels)
-    {
-        delete[] _logoPixels;
-        _logoPixels = nullptr;
-    }
+    LogoTile tile; // stays w==0 on any failure below -> negative cache entry
 
-    String path = String("/logos/") + icao + ".rgb565";
+    String path = String("/logos/") + key + ".rgb565";
     File f = LittleFS.open(path, "r");
-    if (!f)
-        return false;
-
-    uint8_t hdr[4];
-    if (f.read(hdr, 4) != 4)
+    if (f)
     {
+        uint8_t hdr[4];
+        if (f.read(hdr, 4) == 4)
+        {
+            int w = hdr[0] | (hdr[1] << 8);
+            int h = hdr[2] | (hdr[3] << 8);
+            if (w > 0 && h > 0 && w <= 64 && h <= 64)
+            {
+                size_t count = (size_t)w * (size_t)h;
+                std::vector<uint16_t> px(count);
+                size_t want = count * sizeof(uint16_t);
+                // stored little-endian == ESP32 native
+                if (f.read((uint8_t *)px.data(), want) == want)
+                {
+                    tile.w = (uint16_t)w;
+                    tile.h = (uint16_t)h;
+                    tile.px = std::move(px);
+                }
+            }
+        }
         f.close();
-        return false;
-    }
-    int w = hdr[0] | (hdr[1] << 8);
-    int h = hdr[2] | (hdr[3] << 8);
-    if (w <= 0 || h <= 0 || w > 64 || h > 64)
-    {
-        f.close();
-        return false;
     }
 
-    size_t count = (size_t)w * (size_t)h;
-    _logoPixels = new uint16_t[count];
-    size_t want = count * sizeof(uint16_t);
-    size_t got = f.read((uint8_t *)_logoPixels, want); // stored little-endian == ESP32 native
-    f.close();
-    if (got != want)
-    {
-        delete[] _logoPixels;
-        _logoPixels = nullptr;
-        return false;
-    }
-    _logoW = w;
-    _logoH = h;
-    _logoValid = true;
-    return true;
+    // put() takes the value by const&, so insert an empty shell and move the
+    // decoded pixels into it — no transient second copy of the tile.
+    _logoCache.put(key, LogoTile{});
+    LogoTile *slot = _logoCache.find(key); // just inserted -> MRU, never null
+    *slot = std::move(tile);
+    return slot;
 }
 
 uint16_t Hub75Display::accentColorFor(const String &code)
@@ -355,35 +345,43 @@ void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, in
     //   3. operator's real/badge tile (if it has one)
     //   4. cargo       -> generic cargo icon (only when no specific operator tile)
     //   5. text/accent fallback (below)
-    bool haveLogo = false;
+    const LogoTile *tile = nullptr;
     if (f.is_helicopter)
-        haveLogo = loadLogoFor("_HELI") && _logoValid;
+        tile = tileFor("_HELI");
     else if (f.is_private)
-        haveLogo = loadLogoFor("_PRIVATE") && _logoValid;
-    if (!haveLogo && f.operator_icao.length())
-        haveLogo = loadLogoFor(f.operator_icao) && _logoValid;
-    if (!haveLogo && f.is_cargo)
-        haveLogo = loadLogoFor("_CARGO") && _logoValid;
+        tile = tileFor("_PRIVATE");
+    if ((!tile || tile->w == 0) && f.operator_icao.length())
+        tile = tileFor(f.operator_icao);
+    if ((!tile || tile->w == 0) && f.is_cargo)
+        tile = tileFor("_CARGO");
+
+    const bool haveLogo = (tile && tile->w != 0);
+    _lastDrewLogo = haveLogo;
     if (haveLogo)
     {
+        const uint16_t *pixels = tile->px.data();
+        const int lw = tile->w, lh = tile->h;
         // Integer-scale the native tile to fill the box (1x for a 32px tile in a
         // 32px box, 2x for a 16px tile, etc.).
-        int scale = min(w / _logoW, h / _logoH);
+        int scale = min(w / lw, h / lh);
         if (scale < 1)
             scale = 1;
-        const int16_t sw = _logoW * scale, sh = _logoH * scale;
+        const int16_t sw = lw * scale, sh = lh * scale;
         const int16_t lx = x + (w - sw) / 2;
         const int16_t ly = y + (h - sh) / 2;
         if (scale == 1)
         {
-            _canvas->drawRGBBitmap(lx, ly, _logoPixels, _logoW, _logoH);
+            // Cast away const deliberately: Adafruit_GFX overloads drawRGBBitmap on
+            // uint16_t* (RAM) vs const uint16_t[] (PROGMEM). We want the RAM one,
+            // same as before. drawRGBBitmap does not write through the pointer.
+            _canvas->drawRGBBitmap(lx, ly, const_cast<uint16_t *>(pixels), lw, lh);
         }
         else
         {
-            for (int j = 0; j < _logoH; ++j)
-                for (int i = 0; i < _logoW; ++i)
+            for (int j = 0; j < lh; ++j)
+                for (int i = 0; i < lw; ++i)
                     _canvas->fillRect(lx + i * scale, ly + j * scale, scale, scale,
-                                      _logoPixels[j * _logoW + i]);
+                                      pixels[j * lw + i]);
         }
         return;
     }
@@ -568,7 +566,8 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     if (!airline.length())
         airline = f.ident.length() ? f.ident : String("?");
     // When a real logo tile is shown, the "Airlines/Airways" suffix is redundant.
-    if (_logoValid)
+    // drawLogoOrBadge() above set _lastDrewLogo for exactly this flight's tile.
+    if (_lastDrewLogo)
         airline = stripAirlineWords(airline);
 
     drawTextLine(tx, topY, truncateToColumns(airline, topCols), color);

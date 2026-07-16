@@ -57,6 +57,17 @@ public:
         return true;
     }
 
+    // Pointer to the stored value (promoted to MRU), or nullptr if absent.
+    // Valid until the next put()/eviction. Avoids copying large values out.
+    V *find(const K &key)
+    {
+        auto mit = _index.find(key);
+        if (mit == _index.end())
+            return nullptr;
+        _items.splice(_items.begin(), _items, mit->second); // move to front (MRU)
+        return &mit->second->second;
+    }
+
     // If key exists: update value and promote to MRU. Else insert at MRU and,
     // if over capacity, evict the LRU (back).
     void put(const K &key, const V &value)
