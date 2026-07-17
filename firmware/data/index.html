@@ -159,11 +159,6 @@
       <div><label>Text color</label><input id="textColor" type="color" /></div>
     </div>
     <div class="row">
-      <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
-      <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
-      <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
-    </div>
-    <div class="row">
       <div><label>When no flights</label>
         <select id="noFlightsMode">
           <option value="dots">Dots (...)</option>
@@ -187,6 +182,22 @@
     </div>
     <small class="help">Only as many lines as physically fit on the panel are drawn.</small>
 
+    <div class="sec">Clock</div>
+    <label>Time zone</label>
+    <select id="timezone">
+      <option value="UTC0">UTC</option>
+      <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (New York)</option>
+      <option value="CST6CDT,M3.2.0,M11.1.0">US Central (Chicago)</option>
+      <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (Denver)</option>
+      <option value="MST7">US Arizona (no DST)</option>
+      <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (Los Angeles)</option>
+      <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska</option>
+      <option value="HST10">US Hawaii (no DST)</option>
+      <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (London)</option>
+      <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (Berlin/Paris)</option>
+    </select>
+    <small class="help">Drives the no-flights clock <b>and</b> the night window below. Daylight saving is handled automatically — no twice-yearly edit.</small>
+
     <div class="sec">Brightness schedule</div>
     <span class="check"><input type="checkbox" id="schedEnabled"><label>Enable day/night brightness</label></span>
     <div class="row">
@@ -196,7 +207,7 @@
     <div class="row">
       <div><label>Night start hour (0–23)</label><input id="nightStartHour" type="number" min="0" max="23" /></div>
       <div><label>Night end hour (0–23)</label><input id="nightEndHour" type="number" min="0" max="23" /></div>
-      <div><label>UTC offset (minutes)</label><input id="timezoneOffsetMinutes" type="number" /></div>
+
     </div>
   </div>
 
@@ -207,6 +218,14 @@
     <small class="help">Two momentary buttons to GND on <b><span id="btnPins">…</span></b>.<br>
       <b>A:</b> click = panel off/on · hold = brighter &nbsp;|&nbsp; <b>B:</b> click = cycle no-flights mode · hold = dimmer<br>
       A held brightness overrides the schedule and the light sensor until the next automatic change.</small>
+
+    <div class="sec">Flight list</div>
+    <div class="row">
+      <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
+      <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
+      <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
+    </div>
+    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit.</small>
 
     <div class="sec">Light sensor (auto-off in the dark)</div>
     <span class="check" style="margin-top:0"><input type="checkbox" id="lightSensorEnabled"><label>Enable ambient light sensor</label></span>
@@ -331,7 +350,7 @@ async function loadSettings(){
   $('nightBrightness').value = s.schedule.nightBrightness;
   $('nightStartHour').value = s.schedule.nightStartHour;
   $('nightEndHour').value = s.schedule.nightEndHour;
-  $('timezoneOffsetMinutes').value = s.schedule.timezoneOffsetMinutes;
+  $('timezone').value = s.schedule.timezone || 'UTC0';
 
   $('buttonsEnabled').checked = !!(s.buttons && s.buttons.enabled);
   $('lightSensorEnabled').checked = !!s.light.enabled;
@@ -380,7 +399,7 @@ function collect(){
     },
     schedule:{
       enabled:$('schedEnabled').checked, dayBrightness:+$('dayBrightness').value, nightBrightness:+$('nightBrightness').value,
-      nightStartHour:+$('nightStartHour').value, nightEndHour:+$('nightEndHour').value, timezoneOffsetMinutes:+$('timezoneOffsetMinutes').value
+      nightStartHour:+$('nightStartHour').value, nightEndHour:+$('nightEndHour').value, timezone:$('timezone').value
     },
     buttons:{ enabled:$('buttonsEnabled').checked },
     light:{

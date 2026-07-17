@@ -19,6 +19,7 @@ Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
 #include "config/HardwareConfiguration.h"
 #include "config/FunFacts.h"
 #include "core/Settings.h"
+#include "utils/ClockFormat.h"
 
 // How long each fun fact stays up / how long the clock<->fact alternation holds,
 // in milliseconds. Reused as the clock recompose granularity is per-minute.
@@ -908,11 +909,9 @@ long Hub75Display::noFlightsFrameKey()
             key += (long)((millis() / kNoFlightsRotateMs) % (kFunFactCount ? kFunFactCount : 1));
         else
         {
-            long localSecs = (long)(now % 86400L) + (long)g_settings.schedule.timezoneOffsetMinutes * 60L;
-            localSecs %= 86400L;
-            if (localSecs < 0)
-                localSecs += 86400L;
-            key += localSecs / 60L; // minute of day
+            struct tm tmv;
+            localtime_r(&now, &tmv); // TZ-aware (configTzTime); DST included
+            key += (long)tmv.tm_hour * 60L + tmv.tm_min; // minute of day
         }
     }
     else // fun fact (funfact mode, or clockfact on the fact phase)
@@ -974,39 +973,28 @@ void Hub75Display::drawClockScreen()
 {
     const uint16_t color = textColor();
 
+    // One localtime_r replaces the hand-rolled offset + wrap + day-shift this used to
+    // do (and which the date line below did differently, on a shifted time_t). libc
+    // owns the zone via configTzTime, so DST is handled and the date can never
+    // disagree with the time.
     time_t now = time(nullptr);
-    long localSecs = (long)(now % 86400L) + (long)g_settings.schedule.timezoneOffsetMinutes * 60L;
-    long dayShift = 0;
-    if (localSecs < 0)
-    {
-        localSecs += 86400L;
-        dayShift = -1;
-    }
-    else if (localSecs >= 86400L)
-    {
-        localSecs -= 86400L;
-        dayShift = 1;
-    }
-    const int hh = (int)(localSecs / 3600L);
-    const int mm = (int)((localSecs % 3600L) / 60L);
-
-    char timeBuf[6];
-    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", hh, mm);
-
-    // Date line via gmtime on the offset-adjusted, day-shifted timestamp.
-    time_t local = now + (time_t)g_settings.schedule.timezoneOffsetMinutes * 60 + dayShift * 86400;
     struct tm tmv;
-    gmtime_r(&local, &tmv);
+    localtime_r(&now, &tmv);
+
+    char timeBuf[9]; // "12:00 AM" = 8 + NUL
+    formatClock12(tmv.tm_hour, tmv.tm_min, timeBuf, sizeof(timeBuf));
+
     char dateBuf[16];
     strftime(dateBuf, sizeof(dateBuf), "%a %b %d", &tmv);
 
     // Pick a clock text size that fits the panel width (6x8 glyphs scale by size).
     uint8_t ts = 2;
-    if (_matrixWidth >= 5 * 6 * 3 && _matrixHeight >= 8 * 3 + 10)
+    const int glyphs = (int)strlen(timeBuf);
+    if (_matrixWidth >= glyphs * 6 * 3 && _matrixHeight >= 8 * 3 + 10)
         ts = 3;
-    if (_matrixWidth < 5 * 6 * 2)
+    if (_matrixWidth < glyphs * 6 * 2)
         ts = 1;
-    const int tW = 5 * 6 * ts; // "HH:MM" = 5 glyphs
+    const int tW = (int)strlen(timeBuf) * 6 * ts; // "3:45 PM" / "12:00 AM" vary in width
     const int tH = 8 * ts;
 
     const bool haveDate = (_matrixHeight >= tH + 10);

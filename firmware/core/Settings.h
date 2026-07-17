@@ -53,10 +53,10 @@ struct DisplayLayout
     bool showSpeed = true;         // "451kt"
     bool showHeading = true;       // "HDG 094"
     bool showVerticalRate = true;  // "+1200fpm"
-    bool flightNumberOverVr = false; // show the flight number in the vertical-rate slot
+    bool flightNumberOverVr = true;  // show the flight number in the vertical-rate slot
     // What to show when there are zero flights:
-    //   "dots" (default), "clock", "funfact", "clockfact"
-    String noFlightsMode = "dots";
+    //   "dots", "clock", "funfact", "clockfact" (default — alternates the two)
+    String noFlightsMode = "clockfact";
 };
 
 struct AircraftFilters
@@ -77,7 +77,10 @@ struct BrightnessSchedule
     uint8_t nightBrightness = 5;
     uint8_t nightStartHour = 22; // local hour [0-23] when night brightness begins
     uint8_t nightEndHour = 7;    // local hour [0-23] when day brightness resumes
-    int16_t timezoneOffsetMinutes = 0; // offset from UTC for local time
+    // POSIX TZ string, e.g. "EST5EDT,M3.2.0,M11.1.0". Replaces a fixed minute offset,
+    // which had no DST information: it silently ran an hour wrong for half the year and
+    // dragged the night window below along with it. libc handles the transitions.
+    String timezone = "UTC0";
 };
 
 struct Settings
@@ -107,11 +110,11 @@ struct Settings
     std::vector<String> trackedFlights; // idents / callsigns / tails for Flights mode
 
     // ---- Display ----
-    uint8_t brightness = 5;
+    uint8_t brightness = 20;
     uint8_t textColorR = 255;
     uint8_t textColorG = 255;
     uint8_t textColorB = 255;
-    uint8_t maxFlights = 5;        // up to N aircraft kept/cycled
+    uint8_t maxFlights = 8;        // up to N aircraft kept/cycled
     uint32_t cycleSeconds = 3;     // seconds per flight when cycling
     uint32_t fetchIntervalSeconds = 30;
 

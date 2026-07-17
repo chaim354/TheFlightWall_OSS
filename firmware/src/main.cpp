@@ -141,11 +141,9 @@ static int localHourNow()
     time_t now = time(nullptr);
     if (now < 100000) // not synced yet
         return -1;
-    long localSecs = (long)(now % 86400L) + (long)g_settings.schedule.timezoneOffsetMinutes * 60L;
-    localSecs %= 86400L;
-    if (localSecs < 0)
-        localSecs += 86400L;
-    return (int)(localSecs / 3600L);
+    struct tm tmv;
+    localtime_r(&now, &tmv); // TZ-aware, DST included — see configTzTime in setup()
+    return tmv.tm_hour;
 }
 
 static bool isNightHour(int hour)
@@ -374,7 +372,10 @@ void setup()
             Serial.printf("mDNS: http://%s.local\n", kMdnsHostname);
         }
         // NTP for brightness scheduling (UTC; offset applied locally).
-        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        // configTzTime (not configTime) so libc owns the zone: it setenv()s TZ and
+        // tzset()s, after which localtime_r handles DST transitions itself. The old
+        // fixed offset had no DST information at all.
+        configTzTime(g_settings.schedule.timezone.c_str(), "pool.ntp.org", "time.nist.gov");
 
         // Optionally seed the Area-mode center from IP geolocation.
         if (g_settings.autoLocateOnBoot)
@@ -455,6 +456,10 @@ void loop()
     {
         // Re-apply runtime-tunable settings immediately. Hardware/WiFi changes
         // take effect on next reboot.
+        // Re-apply the zone: TZ lives in libc's environment, not in Settings, so a
+        // change here is invisible to localtime_r until tzset() runs again.
+        setenv("TZ", g_settings.schedule.timezone.c_str(), 1);
+        tzset();
         g_light.begin();          // re-init for new sensor type/pin/enable
         g_buttons.begin();        // re-init for the new enable flag
         g_appliedBrightness = -1; // force re-apply

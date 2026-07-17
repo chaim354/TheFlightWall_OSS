@@ -71,7 +71,7 @@ void Settings::seedDefaults()
     textColorR = UserConfiguration::TEXT_COLOR_R;
     textColorG = UserConfiguration::TEXT_COLOR_G;
     textColorB = UserConfiguration::TEXT_COLOR_B;
-    maxFlights = 5;
+    maxFlights = UserConfiguration::MAX_FLIGHTS;
     cycleSeconds = TimingConfiguration::DISPLAY_CYCLE_SECONDS;
     fetchIntervalSeconds = TimingConfiguration::FETCH_INTERVAL_SECONDS;
 
@@ -234,7 +234,7 @@ String Settings::toJson() const
     sch["nightBrightness"] = schedule.nightBrightness;
     sch["nightStartHour"] = schedule.nightStartHour;
     sch["nightEndHour"] = schedule.nightEndHour;
-    sch["timezoneOffsetMinutes"] = schedule.timezoneOffsetMinutes;
+    sch["timezone"] = schedule.timezone;
 
     JsonObject btn = doc.createNestedObject("buttons");
     btn["enabled"] = buttonsEnabled;
@@ -406,8 +406,8 @@ bool Settings::fromJson(const String &in)
             schedule.nightStartHour = sch["nightStartHour"].as<uint8_t>();
         if (sch.containsKey("nightEndHour"))
             schedule.nightEndHour = sch["nightEndHour"].as<uint8_t>();
-        if (sch.containsKey("timezoneOffsetMinutes"))
-            schedule.timezoneOffsetMinutes = sch["timezoneOffsetMinutes"].as<int16_t>();
+        if (sch.containsKey("timezone"))
+            schedule.timezone = sch["timezone"].as<const char *>();
     }
 
     if (doc.containsKey("buttons"))

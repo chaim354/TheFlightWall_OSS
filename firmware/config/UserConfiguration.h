@@ -11,7 +11,10 @@ namespace UserConfiguration
 
     // Display customization
     // Brightness controls overall display brightness (0-255)
-    static const uint8_t DISPLAY_BRIGHTNESS = 5;
+    static const uint8_t DISPLAY_BRIGHTNESS = 20;
+    // Also mirrored by Settings.h's initialiser: seedDefaults() reads these constants,
+    // but a default-constructed Settings uses the header's. They must agree.
+    static const uint8_t MAX_FLIGHTS = 8;
 
     // RGB color for all text rendering on the LED matrix
     static const uint8_t TEXT_COLOR_R = 255;
