@@ -22,10 +22,18 @@ static constexpr double kMetersToFeet = 3.28084;
 static constexpr double kMetersPerSecToKnots = 1.94384;
 static constexpr double kMetersPerSecToFpm = 196.850;
 
-FlightDataFetcher::FlightDataFetcher(BaseStateVectorFetcher *stateFetcher,
+FlightDataFetcher::FlightDataFetcher(BaseStateVectorFetcher *openSkyState,
+                                     BaseStateVectorFetcher *fr24State,
                                      BaseFlightFetcher *aeroApi,
                                      BaseFlightFetcher *adsbdb)
-    : _stateFetcher(stateFetcher), _aeroApi(aeroApi), _adsbdb(adsbdb) {}
+    : _openSkyState(openSkyState), _fr24State(fr24State), _aeroApi(aeroApi), _adsbdb(adsbdb) {}
+
+BaseStateVectorFetcher *FlightDataFetcher::activeStateFetcher()
+{
+    return (g_settings.positionSource == PositionSource::FlightRadar24 && _fr24State)
+               ? _fr24State
+               : _openSkyState;
+}
 
 BaseFlightFetcher *FlightDataFetcher::activeFetcher()
 {
@@ -126,7 +134,7 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
                                         std::vector<FlightInfo> &outFlights,
                                         bool &ok)
 {
-    if (!_stateFetcher->fetchStateVectors(
+    if (!activeStateFetcher()->fetchStateVectors(
             g_settings.centerLat,
             g_settings.centerLon,
             g_settings.radiusKm,
@@ -175,9 +183,24 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // Cache key prefers the stable ICAO24, falling back to callsign.
         const String key = s.icao24.length() ? s.icao24 : s.callsign;
         FlightInfo info;
-        // Best-effort: once the budget is spent this serves cache-only, so the card
-        // still renders (callsign + logo below) just without a route.
-        getEnriched(key, s.callsign, s.icao24, info, withinEnrichBudget());
+        if (s.has_inline_enrichment)
+        {
+            // The position source (e.g. FlightRadar24) already carried the route,
+            // aircraft type, and airline in the same feed — no per-flight network
+            // lookup, no enrichment-budget spend. IATA codes here; applyLocalIdentity
+            // below still supplies the airline display name + logo from the callsign.
+            info.origin.code_iata = s.origin_iata;
+            info.destination.code_iata = s.dest_iata;
+            info.aircraft_code = s.aircraft_type;
+            if (s.airline_icao.length())
+                info.operator_icao = s.airline_icao;
+        }
+        else
+        {
+            // Best-effort: once the budget is spent this serves cache-only, so the card
+            // still renders (callsign + logo below) just without a route.
+            getEnriched(key, s.callsign, s.icao24, info, withinEnrichBudget());
+        }
 
         // Local, free identity (logo) is applied whether or not the network lookup
         // succeeded — so airliners always show their logo/airline. In Area mode we

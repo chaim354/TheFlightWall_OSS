@@ -75,13 +75,17 @@ The robust hardware fix is a **fast push-pull level shifter (74HCT245 / 74AHCT24
 ## Data API Keys
 
 The data for this project consists of two parts:
-1. **Flight positions & callsigns** — public [ADS-B](https://en.wikipedia.org/wiki/Automatic_Dependent_Surveillance%E2%80%93Broadcast) data via [OpenSky](https://opensky-network.org) (free, needs an OAuth client id/secret).
-2. **Flight enrichment** — airline, route (origin/destination), and aircraft type. Selectable in the web UI:
+1. **Flight positions & callsigns** — public [ADS-B](https://en.wikipedia.org/wiki/Automatic_Dependent_Surveillance%E2%80%93Broadcast) data. Selectable in the web UI:
+   - **[OpenSky](https://opensky-network.org)** — *default, free, needs an OAuth client id/secret.*
+   - **Flightradar24** — *opt-in, no key.* An **unofficial** scrape of fr24.com's internal `feed.js` — the same JSON the live map uses. One call returns positions **and** route/airline/aircraft together, so no separate enrichment lookup is needed and its routes handle diversions/non-scheduled traffic that the free enrichment databases miss. Trade-offs: it **violates Flightradar24's Terms of Service** (personal/educational use only — see business@fr24.com for commercial), the endpoint is undocumented and can break or rate-limit, and it parses the whole area in one shot — so it's intended for the **ESP32-S3 (PSRAM)** and a modest radius. OpenSky remains the default; this is never on unless you select it.
+2. **Flight enrichment** — airline, route (origin/destination), and aircraft type. Used when the position source doesn't already provide it (OpenSky). Selectable in the web UI:
    - **[adsbdb.com](https://www.adsbdb.com/)** — *default, free, no API key.* Callsign → route + airline, ICAO24 → aircraft type.
    - **[FlightAware AeroAPI](https://flightaware.com/aeroapi)** — paid; optional. Can be the primary source, or just a **backup** that only fires when adsbdb misses a flight (so you pay only for the gaps).
    - **Off** — show callsign only.
 
 Enrichment results are **cached per aircraft** (default 10 min) so loitering planes aren't re-queried every cycle. Out of the box the wall costs **$0** for enrichment — you only need the OpenSky credentials. Enter everything later in the web UI — you do **not** have to hardcode anything.
+
+> **📖 See [docs/data-sources.md](docs/data-sources.md)** for the full rundown: every position and enrichment source, approximate monthly costs, how to configure each, and the trade-offs of the opt-in Flightradar24 source (including its Terms-of-Service and memory caveats).
 
 ### Setting up OpenSky
 1. Register for an [OpenSky](https://opensky-network.org/) account

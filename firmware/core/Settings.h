@@ -31,6 +31,16 @@ enum class EnrichmentSource : uint8_t
     Off = 2      // no enrichment; callsign-only cards
 };
 
+// Where Area-mode position (state-vector) data comes from.
+enum class PositionSource : uint8_t
+{
+    OpenSky = 0,       // default: stable, official, OAuth-key'd public API
+    FlightRadar24 = 1, // opt-in UNOFFICIAL scrape of fr24.com's feed.js. Carries
+                       // route/aircraft/airline inline (no separate enrichment
+                       // call), but violates FR24 ToS and can break/rate-limit.
+                       // Never the default; intended for personal use on the S3.
+};
+
 enum class LightSensorType : uint8_t
 {
     Analog = 0,  // photoresistor/LDR on an ADC1 pin (analogRead)
@@ -93,6 +103,9 @@ struct Settings
     String openSkyClientId;
     String openSkyClientSecret;
     String aeroApiKey;
+
+    // ---- Position source (Area mode) ----
+    PositionSource positionSource = PositionSource::OpenSky;
 
     // ---- Flight enrichment (route/airline/aircraft) ----
     EnrichmentSource enrichmentSource = EnrichmentSource::Adsbdb;

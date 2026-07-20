@@ -99,6 +99,13 @@
     <label>OpenSky client secret</label>
     <input id="openSkyClientSecret" type="password" />
 
+    <label>Position source (Area mode)</label>
+    <select id="positionSource">
+      <option value="opensky">OpenSky — official, needs key above (recommended)</option>
+      <option value="fr24">Flightradar24 — unofficial, no key, routes included</option>
+    </select>
+    <small class="help">Flightradar24 is an <b>unofficial scrape</b> of fr24.com for personal use only — it can break or rate-limit, and it carries route/airline/aircraft inline (no enrichment lookup needed). Best on the S3 (PSRAM). OpenSky stays the default.</small>
+
     <label>Flight enrichment source (route · airline · aircraft)</label>
     <select id="enrichmentSource">
       <option value="adsbdb">adsbdb.com — free, no key (recommended)</option>
@@ -318,6 +325,7 @@ async function loadSettings(){
   $('openSkyClientId').value = s.api.openSkyClientId || '';
   $('openSkyClientSecret').value = s.api.openSkyClientSecret || '';
   $('aeroApiKey').value = s.api.aeroApiKey || '';
+  $('positionSource').value = s.api.positionSource || 'opensky';
   $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
   $('enrichmentFallbackToAeroApi').checked = s.api.enrichmentFallbackToAeroApi !== false;
 
@@ -377,7 +385,7 @@ function collect(){
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
     network:{ wifiSsid:$('wifiSsid').value, wifiPassword:$('wifiPassword').value },
-    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, positionSource:$('positionSource').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),

@@ -4,9 +4,10 @@
 
 namespace UserConfiguration
 {
-    // Location configuration (default seed; change to your area or use the web UI / auto-detect)
-    static const double CENTER_LAT = 40.7234; // near JFK / NYC
-    static const double CENTER_LON = -73.7021;
+    // Location configuration (default seed; change to your area or use the web UI / auto-detect).
+    // Defaults to JFK airport's reference point — a generic landmark, not anyone's home.
+    static const double CENTER_LAT = 40.6413; // JFK (KJFK) airport reference point
+    static const double CENTER_LON = -73.7781;
     static const double RADIUS_KM = 10.0; // Search radius in km (memory-safe; raise in UI if stable)
 
     // Display customization

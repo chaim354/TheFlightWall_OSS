@@ -182,6 +182,7 @@ String Settings::toJson() const
     api["openSkyClientId"] = openSkyClientId;
     api["openSkyClientSecret"] = openSkyClientSecret;
     api["aeroApiKey"] = aeroApiKey;
+    api["positionSource"] = (positionSource == PositionSource::FlightRadar24) ? "fr24" : "opensky";
     api["enrichmentSource"] = (enrichmentSource == EnrichmentSource::AeroApi) ? "aeroapi"
                               : (enrichmentSource == EnrichmentSource::Off) ? "off"
                                                                             : "adsbdb";
@@ -292,6 +293,11 @@ bool Settings::fromJson(const String &in)
             openSkyClientSecret = api["openSkyClientSecret"].as<String>();
         if (api.containsKey("aeroApiKey"))
             aeroApiKey = api["aeroApiKey"].as<String>();
+        if (api.containsKey("positionSource"))
+        {
+            String s = api["positionSource"].as<String>();
+            positionSource = (s == "fr24") ? PositionSource::FlightRadar24 : PositionSource::OpenSky;
+        }
         if (api.containsKey("enrichmentSource"))
         {
             String s = api["enrichmentSource"].as<String>();

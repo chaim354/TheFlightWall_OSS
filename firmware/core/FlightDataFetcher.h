@@ -12,7 +12,8 @@
 class FlightDataFetcher
 {
 public:
-    FlightDataFetcher(BaseStateVectorFetcher *stateFetcher,
+    FlightDataFetcher(BaseStateVectorFetcher *openSkyState,
+                      BaseStateVectorFetcher *fr24State,
                       BaseFlightFetcher *aeroApi,
                       BaseFlightFetcher *adsbdb);
 
@@ -43,7 +44,8 @@ private:
     // once the cache fills.
     static const unsigned long kEnrichBudgetMs = 45000;
 
-    BaseStateVectorFetcher *_stateFetcher;
+    BaseStateVectorFetcher *_openSkyState;
+    BaseStateVectorFetcher *_fr24State;
     BaseFlightFetcher *_aeroApi;
     BaseFlightFetcher *_adsbdb;
 
@@ -69,6 +71,8 @@ private:
     LruCache<String, CacheEntry> _cache{64};
 
     BaseFlightFetcher *activeFetcher();
+    // Position source per g_settings.positionSource (mirrors activeFetcher()).
+    BaseStateVectorFetcher *activeStateFetcher();
     // allowNetwork=false serves the cache only and never opens a connection — how the
     // enrichment budget is enforced. The cache is still consulted because a hit is free
     // and costs no time we are trying to protect.
