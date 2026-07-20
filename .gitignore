@@ -7,3 +7,6 @@ firmware/.pio
 firmware/config/Secrets.h
 # Build artifact: regenerated from data/index.html by tools/gzip_web_assets.py
 firmware/data/*.gz
+# Local screenshots in the repo root (not for publishing). Root-anchored so the
+# tracked build photos under images/ are unaffected.
+/Screenshot*.png
