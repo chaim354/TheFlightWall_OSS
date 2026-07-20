@@ -1,15 +1,10 @@
 # TheFlightWall
 
-TheFlightWall is an LED wall which shows live information of flights going by your window.
+TheFlightWall is an LED wall that shows live information about flights passing your window.
 
-This open-source build is at **feature parity with the [FlightWall Mini](https://theflightwall.com/products/flightwall-mini-flight-tracking-led-display)**: configure and control everything from a built-in **web page** (no app required), with two tracking modes, live flight metrics, filters, and a day/night brightness schedule. See [Configuration & Control](#configuration--control-web-ui).
+> **About this fork.** This project was **inspired by the original [TheFlightWall](https://github.com/AxisNimble/TheFlightWall_OSS)** (the commercial build sold at [theflightwall.com](https://theflightwall.com)), but it has since diverged almost entirely. The firmware has been essentially rewritten and now shares **almost none of the original code or components**: it drives a **HUB75 RGB matrix** (the original was a WS2812B panel wall), is configured entirely from a built-in **web page**, and uses a new data pipeline (OpenSky + adsbdb/hexdb, with optional AeroAPI or Flightradar24). Full credit for the original concept and build goes to its creators.
 
-This is the open source version, with guides to the display, wiring, data services, and code. Check out our viral build video: [https://www.instagram.com/p/DLIbAtbJxPl](https://www.instagram.com/p/DLIbAtbJxPl)
-
-**Don't feel like building one? Check out the offical product: [theflightwall.com](https://theflightwall.com)**
-
-![Main Image](images/main-image.png)
-*Now with bundled airline logo tiles and a Mini-style flight card — see [Airline logos](#airline-logos).*
+This build is at feature parity with the FlightWall Mini: two tracking modes, live flight metrics, filters, and a day/night brightness schedule — all controlled from the web UI, no app required. See [Configuration & Control](#configuration--control-web-ui).
 
 # Component List
 
@@ -175,9 +170,6 @@ Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height`
 ### Layouts by panel size
 The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft,Spd:258mph` / `Trk:263deg,Vr:-18ft/s`, with IATA airport codes); **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.
 
-# Thanks
-We really appreciate all the support on this project!
+# Credits
 
-If you don't want to build one but still find it cool, check out our offical displays: **[https://theflightwall.com](https://theflightwall.com)**
-
-Excited to see your builds :) Tag @theflightwall on IG
+This project was inspired by the original [TheFlightWall](https://github.com/AxisNimble/TheFlightWall_OSS) — full credit to its creators for the concept and the build (their [viral build video](https://www.instagram.com/p/DLIbAtbJxPl)). If you'd rather buy a finished, polished display than build your own, check out their official product at **[theflightwall.com](https://theflightwall.com)** ([@theflightwall](https://www.instagram.com/theflightwall)).
