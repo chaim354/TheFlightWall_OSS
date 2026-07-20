@@ -3,10 +3,14 @@ Purpose: Implementation of the on-device configuration & control web server.
 */
 #include "core/WebConfigServer.h"
 #include "core/Settings.h"
+#include "config/HardwareConfiguration.h" // board-guarded pins reported in /api/status
+#include "adapters/GeoLocator.h"
 
 #include <LittleFS.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <algorithm>
+#include <vector>
 
 static const byte kDnsPort = 53;
 
@@ -75,8 +79,8 @@ void WebConfigServer::registerRoutes()
                { handleGetStatus(); });
     _server.on("/api/flights", HTTP_GET, [this]()
                { handleGetFlights(); });
-    _server.on("/api/framebuffer", HTTP_GET, [this]()
-               { handleFramebuffer(); });
+    _server.on("/api/geolocate", HTTP_GET, [this]()
+               { handleGeolocate(); });
     _server.on("/api/wifiscan", HTTP_GET, [this]()
                { handleWifiScan(); });
     _server.on("/api/restart", HTTP_POST, [this]()
@@ -87,7 +91,26 @@ void WebConfigServer::registerRoutes()
 
 void WebConfigServer::handleRoot()
 {
-    File f = LittleFS.open("/index.html", "r");
+    // Prefer the pre-compressed page (~25KB -> ~7.5KB). That matters more here than on
+    // a normal server: loop() is single-threaded and blocks on the flight fetch, so the
+    // page can only stream during the gaps — fewer bytes is directly less time stuck.
+    // tools/gzip_web_assets.py regenerates the .gz on every build, so it cannot go
+    // stale; the uncompressed fallback below covers an FS image built without it.
+    // Do NOT sendHeader("Content-Encoding") here. streamFile() -> _streamFileCore()
+    // already adds it when the FILE NAME ends in .gz (WebServer.cpp:525). Setting it
+    // manually as well emits the header twice, which per HTTP means the body was
+    // gzipped TWICE — the browser decodes once, tries again, fails, and renders
+    // nothing. The content type stays text/html: that is what the decoded body is,
+    // and it is also what triggers the automatic header.
+    File f = LittleFS.open("/index.html.gz", "r");
+    if (f)
+    {
+        _server.streamFile(f, "text/html");
+        f.close();
+        return;
+    }
+
+    f = LittleFS.open("/index.html", "r");
     if (!f)
     {
         _server.send(200, "text/html",
@@ -125,7 +148,7 @@ void WebConfigServer::handlePostSettings()
 
 void WebConfigServer::handleGetStatus()
 {
-    DynamicJsonDocument doc(512);
+    JsonDocument doc;
     doc["apMode"] = _apMode;
     doc["wifiConnected"] = (WiFi.status() == WL_CONNECTED);
     doc["ssid"] = _apMode ? WiFi.softAPSSID() : WiFi.SSID();
@@ -137,52 +160,127 @@ void WebConfigServer::handleGetStatus()
     doc["freeHeap"] = (uint32_t)ESP.getFreeHeap();
     doc["lightLevel"] = _lightLevel;
     doc["lightDark"] = _lightDark;
+    // Board-specific pins so the (single, board-agnostic) web UI can label the light
+    // sensor controls truthfully. Hardcoding them in index.html got it wrong on the
+    // S3, which has no GPIO 22 and whose ADC1 is 1-10 rather than 32-39.
+    doc["i2cSda"] = HardwareConfiguration::I2C_SDA;
+    doc["i2cScl"] = HardwareConfiguration::I2C_SCL;
+    doc["adc1Min"] = HardwareConfiguration::ADC1_PIN_MIN;
+    doc["adc1Max"] = HardwareConfiguration::ADC1_PIN_MAX;
+    doc["buttonAPin"] = HardwareConfiguration::BUTTON_A_PIN;
+    doc["buttonBPin"] = HardwareConfiguration::BUTTON_B_PIN;
     String out;
     serializeJson(doc, out);
     _server.send(200, "application/json", out);
 }
 
-void WebConfigServer::handleGetFlights()
+String WebConfigServer::buildFlightsJson() const
 {
-    _server.send(200, "application/json", _flightsJson);
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    if (_flights)
+    {
+        for (const auto &f : *_flights)
+        {
+            JsonObject o = arr.createNestedObject();
+            o["ident"] = f.ident.length() ? f.ident : f.ident_icao;
+            o["airline"] = f.airline_display_name_full;
+            o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+            o["origin"] = f.origin.code_icao;
+            o["destination"] = f.destination.code_icao;
+            o["helicopter"] = f.is_helicopter;
+            o["cargo"] = f.is_cargo;
+            o["private"] = f.is_private;
+            if (f.has_metrics)
+            {
+                // Distance from the configured center — the key the list is already
+                // ordered by (FlightDataFetcher sorts candidates nearest-first). NAN in
+                // Flights mode, which has no center to measure from, so the guard omits
+                // the key there rather than emitting null.
+                if (!isnan(f.distance_km))
+                    o["distanceKm"] = round(f.distance_km * 10.0) / 10.0;
+                if (!isnan(f.altitude_ft))
+                    o["altitudeFt"] = (long)f.altitude_ft;
+                if (!isnan(f.groundspeed_kt))
+                    o["speedKt"] = (long)f.groundspeed_kt;
+                if (!isnan(f.heading_deg))
+                    o["headingDeg"] = (long)f.heading_deg;
+                if (!isnan(f.vertical_rate_fpm))
+                    o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
+            }
+        }
+    }
+    String out;
+    serializeJson(doc, out);
+    return out;
 }
 
-void WebConfigServer::handleFramebuffer()
+void WebConfigServer::handleGetFlights()
 {
-    uint16_t w = 0, h = 0;
-    const uint16_t *fb = _display ? _display->framebuffer(w, h) : nullptr;
-    if (!fb || w == 0 || h == 0)
+    _server.send(200, "application/json", buildFlightsJson());
+}
+
+void WebConfigServer::handleGeolocate()
+{
+    GeoLocator geo;
+    double lat = 0, lon = 0;
+    String place;
+    if (geo.locate(lat, lon, place))
     {
-        _server.send(503, "application/octet-stream", "");
-        return;
+        JsonDocument doc;
+        doc["ok"] = true;
+        doc["lat"] = lat;
+        doc["lon"] = lon;
+        doc["place"] = place;
+        String out;
+        serializeJson(doc, out);
+        _server.send(200, "application/json", out);
     }
-
-    // Body: 4-byte header (w, h little-endian) + w*h little-endian RGB565 pixels.
-    const size_t pxBytes = (size_t)w * (size_t)h * sizeof(uint16_t);
-    uint8_t hdr[4] = {(uint8_t)(w & 0xFF), (uint8_t)(w >> 8),
-                      (uint8_t)(h & 0xFF), (uint8_t)(h >> 8)};
-
-    _server.setContentLength(sizeof(hdr) + pxBytes);
-    _server.send(200, "application/octet-stream", "");
-
-    WiFiClient client = _server.client();
-    client.write(hdr, sizeof(hdr));
-    client.write((const uint8_t *)fb, pxBytes); // ESP32 is little-endian: bytes match RGB565 LE
+    else
+    {
+        _server.send(200, "application/json", "{\"ok\":false}");
+    }
 }
 
 void WebConfigServer::handleWifiScan()
 {
     int n = WiFi.scanNetworks();
-    DynamicJsonDocument doc(2048);
+    std::vector<int> idx;
+    for (int i = 0; i < n; ++i)
+        idx.push_back(i);
+    // strongest first, so a strong-but-late network is never dropped by the cap
+    std::sort(idx.begin(), idx.end(), [](int a, int b)
+              { return WiFi.RSSI(a) > WiFi.RSSI(b); });
+
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
-    for (int i = 0; i < n && i < 20; ++i)
+    std::vector<String> seen;
+    const size_t cap = 40;
+    for (int i : idx)
     {
+        if (arr.size() >= cap)
+            break;
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0)
+            continue; // hidden/blank
+        bool dup = false;
+        for (auto &s : seen)
+        {
+            if (s == ssid)
+            {
+                dup = true;
+                break;
+            }
+        }
+        if (dup)
+            continue; // dedupe band-steered SSIDs
+        seen.push_back(ssid);
         JsonObject o = arr.createNestedObject();
-        o["ssid"] = WiFi.SSID(i);
+        o["ssid"] = ssid;
         o["rssi"] = WiFi.RSSI(i);
         o["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
     }
-    WiFi.scanDelete();
+    WiFi.scanDelete(); // free scan results
     String out;
     serializeJson(doc, out);
     _server.send(200, "application/json", out);

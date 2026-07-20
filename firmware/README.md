@@ -7,7 +7,7 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - **Two tracking modes**:
   - *Area* — OpenSky `states/all` filtered by location/radius; live metrics come from the ADS-B state vector.
   - *Flights* — a user list of idents/callsigns/tails looked up directly via AeroAPI; metrics from `last_position`.
-- **Enrich flights** (airline / route / aircraft type) from a selectable source: **adsbdb.com** (free, no key — default), **AeroAPI** (paid; usable as primary or as a backup that only fires when adsbdb misses), or off. Results are cached per aircraft to minimize requests. Friendly names also come from TheFlightWall CDN.
+- **Enrich flights** (airline / route / aircraft type) from a selectable source: **adsbdb.com** (free, no key — default), **AeroAPI** (paid; usable as primary or as a backup that only fires when adsbdb misses), or off. adsbdb provides the airline name and route, with a hexdb.io fallback; the aircraft field shows the ICAO type code. Results are cached per aircraft to minimize requests.
 - **Render** a Mini-style flight card — airline logo tile on the left, then a configurable set of fields (flight #, route, aircraft, altitude, speed, heading, vertical rate) on the right — on a **HUB75 RGB LED matrix**, cycling up to N flights. Logos load from `data/logos/<ICAO>.rgb565`; airlines without a tile get a brand-style code badge.
 - **Live web preview** — each frame is composed into an in-RAM `GFXcanvas16` and blitted to the panel; the same buffer is served at `/api/framebuffer` so the web UI mirrors the wall pixel-for-pixel.
 - **Brightness scheduling** — day/night brightness using NTP time.
@@ -20,7 +20,7 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - **core/FlightDataFetcher**: Orchestrates both tracking modes; applies filters + the maxFlights cap; merges metrics; enriches names.
 - **adapters/OpenSkyFetcher**: Queries OpenSky states/all with OAuth; parses and filters by geo. Reads credentials from runtime settings.
 - **adapters/AeroAPIFetcher**: Retrieves flight details + last-position metrics by ident via AeroAPI.
-- **adapters/FlightWallFetcher**: Looks up human-friendly airline/aircraft names from CDN.
+- **adapters/AdsbdbFetcher**: Free enrichment via adsbdb.com (airline name + route by callsign, ICAO aircraft type by ICAO24), with a hexdb.io fallback.
 - **adapters/Hub75Display**: Composes each frame into a `GFXcanvas16`, blits to the HUB75 panel, and draws the Mini-style logo + layout card; cycles flights; runtime brightness/color/geometry; exposes the framebuffer for the web preview.
 - **config/**: Compile-time *default* values (used to seed runtime Settings on first boot).
 - **models/**: Lightweight structs for `StateVector`, `FlightInfo` (now incl. metrics), `AirportInfo`.

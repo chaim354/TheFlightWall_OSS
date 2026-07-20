@@ -12,6 +12,37 @@ Purpose: Implementation of the runtime Settings store (LittleFS + ArduinoJson).
 #include "config/HardwareConfiguration.h"
 #include "config/APIConfiguration.h"
 
+// Name <-> enum for the light sensor type. A switch rather than a ternary chain so a
+// new type is a visible edit here instead of silently serializing as "analog" — the
+// same fall-through hazard LightSensor's dispatch had.
+static const char *lightSensorTypeName(LightSensorType t)
+{
+    switch (t)
+    {
+    case LightSensorType::BH1750:
+        return "bh1750";
+    case LightSensorType::TCS3472:
+        return "tcs3472";
+    case LightSensorType::Analog:
+        break;
+    }
+    return "analog";
+}
+
+static LightSensorType lightSensorTypeFromName(const char *name)
+{
+    if (name)
+    {
+        const String n(name);
+        if (n == "bh1750")
+            return LightSensorType::BH1750;
+        if (n == "tcs3472")
+            return LightSensorType::TCS3472;
+    }
+    // Unknown/absent -> Analog: the one type that needs no bus and no extra hardware.
+    return LightSensorType::Analog;
+}
+
 Settings g_settings;
 
 static const char *kSettingsPath = "/settings.json";
@@ -33,13 +64,14 @@ void Settings::seedDefaults()
     centerLat = UserConfiguration::CENTER_LAT;
     centerLon = UserConfiguration::CENTER_LON;
     radiusKm = UserConfiguration::RADIUS_KM;
+    autoLocateOnBoot = false;
     trackedFlights.clear();
 
     brightness = UserConfiguration::DISPLAY_BRIGHTNESS;
     textColorR = UserConfiguration::TEXT_COLOR_R;
     textColorG = UserConfiguration::TEXT_COLOR_G;
     textColorB = UserConfiguration::TEXT_COLOR_B;
-    maxFlights = 5;
+    maxFlights = UserConfiguration::MAX_FLIGHTS;
     cycleSeconds = TimingConfiguration::DISPLAY_CYCLE_SECONDS;
     fetchIntervalSeconds = TimingConfiguration::FETCH_INTERVAL_SECONDS;
 
@@ -47,9 +79,10 @@ void Settings::seedDefaults()
     filters = AircraftFilters();
     schedule = BrightnessSchedule();
 
-    lightSensorEnabled = false;
-    lightSensorType = LightSensorType::Analog;
-    lightSensorPin = 34;
+    buttonsEnabled = true;
+    lightSensorEnabled = true;
+    lightSensorType = LightSensorType::TCS3472;
+    lightSensorPin = HardwareConfiguration::LIGHT_ANALOG_PIN;
     lightDarkThreshold = 500;
     lightHysteresis = 150;
     lightSensorDimInstead = false;
@@ -58,6 +91,10 @@ void Settings::seedDefaults()
     panelResX = HardwareConfiguration::PANEL_RES_X;
     panelResY = HardwareConfiguration::PANEL_RES_Y;
     panelChain = HardwareConfiguration::PANEL_CHAIN;
+    panelClkPhase = false;
+    panelI2sSpeedMhz = 8;
+    panelLatchBlanking = 1;
+    panelDriverChip = "shift";
 }
 
 bool Settings::begin()
@@ -98,21 +135,44 @@ bool Settings::load()
 
 bool Settings::save() const
 {
-    File f = LittleFS.open(kSettingsPath, "w");
+    // Write to a temp file, verify it landed whole, THEN rename over the live file.
+    // A truncate-then-write here (the previous behavior) meant a power cut mid-save
+    // left a partial /settings.json — losing the WiFi password and API keys and
+    // dropping the device into the open setup AP. littlefs's rename atomically
+    // replaces the destination, so /settings.json is always either fully the old
+    // file or fully the new one.
+    const char *kTmpPath = "/settings.tmp";
+    String out = toJson();
+
+    File f = LittleFS.open(kTmpPath, "w");
     if (!f)
     {
-        Serial.println("Settings: failed to open settings file for write");
+        Serial.println("Settings: failed to open temp settings file for write");
         return false;
     }
-    String out = toJson();
-    f.print(out);
+    size_t written = f.print(out);
     f.close();
+
+    if (written != out.length())
+    {
+        Serial.printf("Settings: short write (%u of %u bytes); keeping previous settings\n",
+                      (unsigned)written, (unsigned)out.length());
+        LittleFS.remove(kTmpPath);
+        return false;
+    }
+
+    if (!LittleFS.rename(kTmpPath, kSettingsPath))
+    {
+        Serial.println("Settings: rename of temp settings file failed");
+        LittleFS.remove(kTmpPath);
+        return false;
+    }
     return true;
 }
 
 String Settings::toJson() const
 {
-    DynamicJsonDocument doc(8192);
+    JsonDocument doc;
 
     JsonObject net = doc.createNestedObject("network");
     net["wifiSsid"] = wifiSsid;
@@ -122,6 +182,7 @@ String Settings::toJson() const
     api["openSkyClientId"] = openSkyClientId;
     api["openSkyClientSecret"] = openSkyClientSecret;
     api["aeroApiKey"] = aeroApiKey;
+    api["positionSource"] = (positionSource == PositionSource::FlightRadar24) ? "fr24" : "opensky";
     api["enrichmentSource"] = (enrichmentSource == EnrichmentSource::AeroApi) ? "aeroapi"
                               : (enrichmentSource == EnrichmentSource::Off) ? "off"
                                                                             : "adsbdb";
@@ -133,6 +194,7 @@ String Settings::toJson() const
     track["centerLat"] = centerLat;
     track["centerLon"] = centerLon;
     track["radiusKm"] = radiusKm;
+    track["autoLocateOnBoot"] = autoLocateOnBoot;
     JsonArray flights = track.createNestedArray("trackedFlights");
     for (const auto &id : trackedFlights)
         flights.add(id);
@@ -154,11 +216,15 @@ String Settings::toJson() const
     lay["showSpeed"] = layout.showSpeed;
     lay["showHeading"] = layout.showHeading;
     lay["showVerticalRate"] = layout.showVerticalRate;
+    lay["flightNumberOverVr"] = layout.flightNumberOverVr;
+    lay["noFlightsMode"] = layout.noFlightsMode;
 
     JsonObject filt = doc.createNestedObject("filters");
     filt["minAltitudeFt"] = filters.minAltitudeFt;
     filt["maxAltitudeFt"] = filters.maxAltitudeFt;
     filt["excludeOnGround"] = filters.excludeOnGround;
+    filt["showGeneralAviation"] = filters.showGeneralAviation;
+    filt["hideCargo"] = filters.hideCargo;
     JsonArray allow = filt.createNestedArray("airlineAllowList");
     for (const auto &a : filters.airlineAllowList)
         allow.add(a);
@@ -169,11 +235,14 @@ String Settings::toJson() const
     sch["nightBrightness"] = schedule.nightBrightness;
     sch["nightStartHour"] = schedule.nightStartHour;
     sch["nightEndHour"] = schedule.nightEndHour;
-    sch["timezoneOffsetMinutes"] = schedule.timezoneOffsetMinutes;
+    sch["timezone"] = schedule.timezone;
+
+    JsonObject btn = doc.createNestedObject("buttons");
+    btn["enabled"] = buttonsEnabled;
 
     JsonObject light = doc.createNestedObject("light");
     light["enabled"] = lightSensorEnabled;
-    light["type"] = (lightSensorType == LightSensorType::BH1750) ? "bh1750" : "analog";
+    light["type"] = lightSensorTypeName(lightSensorType);
     light["pin"] = lightSensorPin;
     light["darkThreshold"] = lightDarkThreshold;
     light["hysteresis"] = lightHysteresis;
@@ -184,6 +253,10 @@ String Settings::toJson() const
     hw["panelResX"] = panelResX;
     hw["panelResY"] = panelResY;
     hw["panelChain"] = panelChain;
+    hw["panelClkPhase"] = panelClkPhase;
+    hw["panelI2sSpeedMhz"] = panelI2sSpeedMhz;
+    hw["panelLatchBlanking"] = panelLatchBlanking;
+    hw["panelDriverChip"] = panelDriverChip;
 
     String out;
     serializeJson(doc, out);
@@ -192,7 +265,7 @@ String Settings::toJson() const
 
 bool Settings::fromJson(const String &in)
 {
-    DynamicJsonDocument doc(8192);
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, in);
     if (err)
     {
@@ -220,6 +293,11 @@ bool Settings::fromJson(const String &in)
             openSkyClientSecret = api["openSkyClientSecret"].as<String>();
         if (api.containsKey("aeroApiKey"))
             aeroApiKey = api["aeroApiKey"].as<String>();
+        if (api.containsKey("positionSource"))
+        {
+            String s = api["positionSource"].as<String>();
+            positionSource = (s == "fr24") ? PositionSource::FlightRadar24 : PositionSource::OpenSky;
+        }
         if (api.containsKey("enrichmentSource"))
         {
             String s = api["enrichmentSource"].as<String>();
@@ -244,6 +322,8 @@ bool Settings::fromJson(const String &in)
             centerLon = track["centerLon"].as<double>();
         if (track.containsKey("radiusKm"))
             radiusKm = track["radiusKm"].as<double>();
+        if (track.containsKey("autoLocateOnBoot"))
+            autoLocateOnBoot = track["autoLocateOnBoot"].as<bool>();
         if (track.containsKey("trackedFlights"))
         {
             trackedFlights.clear();
@@ -287,6 +367,9 @@ bool Settings::fromJson(const String &in)
         layout.showSpeed = lay["showSpeed"] | layout.showSpeed;
         layout.showHeading = lay["showHeading"] | layout.showHeading;
         layout.showVerticalRate = lay["showVerticalRate"] | layout.showVerticalRate;
+        layout.flightNumberOverVr = lay["flightNumberOverVr"] | layout.flightNumberOverVr;
+        if (lay.containsKey("noFlightsMode"))
+            layout.noFlightsMode = lay["noFlightsMode"].as<String>();
     }
 
     if (doc.containsKey("filters"))
@@ -298,6 +381,10 @@ bool Settings::fromJson(const String &in)
             filters.maxAltitudeFt = filt["maxAltitudeFt"].as<double>();
         if (filt.containsKey("excludeOnGround"))
             filters.excludeOnGround = filt["excludeOnGround"].as<bool>();
+        if (filt.containsKey("showGeneralAviation"))
+            filters.showGeneralAviation = filt["showGeneralAviation"].as<bool>();
+        if (filt.containsKey("hideCargo"))
+            filters.hideCargo = filt["hideCargo"].as<bool>();
         if (filt.containsKey("airlineAllowList"))
         {
             filters.airlineAllowList.clear();
@@ -325,8 +412,15 @@ bool Settings::fromJson(const String &in)
             schedule.nightStartHour = sch["nightStartHour"].as<uint8_t>();
         if (sch.containsKey("nightEndHour"))
             schedule.nightEndHour = sch["nightEndHour"].as<uint8_t>();
-        if (sch.containsKey("timezoneOffsetMinutes"))
-            schedule.timezoneOffsetMinutes = sch["timezoneOffsetMinutes"].as<int16_t>();
+        if (sch.containsKey("timezone"))
+            schedule.timezone = sch["timezone"].as<const char *>();
+    }
+
+    if (doc.containsKey("buttons"))
+    {
+        JsonObject btn = doc["buttons"];
+        if (btn.containsKey("enabled"))
+            buttonsEnabled = btn["enabled"].as<bool>();
     }
 
     if (doc.containsKey("light"))
@@ -335,9 +429,7 @@ bool Settings::fromJson(const String &in)
         if (light.containsKey("enabled"))
             lightSensorEnabled = light["enabled"].as<bool>();
         if (light.containsKey("type"))
-            lightSensorType = (String(light["type"].as<const char *>()) == "bh1750")
-                                  ? LightSensorType::BH1750
-                                  : LightSensorType::Analog;
+            lightSensorType = lightSensorTypeFromName(light["type"].as<const char *>());
         if (light.containsKey("pin"))
             lightSensorPin = light["pin"].as<uint8_t>();
         if (light.containsKey("darkThreshold"))
@@ -359,6 +451,14 @@ bool Settings::fromJson(const String &in)
             panelResY = hw["panelResY"].as<uint16_t>();
         if (hw.containsKey("panelChain"))
             panelChain = hw["panelChain"].as<uint8_t>();
+        if (hw.containsKey("panelClkPhase"))
+            panelClkPhase = hw["panelClkPhase"].as<bool>();
+        if (hw.containsKey("panelI2sSpeedMhz"))
+            panelI2sSpeedMhz = hw["panelI2sSpeedMhz"].as<uint8_t>();
+        if (hw.containsKey("panelLatchBlanking"))
+            panelLatchBlanking = hw["panelLatchBlanking"].as<uint8_t>();
+        if (hw.containsKey("panelDriverChip"))
+            panelDriverChip = hw["panelDriverChip"].as<String>();
     }
 
     return true;

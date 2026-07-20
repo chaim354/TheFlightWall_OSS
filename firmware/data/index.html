@@ -7,36 +7,58 @@
 <style>
   :root { --bg:#0b0f17; --card:#141a26; --line:#26314a; --fg:#e8edf6; --muted:#8a98b5; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
-  header { padding:18px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--bg); z-index:5;}
-  header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); font-size:15px; line-height:1.45; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:10px; position:sticky; top:0; background:var(--bg); z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.5px; white-space:nowrap; }
   .wrap { max-width:760px; margin:0 auto; padding:16px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
-  .card h2 { font-size:14px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
-  label { display:block; font-size:13px; margin:10px 0 4px; color:var(--muted); }
+  .card, details.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .card > h2 { font-size:12px; margin:0 0 14px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+  /* Section divider inside a card. The first section rides under the card's own h2,
+     so only later ones get a rule. */
+  .sec { font-size:13px; font-weight:600; color:var(--fg); margin:20px 0 6px; padding-top:16px; border-top:1px solid var(--line); }
+  label { display:block; font-size:12px; margin:10px 0 4px; color:var(--muted); }
   input[type=text],input[type=password],input[type=number],textarea,select {
     width:100%; padding:9px 10px; background:#0e1421; color:var(--fg); border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus,select:focus,textarea:focus { outline:none; border-color:var(--accent); }
   textarea { min-height:70px; resize:vertical; font-family:ui-monospace,Menlo,monospace; }
-  .row { display:flex; gap:12px; flex-wrap:wrap; }
-  .row > div { flex:1; min-width:130px; }
-  .checks { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; margin-top:6px; }
-  .check { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--fg); }
-  .check input { width:auto; }
-  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:2px; }
+  .row > div { flex:1; min-width:140px; }
+  .checks { display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; margin-top:8px; }
+  .check { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--fg); margin-top:10px; }
+  .check input { width:auto; flex:none; }
+  .check label { margin:0; font-size:14px; color:var(--fg); }
+  .checks .check { margin-top:0; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
   button.warn { background:var(--warn); }
-  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .pill { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pill { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); white-space:nowrap; }
   .pill.on { color:#fff; background:var(--ok); border-color:var(--ok); }
   .pill.off { color:#fff; background:#ef4444; border-color:#ef4444; }
   .hide { display:none; }
   .flight { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-top:8px; font-size:13px; }
   .flight b { color:#fff; } .flight span { color:var(--muted); }
-  .toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#1f2a40; border:1px solid var(--line); padding:10px 16px; border-radius:8px; opacity:0; transition:.2s; }
+  .toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#1f2a40; border:1px solid var(--line); padding:10px 16px; border-radius:8px; opacity:0; transition:.2s; pointer-events:none; }
   .toast.show { opacity:1; }
-  small.help { color:var(--muted); display:block; margin-top:4px; }
-  #preview { width:100%; height:auto; margin-top:6px; border:1px solid var(--line); border-radius:8px; background:#000; image-rendering:pixelated; image-rendering:crisp-edges; display:block; }
+  small.help { color:var(--muted); display:block; margin-top:6px; font-size:12px; line-height:1.5; }
   .scanlist button { display:block; width:100%; text-align:left; margin-top:6px; background:#0e1421; border:1px solid var(--line); }
+  summary { cursor:pointer; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-weight:600; list-style:none; display:flex; align-items:center; gap:8px; }
+  summary::-webkit-details-marker { display:none; }
+  summary::before { content:'\25B8'; transition:transform .15s; }
+  details[open] > summary { margin-bottom:14px; }
+  details[open] > summary::before { transform:rotate(90deg); }
+  /* Real breakpoint. Previously the page relied only on flex-wrap + a 130px min-width,
+     which squeezed three fields into a phone width rather than stacking them. */
+  @media (max-width:560px) {
+    body { font-size:14px; }
+    .wrap { padding:12px; }
+    header { padding:10px 12px; }
+    header h1 { font-size:16px; }
+    .row { display:block; }
+    .row > div { min-width:0; margin-bottom:2px; }
+    .checks { grid-template-columns:1fr; }
+    .card, details.card { padding:14px; }
+  }
 </style>
 </head>
 <body>
@@ -45,6 +67,8 @@
   <div class="bar">
     <span id="connPill" class="pill">…</span>
     <button class="ghost" onclick="loadAll()">Refresh</button>
+    <button onclick="save()">Save</button>
+    <button class="warn" onclick="restart()">Restart</button>
   </div>
 </header>
 
@@ -53,14 +77,13 @@
   <div class="card">
     <h2>Status</h2>
     <div id="status" class="bar"><span class="pill">loading…</span></div>
-    <label style="margin-top:12px">Live matrix preview</label>
-    <canvas id="preview" width="128" height="64"></canvas>
     <div id="flights"></div>
   </div>
 
   <div class="card">
-    <h2>WiFi</h2>
-    <label>Network (SSID)</label>
+    <h2>Setup</h2>
+
+    <label>WiFi network (SSID)</label>
     <input id="wifiSsid" type="text" placeholder="Your WiFi name" />
     <label>Password</label>
     <input id="wifiPassword" type="password" placeholder="••••••••" />
@@ -69,14 +92,19 @@
     </div>
     <div id="scanlist" class="scanlist"></div>
     <small class="help">Changing WiFi takes effect after a restart.</small>
-  </div>
 
-  <div class="card">
-    <h2>API Keys</h2>
-    <label>OpenSky Client ID</label>
+    <div class="sec">API keys</div>
+    <label>OpenSky client ID</label>
     <input id="openSkyClientId" type="text" />
-    <label>OpenSky Client Secret</label>
+    <label>OpenSky client secret</label>
     <input id="openSkyClientSecret" type="password" />
+
+    <label>Position source (Area mode)</label>
+    <select id="positionSource">
+      <option value="opensky">OpenSky — official, needs key above (recommended)</option>
+      <option value="fr24">Flightradar24 — unofficial, no key, routes included</option>
+    </select>
+    <small class="help">Flightradar24 is an <b>unofficial scrape</b> of fr24.com for personal use only — it can break or rate-limit, and it carries route/airline/aircraft inline (no enrichment lookup needed). Best on the S3 (PSRAM). OpenSky stays the default.</small>
 
     <label>Flight enrichment source (route · airline · aircraft)</label>
     <select id="enrichmentSource">
@@ -86,13 +114,14 @@
     </select>
     <small class="help">adsbdb.com is free and needs no key. Results are cached per aircraft to minimize requests.</small>
 
-    <label>FlightAware AeroAPI Key <span style="color:var(--muted)">(for AeroAPI source or backup)</span></label>
+    <label>FlightAware AeroAPI key <span style="color:var(--muted)">(for AeroAPI source or backup)</span></label>
     <input id="aeroApiKey" type="password" />
-    <span class="check" style="margin-top:8px"><input type="checkbox" id="enrichmentFallbackToAeroApi"><label style="margin:0">Use AeroAPI as backup when adsbdb misses a flight (needs key)</label></span>
+    <span class="check"><input type="checkbox" id="enrichmentFallbackToAeroApi"><label>Use AeroAPI as backup when adsbdb misses a flight (needs key)</label></span>
   </div>
 
   <div class="card">
     <h2>Tracking</h2>
+
     <label>Mode</label>
     <select id="mode" onchange="toggleMode()">
       <option value="area">Area — everything near a location</option>
@@ -105,52 +134,79 @@
         <div><label>Center longitude</label><input id="centerLon" type="number" step="0.0001" /></div>
         <div><label>Radius (km)</label><input id="radiusKm" type="number" step="0.5" /></div>
       </div>
+      <div class="bar" style="margin-top:10px">
+        <button class="ghost" type="button" onclick="geolocate()">Auto-detect my location</button>
+      </div>
+      <small class="help" id="geoNote">Uses your IP (approximate). Review before saving.</small>
+      <span class="check"><input type="checkbox" id="autoLocateOnBoot"><label>Auto-detect location on every boot</label></span>
     </div>
 
     <div id="flightsBox" class="hide">
       <label>Flights to track (one per line — flight #, callsign, or tail)</label>
       <textarea id="trackedFlights" placeholder="UAL123&#10;N172SP&#10;BAW286"></textarea>
     </div>
-  </div>
 
-  <div class="card">
-    <h2>Display</h2>
-    <div class="row">
-      <div><label>Brightness (0–255)</label><input id="brightness" type="number" min="0" max="255" /></div>
-      <div><label>Text color</label><input id="textColor" type="color" /></div>
-    </div>
-    <div class="row">
-      <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
-      <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
-      <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
-    </div>
-    <label>Fields to show on each card</label>
-    <div class="checks">
-      <span class="check"><input type="checkbox" id="showAirlineFlight"><label style="margin:0">Airline + flight</label></span>
-      <span class="check"><input type="checkbox" id="showRoute"><label style="margin:0">Route</label></span>
-      <span class="check"><input type="checkbox" id="showAircraft"><label style="margin:0">Aircraft type</label></span>
-      <span class="check"><input type="checkbox" id="showAltitude"><label style="margin:0">Altitude</label></span>
-      <span class="check"><input type="checkbox" id="showSpeed"><label style="margin:0">Speed</label></span>
-      <span class="check"><input type="checkbox" id="showHeading"><label style="margin:0">Heading</label></span>
-      <span class="check"><input type="checkbox" id="showVerticalRate"><label style="margin:0">Vertical rate</label></span>
-    </div>
-    <small class="help">Only as many lines as physically fit on the panel are drawn.</small>
-  </div>
-
-  <div class="card">
-    <h2>Filters</h2>
+    <div class="sec">Filters</div>
     <div class="row">
       <div><label>Min altitude (ft)</label><input id="minAltitudeFt" type="number" /></div>
       <div><label>Max altitude (ft)</label><input id="maxAltitudeFt" type="number" /></div>
     </div>
-    <span class="check" style="margin-top:10px"><input type="checkbox" id="excludeOnGround"><label style="margin:0">Hide aircraft on the ground</label></span>
+    <span class="check"><input type="checkbox" id="excludeOnGround"><label>Hide aircraft on the ground</label></span>
+    <span class="check"><input type="checkbox" id="showGeneralAviation"><label>Show general aviation / private flights (fills leftover slots)</label></span>
+    <span class="check"><input type="checkbox" id="hideCargo"><label>Hide cargo / freight flights</label></span>
     <label>Airline allow-list (comma separated ICAO/IATA, blank = all)</label>
     <input id="airlineAllowList" type="text" placeholder="UAL, DAL, AAL" />
   </div>
 
   <div class="card">
-    <h2>Brightness Schedule</h2>
-    <span class="check"><input type="checkbox" id="schedEnabled"><label style="margin:0">Enable day/night brightness</label></span>
+    <h2>Display</h2>
+
+    <div class="row">
+      <div><label>Brightness (0–255)</label><input id="brightness" type="number" min="0" max="255" /></div>
+      <div><label>Text color</label><input id="textColor" type="color" /></div>
+    </div>
+    <div class="row">
+      <div><label>When no flights</label>
+        <select id="noFlightsMode">
+          <option value="dots">Dots (...)</option>
+          <option value="clock">Clock</option>
+          <option value="funfact">Fun fact</option>
+          <option value="clockfact">Clock + fun fact</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sec">Fields on each card</div>
+    <div class="checks">
+      <span class="check"><input type="checkbox" id="showAirlineFlight"><label>Airline + flight</label></span>
+      <span class="check"><input type="checkbox" id="showRoute"><label>Route</label></span>
+      <span class="check"><input type="checkbox" id="showAircraft"><label>Aircraft type</label></span>
+      <span class="check"><input type="checkbox" id="showAltitude"><label>Altitude</label></span>
+      <span class="check"><input type="checkbox" id="showSpeed"><label>Speed</label></span>
+      <span class="check"><input type="checkbox" id="showHeading"><label>Heading</label></span>
+      <span class="check"><input type="checkbox" id="showVerticalRate"><label>Vertical rate</label></span>
+      <span class="check"><input type="checkbox" id="flightNumberOverVr"><label>Flight # (instead of vertical rate)</label></span>
+    </div>
+    <small class="help">Only as many lines as physically fit on the panel are drawn.</small>
+
+    <div class="sec">Clock</div>
+    <label>Time zone</label>
+    <select id="timezone">
+      <option value="UTC0">UTC</option>
+      <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (New York)</option>
+      <option value="CST6CDT,M3.2.0,M11.1.0">US Central (Chicago)</option>
+      <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (Denver)</option>
+      <option value="MST7">US Arizona (no DST)</option>
+      <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (Los Angeles)</option>
+      <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska</option>
+      <option value="HST10">US Hawaii (no DST)</option>
+      <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (London)</option>
+      <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (Berlin/Paris)</option>
+    </select>
+    <small class="help">Drives the no-flights clock <b>and</b> the night window below. Daylight saving is handled automatically — no twice-yearly edit.</small>
+
+    <div class="sec">Brightness schedule</div>
+    <span class="check"><input type="checkbox" id="schedEnabled"><label>Enable day/night brightness</label></span>
     <div class="row">
       <div><label>Day brightness</label><input id="dayBrightness" type="number" min="0" max="255" /></div>
       <div><label>Night brightness</label><input id="nightBrightness" type="number" min="0" max="255" /></div>
@@ -158,53 +214,83 @@
     <div class="row">
       <div><label>Night start hour (0–23)</label><input id="nightStartHour" type="number" min="0" max="23" /></div>
       <div><label>Night end hour (0–23)</label><input id="nightEndHour" type="number" min="0" max="23" /></div>
-      <div><label>UTC offset (minutes)</label><input id="timezoneOffsetMinutes" type="number" /></div>
+
     </div>
   </div>
 
-  <div class="card">
-    <h2>Light Sensor (auto-off in the dark)</h2>
-    <span class="check"><input type="checkbox" id="lightSensorEnabled"><label style="margin:0">Enable ambient light sensor</label></span>
+  <details class="card">
+    <summary>Advanced</summary>
+
+    <span class="check" style="margin-top:0"><input type="checkbox" id="buttonsEnabled"><label>Enable physical buttons</label></span>
+    <small class="help">Two momentary buttons to GND on <b><span id="btnPins">…</span></b>.<br>
+      <b>A:</b> click = panel off/on · hold = brighter &nbsp;|&nbsp; <b>B:</b> click = cycle no-flights mode · hold = dimmer<br>
+      A held brightness overrides the schedule and the light sensor until the next automatic change.</small>
+
+    <div class="sec">Flight list</div>
+    <div class="row">
+      <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
+      <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
+      <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
+    </div>
+    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit.</small>
+
+    <div class="sec">Light sensor (auto-off in the dark)</div>
+    <span class="check" style="margin-top:0"><input type="checkbox" id="lightSensorEnabled"><label>Enable ambient light sensor</label></span>
     <div class="row">
       <div><label>Sensor type</label>
         <select id="lightSensorType">
           <option value="analog">Analog LDR (ADC1 pin)</option>
-          <option value="bh1750">BH1750 lux (I2C 21/22)</option>
+          <option value="bh1750">BH1750 lux (I2C)</option>
+          <option value="tcs3472">TCS3472 / TCS34725 (I2C)</option>
         </select>
+        <!-- Pins come from the device: one index.html serves both the ESP32 and the
+             S3, whose maps differ (the S3 has no GPIO 22 at all). -->
+        <small class="help">I2C on this board: <span id="i2cPins">…</span></small>
       </div>
-      <div><label>Analog pin (ADC1: 34/35/36/39/33)</label><input id="lightSensorPin" type="number" /></div>
+      <div><label>Analog pin (ADC1: <span id="adc1Range">…</span>)</label><input id="lightSensorPin" type="number" /></div>
     </div>
     <div class="row">
       <div><label>Dark threshold</label><input id="lightDarkThreshold" type="number" /></div>
       <div><label>Hysteresis</label><input id="lightHysteresis" type="number" /></div>
     </div>
-    <span class="check" style="margin-top:8px"><input type="checkbox" id="lightSensorDimInstead"><label style="margin:0">Dim instead of fully off</label></span>
+    <span class="check"><input type="checkbox" id="lightSensorDimInstead"><label>Dim instead of fully off</label></span>
     <div class="row"><div><label>Dim brightness (0–255)</label><input id="lightDimBrightness" type="number" min="0" max="255" /></div></div>
-    <small class="help" id="lightLive">Live reading appears here when enabled — set the threshold just above the dark value.</small>
-  </div>
+    <small class="help" id="lightLive">Live reading appears here when enabled — set the threshold just above the dark value. The units depend on the sensor type, so tune against this number rather than guessing.</small>
 
-  <div class="card">
-    <h2>Hardware (HUB75)</h2>
+    <div class="sec">HUB75 panel</div>
+    <small class="help" style="color:var(--warn)">⚠ These must match your panel hardware. Wrong values can blank or scramble the display. Defaults suit a 128×64 panel.</small>
     <label>Presets</label>
-    <div class="bar" style="margin-bottom:6px">
+    <div class="bar">
       <button class="ghost" type="button" onclick="setPanel(64,32,1)">64×32</button>
       <button class="ghost" type="button" onclick="setPanel(64,64,1)">64×64</button>
       <button class="ghost" type="button" onclick="setPanel(64,64,2)">128×64 (Mini)</button>
     </div>
-    <div class="row">
+    <div class="row" style="margin-top:8px">
       <div><label>Panel width (px)</label><input id="panelResX" type="number" /></div>
       <div><label>Panel height (px)</label><input id="panelResY" type="number" /></div>
       <div><label>Panels chained</label><input id="panelChain" type="number" min="1" /></div>
     </div>
     <small class="help">Matrix width = panel width × panels chained (e.g. 64 × 2 = 128 wide). Wide panels use a logo-left card; square panels (64×64) use a stacked logo-on-top card. Changes take effect after a restart.</small>
-  </div>
 
-  <div class="card">
-    <div class="bar">
-      <button onclick="save()">Save settings</button>
-      <button class="warn" onclick="restart()">Restart device</button>
+    <label style="margin-top:14px">Signal tuning — if pixels flicker or shift by one</label>
+    <span class="check" style="margin-top:0"><input type="checkbox" id="panelClkPhase"><label>Clock phase (uncheck first to fix an off-by-one shift)</label></span>
+    <div class="row" style="margin-top:8px">
+      <div><label>Driver chip</label>
+        <select id="panelDriverChip">
+          <option value="shift">Generic shift register (default)</option>
+          <option value="fm6126a">FM6126A</option>
+          <option value="fm6124">FM6124</option>
+          <option value="icn2038s">ICN2038S</option>
+          <option value="mbi5124">MBI5124</option>
+        </select>
+      </div>
+      <div><label>I2S clock (MHz)</label>
+        <select id="panelI2sSpeedMhz"><option value="8">8 (most stable)</option><option value="16">16</option><option value="20">20</option></select>
+      </div>
+      <div><label>Latch blanking</label><input id="panelLatchBlanking" type="number" min="1" max="4" /></div>
     </div>
-  </div>
+    <small class="help">Start with: uncheck Clock phase. Still bad? Try driver = FM6126A. These apply after a restart. A 74HCT245 level shifter is the robust hardware fix.</small>
+  </details>
 
 </div>
 
@@ -218,7 +304,12 @@ function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show')
 
 function setPanel(x,y,chain){
   $('panelResX').value = x; $('panelResY').value = y; $('panelChain').value = chain;
-  toast(`Panel set to ${x*chain}×${y} — Save + Restart to apply`);
+  // Big "Mini" panels (>=96 wide, >=48 tall) render two full-width metric rows —
+  // auto-enable those layout fields so they fill in.
+  if (x*chain >= 96 && y >= 48){
+    ['showAltitude','showSpeed','showHeading','showVerticalRate'].forEach(id => { if($(id)) $(id).checked = true; });
+  }
+  toast(`Panel set to ${x*chain}×${y} — metric fields enabled. Save + Restart to apply`);
 }
 
 function toggleMode(){
@@ -234,6 +325,7 @@ async function loadSettings(){
   $('openSkyClientId').value = s.api.openSkyClientId || '';
   $('openSkyClientSecret').value = s.api.openSkyClientSecret || '';
   $('aeroApiKey').value = s.api.aeroApiKey || '';
+  $('positionSource').value = s.api.positionSource || 'opensky';
   $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
   $('enrichmentFallbackToAeroApi').checked = s.api.enrichmentFallbackToAeroApi !== false;
 
@@ -241,6 +333,7 @@ async function loadSettings(){
   $('centerLat').value = s.tracking.centerLat;
   $('centerLon').value = s.tracking.centerLon;
   $('radiusKm').value = s.tracking.radiusKm;
+  $('autoLocateOnBoot').checked = !!s.tracking.autoLocateOnBoot;
   $('trackedFlights').value = (s.tracking.trackedFlights || []).join('\n');
 
   $('brightness').value = s.display.brightness;
@@ -249,12 +342,15 @@ async function loadSettings(){
   $('cycleSeconds').value = s.display.cycleSeconds;
   $('fetchIntervalSeconds').value = s.display.fetchIntervalSeconds;
 
-  for (const k of ['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate'])
+  for (const k of ['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'])
     $(k).checked = !!s.layout[k];
+  $('noFlightsMode').value = s.layout.noFlightsMode || 'dots';
 
   $('minAltitudeFt').value = s.filters.minAltitudeFt;
   $('maxAltitudeFt').value = s.filters.maxAltitudeFt;
   $('excludeOnGround').checked = !!s.filters.excludeOnGround;
+  $('showGeneralAviation').checked = !!s.filters.showGeneralAviation;
+  $('hideCargo').checked = !!s.filters.hideCargo;
   $('airlineAllowList').value = (s.filters.airlineAllowList || []).join(', ');
 
   $('schedEnabled').checked = !!s.schedule.enabled;
@@ -262,8 +358,9 @@ async function loadSettings(){
   $('nightBrightness').value = s.schedule.nightBrightness;
   $('nightStartHour').value = s.schedule.nightStartHour;
   $('nightEndHour').value = s.schedule.nightEndHour;
-  $('timezoneOffsetMinutes').value = s.schedule.timezoneOffsetMinutes;
+  $('timezone').value = s.schedule.timezone || 'UTC0';
 
+  $('buttonsEnabled').checked = !!(s.buttons && s.buttons.enabled);
   $('lightSensorEnabled').checked = !!s.light.enabled;
   $('lightSensorType').value = s.light.type;
   $('lightSensorPin').value = s.light.pin;
@@ -275,6 +372,10 @@ async function loadSettings(){
   $('panelResX').value = s.hardware.panelResX;
   $('panelResY').value = s.hardware.panelResY;
   $('panelChain').value = s.hardware.panelChain;
+  $('panelClkPhase').checked = s.hardware.panelClkPhase !== false;
+  $('panelDriverChip').value = s.hardware.panelDriverChip || 'shift';
+  $('panelI2sSpeedMhz').value = s.hardware.panelI2sSpeedMhz || 8;
+  $('panelLatchBlanking').value = s.hardware.panelLatchBlanking || 1;
 
   toggleMode();
 }
@@ -284,11 +385,12 @@ function collect(){
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
     network:{ wifiSsid:$('wifiSsid').value, wifiPassword:$('wifiPassword').value },
-    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, positionSource:$('positionSource').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),
       radiusKm:parseFloat($('radiusKm').value),
+      autoLocateOnBoot:$('autoLocateOnBoot').checked,
       trackedFlights:lines($('trackedFlights').value)
     },
     display:{
@@ -296,21 +398,26 @@ function collect(){
       maxFlights:+$('maxFlights').value, cycleSeconds:+$('cycleSeconds').value,
       fetchIntervalSeconds:+$('fetchIntervalSeconds').value
     },
-    layout:Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate'].map(k=>[k,$(k).checked])),
+    layout:Object.assign(Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'].map(k=>[k,$(k).checked])), {noFlightsMode:$('noFlightsMode').value}),
     filters:{
       minAltitudeFt:+$('minAltitudeFt').value, maxAltitudeFt:+$('maxAltitudeFt').value,
-      excludeOnGround:$('excludeOnGround').checked, airlineAllowList:lines($('airlineAllowList').value)
+      excludeOnGround:$('excludeOnGround').checked,
+      showGeneralAviation:$('showGeneralAviation').checked, hideCargo:$('hideCargo').checked,
+      airlineAllowList:lines($('airlineAllowList').value)
     },
     schedule:{
       enabled:$('schedEnabled').checked, dayBrightness:+$('dayBrightness').value, nightBrightness:+$('nightBrightness').value,
-      nightStartHour:+$('nightStartHour').value, nightEndHour:+$('nightEndHour').value, timezoneOffsetMinutes:+$('timezoneOffsetMinutes').value
+      nightStartHour:+$('nightStartHour').value, nightEndHour:+$('nightEndHour').value, timezone:$('timezone').value
     },
+    buttons:{ enabled:$('buttonsEnabled').checked },
     light:{
       enabled:$('lightSensorEnabled').checked, type:$('lightSensorType').value, pin:+$('lightSensorPin').value,
       darkThreshold:+$('lightDarkThreshold').value, hysteresis:+$('lightHysteresis').value,
       dimInstead:$('lightSensorDimInstead').checked, dimBrightness:+$('lightDimBrightness').value
     },
-    hardware:{ panelResX:+$('panelResX').value, panelResY:+$('panelResY').value, panelChain:+$('panelChain').value }
+    hardware:{ panelResX:+$('panelResX').value, panelResY:+$('panelResY').value, panelChain:+$('panelChain').value,
+      panelClkPhase:$('panelClkPhase').checked, panelDriverChip:$('panelDriverChip').value,
+      panelI2sSpeedMhz:+$('panelI2sSpeedMhz').value, panelLatchBlanking:+$('panelLatchBlanking').value }
   };
 }
 
@@ -324,6 +431,20 @@ async function restart(){
   if(!confirm('Restart the device?')) return;
   await fetch('/api/restart',{method:'POST'});
   toast('Restarting…');
+}
+
+async function geolocate(){
+  $('geoNote').textContent='Locating…';
+  try{
+    const r = await (await fetch('/api/geolocate')).json();
+    if(r.ok){
+      $('centerLat').value = (+r.lat).toFixed(4);
+      $('centerLon').value = (+r.lon).toFixed(4);
+      $('geoNote').textContent = `≈ ${r.place||'found'} — review, then Save.`;
+    } else {
+      $('geoNote').textContent = 'Could not detect (try again).';
+    }
+  }catch(e){ $('geoNote').textContent='Detect failed.'; }
 }
 
 async function scanWifi(){
@@ -355,6 +476,10 @@ async function loadStatus(){
       `<span class="pill">${s.mode} mode</span>`+
       `<span class="pill">${s.flightCount} flights</span>`+
       `<span class="pill">heap ${Math.round(s.freeHeap/1024)}k</span>`;
+    // Board-specific pins, reported by the device (the ESP32 and S3 maps differ).
+    if('i2cSda' in s){ const p=$('i2cPins'); if(p) p.textContent = `SDA ${s.i2cSda} / SCL ${s.i2cScl}`; }
+    if('adc1Min' in s){ const a=$('adc1Range'); if(a) a.textContent = `${s.adc1Min}-${s.adc1Max}`; }
+    if('buttonAPin' in s){ const b=$('btnPins'); if(b) b.textContent = `GPIO ${s.buttonAPin} (A) and GPIO ${s.buttonBPin} (B)`; }
     if('lightLevel' in s && s.lightLevel >= 0){
       const el = $('lightLive');
       if(el) el.textContent = `Live reading: ${s.lightLevel}  ·  panel ${s.lightDark ? 'OFF (dark)' : 'on (lit)'} — set the threshold just above the dark value.`;
@@ -363,57 +488,20 @@ async function loadStatus(){
   try{
     const f = await (await fetch('/api/flights')).json();
     $('flights').innerHTML = f.map(x=>{
-      const m=[]; if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
+      // Distance leads: the list is ordered nearest-first, so it reads as the sort key.
+      const m=[]; if('distanceKm'in x)m.push(x.distanceKm.toFixed(1)+'km');
+      if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
       if('headingDeg'in x)m.push('HDG'+x.headingDeg); if('verticalRateFpm'in x)m.push(x.verticalRateFpm+'fpm');
-      return `<div class="flight"><b>${x.ident||'?'}</b> <span>${x.airline||''}</span><br>
+      return `<div class="flight"><b>${x.ident||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${x.airline||''}</span><br>
         <span>${x.origin||'?'} → ${x.destination||'?'} · ${x.aircraft||''}</span>
         ${m.length?'<br><span>'+m.join(' · ')+'</span>':''}</div>`;
     }).join('') || '<small class="help">No flights currently displayed.</small>';
   }catch(e){}
 }
 
-let _previewOff = null; // offscreen w×h canvas, recreated when dimensions change
-async function loadPreview(){
-  try{
-    const res = await fetch('/api/framebuffer');
-    if(!res.ok) return; // 503 in AP/setup mode
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if(buf.length < 4) return;
-    const w = buf[0] | (buf[1]<<8), h = buf[2] | (buf[3]<<8);
-    if(w<=0 || h<=0 || buf.length < 4 + w*h*2) return;
-
-    if(!_previewOff || _previewOff.width!==w || _previewOff.height!==h){
-      _previewOff = document.createElement('canvas');
-      _previewOff.width = w; _previewOff.height = h;
-    }
-    const octx = _previewOff.getContext('2d');
-    const img = octx.createImageData(w, h);
-    for(let i=0;i<w*h;i++){
-      const lo = buf[4 + i*2], hi = buf[4 + i*2 + 1];
-      const v = lo | (hi<<8);
-      const r = (v>>11)&0x1f, g = (v>>5)&0x3f, b = v&0x1f;
-      const o = i*4;
-      img.data[o]   = (r*255/31)|0;
-      img.data[o+1] = (g*255/63)|0;
-      img.data[o+2] = (b*255/31)|0;
-      img.data[o+3] = 255;
-    }
-    octx.putImageData(img, 0, 0);
-
-    const cv = $('preview');
-    // Keep aspect ratio; scale up with nearest-neighbor for a crisp pixel look.
-    if(cv.width!==w || cv.height!==h){ cv.width=w; cv.height=h; }
-    const ctx = cv.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0,0,w,h);
-    ctx.drawImage(_previewOff, 0, 0);
-  }catch(e){}
-}
-
-function loadAll(){ loadSettings(); loadStatus(); loadPreview(); }
+function loadAll(){ loadSettings(); loadStatus(); }
 loadAll();
 setInterval(loadStatus, 5000);
-setInterval(loadPreview, 1500);
 </script>
 </body>
 </html>

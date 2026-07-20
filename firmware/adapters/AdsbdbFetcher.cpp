@@ -1,8 +1,10 @@
 /*
-Purpose: Free flight enrichment via adsbdb.com (no API key).
-- GET /v0/callsign/{callsign} -> flightroute: airline + origin/destination ICAO.
-- GET /v0/aircraft/{icao24}   -> aircraft: icao_type + registered owner codes.
-Maps results into FlightInfo (route/operator/aircraft + friendly airline name).
+Purpose: Free flight enrichment via adsbdb.com (+ hexdb.io fallback), no API key.
+- /v0/callsign/{cs} -> route (origin/dest ICAO+IATA) and airline name.
+- /v0/aircraft/{icao24} -> ICAO aircraft type.
+All HTTP goes through the shared streaming HttpJson client. Returns true only
+when a NETWORK lookup actually produced route or aircraft data (the caller adds
+local callsign-prefix identity separately, so prefix-only is NOT "enriched").
 */
 #include "adapters/AdsbdbFetcher.h"
 
@@ -15,40 +17,15 @@ static String jstr(JsonObject o, const char *key)
     return o[key].as<String>();
 }
 
-bool AdsbdbFetcher::httpGetJson(const String &url, String &outPayload)
-{
-    WiFiClientSecure client;
-    client.setInsecure();
-
-    HTTPClient http;
-    http.begin(client, url);
-    http.addHeader("Accept", "application/json");
-    http.setTimeout(12000);
-
-    int code = http.GET();
-    if (code != 200)
-    {
-        http.end();
-        return false; // 404 = unknown callsign/aircraft (not an error worth logging loudly)
-    }
-    outPayload = http.getString();
-    http.end();
-    return true;
-}
-
 bool AdsbdbFetcher::fetchRoute(const String &callsign, FlightInfo &out)
 {
     String cs = callsign;
     cs.trim();
-    if (cs.length() == 0)
+    if (cs.length() == 0 || !_http)
         return false;
 
-    String payload;
-    if (!httpGetJson(String(kAdsbdbBase) + "/callsign/" + cs, payload))
-        return false;
-
-    DynamicJsonDocument doc(4096);
-    if (deserializeJson(doc, payload))
+    JsonDocument doc;
+    if (!_http->getJson(String(kAdsbdbBase) + "/callsign/" + cs, doc))
         return false;
 
     JsonObject fr = doc["response"]["flightroute"].as<JsonObject>();
@@ -77,11 +54,16 @@ bool AdsbdbFetcher::fetchRoute(const String &callsign, FlightInfo &out)
 
     JsonObject o = fr["origin"].as<JsonObject>();
     if (!o.isNull())
+    {
         out.origin.code_icao = jstr(o, "icao_code");
+        out.origin.code_iata = jstr(o, "iata_code");
+    }
     JsonObject d = fr["destination"].as<JsonObject>();
     if (!d.isNull())
+    {
         out.destination.code_icao = jstr(d, "icao_code");
-
+        out.destination.code_iata = jstr(d, "iata_code");
+    }
     return true;
 }
 
@@ -89,24 +71,17 @@ bool AdsbdbFetcher::fetchAircraft(const String &icao24, FlightInfo &out)
 {
     String hex = icao24;
     hex.trim();
-    if (hex.length() == 0)
+    if (hex.length() == 0 || !_http)
         return false;
 
-    String payload;
-    if (!httpGetJson(String(kAdsbdbBase) + "/aircraft/" + hex, payload))
-        return false;
-
-    DynamicJsonDocument doc(4096);
-    if (deserializeJson(doc, payload))
+    JsonDocument doc;
+    if (!_http->getJson(String(kAdsbdbBase) + "/aircraft/" + hex, doc))
         return false;
 
     JsonObject ac = doc["response"]["aircraft"].as<JsonObject>();
     if (ac.isNull())
         return false;
 
-    // Only the aircraft ICAO type is reliable/useful here. The "registered_owner"
-    // is frequently a leasing company, not the operating airline, so we take the
-    // airline strictly from the callsign route lookup instead.
     String type = jstr(ac, "icao_type");
     if (type.length())
     {
@@ -116,12 +91,84 @@ bool AdsbdbFetcher::fetchAircraft(const String &icao24, FlightInfo &out)
     return false;
 }
 
+bool AdsbdbFetcher::fetchRouteHexdb(const String &callsign, FlightInfo &out)
+{
+    String cs = callsign;
+    cs.trim();
+    if (cs.length() == 0 || !_http)
+        return false;
+
+    JsonDocument doc;
+    if (!_http->getJson(String("https://hexdb.io/api/v1/route/icao/") + cs, doc))
+        return false;
+
+    String route = doc["route"] | "";
+    int dash = route.indexOf('-');
+    if (dash < 0)
+        return false;
+    String origin = route.substring(0, dash);
+    String dest = route.substring(route.lastIndexOf('-') + 1); // last leg if multi-stop
+    origin.trim();
+    dest.trim();
+    if (origin.length() && out.origin.code_icao.length() == 0)
+        out.origin.code_icao = origin;
+    if (dest.length() && out.destination.code_icao.length() == 0)
+        out.destination.code_icao = dest;
+    return origin.length() || dest.length();
+}
+
+bool AdsbdbFetcher::fetchAircraftHexdb(const String &icao24, FlightInfo &out)
+{
+    String hex = icao24;
+    hex.trim();
+    if (hex.length() == 0 || !_http)
+        return false;
+
+    JsonDocument doc;
+    if (!_http->getJson(String("https://hexdb.io/api/v1/aircraft/") + hex, doc))
+        return false;
+
+    String t = doc["ICAOTypeCode"] | "";
+    if (t.length() && out.aircraft_code.length() == 0)
+    {
+        out.aircraft_code = t;
+        return true;
+    }
+    return false;
+}
+
 bool AdsbdbFetcher::fetchFlightInfo(const String &flightIdent, const String &icao24, FlightInfo &outInfo)
 {
-    bool ok = false;
-    if (flightIdent.length())
-        ok = fetchRoute(flightIdent, outInfo) || ok;
-    if (icao24.length())
-        ok = fetchAircraft(icao24, outInfo) || ok;
-    return ok;
+    bool gotNetworkData = false;
+
+    // Batch by HOST, not by field. The shared HttpJson holds ONE persistent TLS
+    // connection, so alternating adsbdb/hexdb (A,B,A,B) forces a full renegotiation
+    // on every call. Doing both adsbdb lookups first and only then the hexdb
+    // fallbacks (A,A,B,B) keeps keep-alive working, and lets consecutive flights
+    // reuse the already-open adsbdb connection.
+    bool haveRoute = false;
+    bool haveAircraft = false;
+
+    // adsbdb (host A) — route also supplies the airline name.
+    if (flightIdent.length() && fetchRoute(flightIdent, outInfo))
+    {
+        haveRoute = true;
+        gotNetworkData = true;
+    }
+    if (icao24.length() && fetchAircraft(icao24, outInfo))
+    {
+        haveAircraft = true;
+        gotNetworkData = true;
+    }
+
+    // hexdb.io (host B) — only for whatever adsbdb missed.
+    if (!haveRoute && flightIdent.length() && fetchRouteHexdb(flightIdent, outInfo))
+        gotNetworkData = true;
+    if (!haveAircraft && icao24.length() && fetchAircraftHexdb(icao24, outInfo))
+        gotNetworkData = true;
+
+    // NOTE: callsign-prefix -> operator_icao is applied by the orchestrator
+    // (FlightDataFetcher), NOT here, so prefix-only does not count as a network
+    // success and never poisons the cache.
+    return gotNetworkData;
 }

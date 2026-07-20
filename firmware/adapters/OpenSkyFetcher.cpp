@@ -11,6 +11,43 @@ Outputs: Populates outStateVectors with filtered results (distance_km, bearing_d
 #include "adapters/OpenSkyFetcher.h"
 #include "core/Settings.h"
 
+// The TLS client for every OpenSky call. Configured once, lazily (a global fetcher
+// is constructed before WiFi/Settings exist).
+//
+// setHandshakeTimeout(15) is the load-bearing line. Without our own client,
+// HTTPClient::begin(url) constructs a WiFiClientSecure internally whose
+// handshake_timeout is the 120000ms default — identical to the loop watchdog — so a
+// stalled handshake reboots the board instead of failing. 15s matches HttpJson, and
+// leaves room for the enrichment calls later in the same fetch cycle.
+//
+// setInsecure() preserves existing behavior: begin(url) reached the same state via
+// TLSTraits::verify() (CA == nullptr -> setInsecure), so this is not a downgrade.
+// The coredump confirms it: `insecure=true` in the captured start_ssl_client frame.
+WiFiClientSecure &OpenSkyFetcher::secureClient()
+{
+    if (!m_secureInit)
+    {
+        m_secure.setInsecure();
+        m_secure.setHandshakeTimeout(15); // seconds
+        m_secureInit = true;
+    }
+    // Close anything left open by the previous call before handing the client over.
+    //
+    // OpenSky spans TWO hosts — auth.opensky-network.org for the token, then
+    // opensky-network.org for the states — and HTTPClient::connect() short-circuits on
+    // `if (connected()) return true;` WITHOUT comparing hosts. fetchToken() does not
+    // call useHTTP10(), so its _reuse stays true and end() deliberately KEEPS its
+    // socket open; the states GET would then be sent down that auth connection.
+    //
+    // begin(url) could not hit this because it built a fresh client inside each
+    // HTTPClient. Sharing one client (needed to bound the handshake) reintroduced the
+    // "one persistent client can hold one host" hazard, so pay a handshake per call —
+    // exactly what the old code did. useHTTP10(true) already disables keep-alive on
+    // the states path anyway, so this costs nothing there.
+    m_secure.stop();
+    return m_secure;
+}
+
 static String urlEncodeForm(const String &value)
 {
     String out;
@@ -86,7 +123,7 @@ bool OpenSkyFetcher::requestAccessToken(String &outToken, unsigned long &outExpi
     HTTPClient http;
     Serial.print("OpenSkyFetcher: Token URL: ");
     Serial.println(APIConfiguration::OPENSKY_TOKEN_URL);
-    http.begin(APIConfiguration::OPENSKY_TOKEN_URL);
+    http.begin(secureClient(), APIConfiguration::OPENSKY_TOKEN_URL);
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     http.addHeader("Accept", "application/json");
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -123,7 +160,7 @@ bool OpenSkyFetcher::requestAccessToken(String &outToken, unsigned long &outExpi
     }
     http.end();
 
-    DynamicJsonDocument doc(12288);
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err)
     {
@@ -167,7 +204,6 @@ bool OpenSkyFetcher::fetchStateVectors(double centerLat,
                                        double radiusKm,
                                        std::vector<StateVector> &outStateVectors)
 {
-    // Ensure OAuth token if configured
     if (!ensureAccessToken(false))
     {
         Serial.println("OpenSkyFetcher: ensureAccessToken failed before GET");
@@ -180,179 +216,90 @@ bool OpenSkyFetcher::fetchStateVectors(double centerLat,
     String url = String(APIConfiguration::OPENSKY_BASE_URL) + "/api/states/all?lamin=" + String(latMin, 6) +
                  "&lamax=" + String(latMax, 6) +
                  "&lomin=" + String(lonMin, 6) +
-                 "&lomax=" + String(lonMax, 6);
+                 "&lomax=" + String(lonMax, 6) +
+                 "&extended=1"; // include ADS-B emitter category (index 17; 8 = rotorcraft)
 
     HTTPClient http;
-    http.begin(url);
-    // OAuth Bearer required
+    // OpenSky uses its own transport (Bearer token, not via HttpJson) — but it must
+    // still pass OUR client, so the TLS handshake is bounded. See secureClient().
+    http.begin(secureClient(), url);
+    http.useHTTP10(true); // unchunked body so we can stream-parse the states array
+    http.setTimeout(15000);
     http.addHeader("Authorization", String("Bearer ") + m_accessToken);
 
     int code = http.GET();
+    if (code == 401 && m_accessToken.length() > 0 && ensureAccessToken(true))
+    {
+        http.end();
+        http.begin(secureClient(), url);
+        http.useHTTP10(true);
+        http.setTimeout(15000);
+        http.addHeader("Authorization", String("Bearer ") + m_accessToken);
+        code = http.GET();
+    }
     if (code != 200)
     {
-        bool attemptedRefresh = false;
-        if (code == 401 && m_accessToken.length() > 0)
-        {
-            // Try refresh once
-            http.end();
-            if (ensureAccessToken(true))
-            {
-                HTTPClient retry;
-                retry.begin(url);
-                retry.addHeader("Authorization", String("Bearer ") + m_accessToken);
-                code = retry.GET();
-                if (code != 200)
-                {
-                    Serial.print("OpenSkyFetcher: HTTP retry failed with code: ");
-                    Serial.println(code);
-                    retry.end();
-                    return false;
-                }
-                String payload = retry.getString();
-                retry.end();
-
-                DynamicJsonDocument doc(16384);
-                DeserializationError err = deserializeJson(doc, payload);
-                if (err)
-                {
-                    Serial.print("OpenSkyFetcher: JSON deserialization error: ");
-                    Serial.println(err.c_str());
-                    return false;
-                }
-
-                JsonArray states = doc["states"].as<JsonArray>();
-                if (states.isNull())
-                {
-                    return true; // no states is not an error
-                }
-
-                for (JsonVariant v : states)
-                {
-                    if (!v.is<JsonArray>())
-                    {
-                        Serial.println("OpenSkyFetcher: Expected array element in states");
-                        continue;
-                    }
-                    JsonArray a = v.as<JsonArray>();
-                    if (a.size() < 17)
-                    {
-                        Serial.println("OpenSkyFetcher: State vector array has insufficient elements");
-                        continue;
-                    }
-
-                    StateVector s;
-                    s.icao24 = a[0].as<const char *>();
-                    s.callsign = a[1].isNull() ? String("") : String(a[1].as<const char *>());
-                    s.callsign.trim();
-                    s.origin_country = a[2].isNull() ? String("") : String(a[2].as<const char *>());
-                    s.time_position = a[3].isNull() ? 0 : a[3].as<long>();
-                    s.last_contact = a[4].isNull() ? 0 : a[4].as<long>();
-                    s.lon = a[5].isNull() ? NAN : a[5].as<double>();
-                    s.lat = a[6].isNull() ? NAN : a[6].as<double>();
-                    s.baro_altitude = a[7].isNull() ? NAN : a[7].as<double>();
-                    s.on_ground = a[8].isNull() ? false : a[8].as<bool>();
-                    s.velocity = a[9].isNull() ? NAN : a[9].as<double>();
-                    s.heading = a[10].isNull() ? NAN : a[10].as<double>();
-                    s.vertical_rate = a[11].isNull() ? NAN : a[11].as<double>();
-                    s.sensors = a[12].isNull() ? 0 : a[12].as<long>();
-                    s.geo_altitude = a[13].isNull() ? NAN : a[13].as<double>();
-                    s.squawk = a[14].isNull() ? String("") : String(a[14].as<const char *>());
-                    s.spi = a[15].isNull() ? false : a[15].as<bool>();
-                    s.position_source = a[16].isNull() ? 0 : a[16].as<int>();
-
-                    if (isnan(s.lat) || isnan(s.lon))
-                    {
-                        Serial.println("OpenSkyFetcher: Skipping state vector with invalid coordinates");
-                        continue;
-                    }
-
-                    s.distance_km = haversineKm(centerLat, centerLon, s.lat, s.lon);
-                    if (s.distance_km > radiusKm)
-                        continue;
-                    s.bearing_deg = computeBearingDeg(centerLat, centerLon, s.lat, s.lon);
-
-                    outStateVectors.push_back(s);
-                }
-
-                return true;
-            }
-            attemptedRefresh = true;
-        }
-
         Serial.print("OpenSkyFetcher: HTTP request failed with code: ");
         Serial.println(code);
         http.end();
-        if (attemptedRefresh)
-        {
-            Serial.println("OpenSkyFetcher: Token refresh attempt failed");
-        }
         return false;
     }
-    String payload = http.getString();
+
+    try
+    {
+        parseStatesInto(http.getStream(), centerLat, centerLon, radiusKm, outStateVectors);
+    }
+    catch (...)
+    {
+        outStateVectors.clear();
+        Serial.println("OpenSkyFetcher: parse aborted (low memory)");
+    }
     http.end();
-
-    DynamicJsonDocument doc(16384);
-    DeserializationError err = deserializeJson(doc, payload);
-    if (err)
-    {
-        Serial.print("OpenSkyFetcher: JSON deserialization error: ");
-        Serial.println(err.c_str());
-        return false;
-    }
-
-    JsonArray states = doc["states"].as<JsonArray>();
-    if (states.isNull())
-    {
-        return true; // no states is not an error
-    }
-
-    for (JsonVariant v : states)
-    {
-        if (!v.is<JsonArray>())
-        {
-            Serial.println("OpenSkyFetcher: Expected array element in states");
-            continue;
-        }
-        JsonArray a = v.as<JsonArray>();
-        if (a.size() < 17)
-        {
-            Serial.println("OpenSkyFetcher: State vector array has insufficient elements");
-            continue;
-        }
-
-        StateVector s;
-        s.icao24 = a[0].as<const char *>();
-        s.callsign = a[1].isNull() ? String("") : String(a[1].as<const char *>());
-        s.callsign.trim();
-        s.origin_country = a[2].isNull() ? String("") : String(a[2].as<const char *>());
-        s.time_position = a[3].isNull() ? 0 : a[3].as<long>();
-        s.last_contact = a[4].isNull() ? 0 : a[4].as<long>();
-        s.lon = a[5].isNull() ? NAN : a[5].as<double>();
-        s.lat = a[6].isNull() ? NAN : a[6].as<double>();
-        s.baro_altitude = a[7].isNull() ? NAN : a[7].as<double>();
-        s.on_ground = a[8].isNull() ? false : a[8].as<bool>();
-        s.velocity = a[9].isNull() ? NAN : a[9].as<double>();
-        s.heading = a[10].isNull() ? NAN : a[10].as<double>();
-        s.vertical_rate = a[11].isNull() ? NAN : a[11].as<double>();
-        s.sensors = a[12].isNull() ? 0 : a[12].as<long>();
-        s.geo_altitude = a[13].isNull() ? NAN : a[13].as<double>();
-        s.squawk = a[14].isNull() ? String("") : String(a[14].as<const char *>());
-        s.spi = a[15].isNull() ? false : a[15].as<bool>();
-        s.position_source = a[16].isNull() ? 0 : a[16].as<int>();
-
-        if (isnan(s.lat) || isnan(s.lon))
-        {
-            Serial.println("OpenSkyFetcher: Skipping state vector with invalid coordinates");
-            continue;
-        }
-
-        s.distance_km = haversineKm(centerLat, centerLon, s.lat, s.lon);
-        if (s.distance_km > radiusKm)
-            continue;
-        s.bearing_deg = computeBearingDeg(centerLat, centerLon, s.lat, s.lon);
-
-        outStateVectors.push_back(s);
-    }
-
     return true;
+}
+
+void OpenSkyFetcher::parseStatesInto(Stream &stream, double centerLat, double centerLon,
+                                     double radiusKm, std::vector<StateVector> &out)
+{
+    // Seek to the start of the states array, then parse ONE inner array at a
+    // time into a reused tiny document (never the whole response in RAM).
+    if (!stream.find("\"states\":["))
+        return; // no states array (e.g. {"time":..,"states":null})
+
+    JsonDocument sdoc; // reused; holds only ONE state vector at a time
+    do
+    {
+        sdoc.clear();
+        DeserializationError err = deserializeJson(sdoc, stream);
+        if (err)
+            break; // hit ']' / malformed — stop
+        JsonArray a = sdoc.as<JsonArray>();
+        if (a.size() >= 7)
+        {
+            StateVector s;
+            s.icao24 = a[0].as<const char *>();
+            s.callsign = a[1].isNull() ? String("") : String(a[1].as<const char *>());
+            s.callsign.trim();
+            s.lon = a[5].isNull() ? NAN : a[5].as<double>();
+            s.lat = a[6].isNull() ? NAN : a[6].as<double>();
+            s.baro_altitude = a[7].isNull() ? NAN : a[7].as<double>();
+            s.on_ground = a[8].isNull() ? false : a[8].as<bool>();
+            s.velocity = a[9].isNull() ? NAN : a[9].as<double>();
+            s.heading = a[10].isNull() ? NAN : a[10].as<double>();
+            s.vertical_rate = a[11].isNull() ? NAN : a[11].as<double>();
+            s.geo_altitude = a[13].isNull() ? NAN : a[13].as<double>();
+            s.position_source = a[16].isNull() ? 0 : a[16].as<int>();
+            s.category = a[17].isNull() ? 0 : a[17].as<int>(); // extended=1; 8 = rotorcraft
+
+            if (!isnan(s.lat) && !isnan(s.lon))
+            {
+                s.distance_km = haversineKm(centerLat, centerLon, s.lat, s.lon);
+                if (s.distance_km <= radiusKm)
+                {
+                    s.bearing_deg = computeBearingDeg(centerLat, centerLon, s.lat, s.lon);
+                    out.push_back(s);
+                }
+            }
+        }
+    } while (out.size() < 40 && stream.findUntil(",", "]"));
 }

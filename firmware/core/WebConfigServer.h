@@ -17,9 +17,11 @@ REST API:
 #pragma once
 
 #include <Arduino.h>
+#include <utility>
+#include <vector>
 #include <WebServer.h>
 #include <DNSServer.h>
-#include "interfaces/BaseDisplay.h"
+#include "models/FlightInfo.h"
 
 class WebConfigServer
 {
@@ -30,11 +32,10 @@ public:
     void handle(); // call frequently from loop()
 
     // Pushed in from the main loop so the UI can show what's on the wall.
-    void setFlightsJson(const String &json) { _flightsJson = json; }
+    // We store a pointer to the long-lived global flights vector and serialize
+    // it on demand in handleGetFlights(), rather than re-serializing every fetch.
+    void setFlights(const std::vector<FlightInfo> *flights) { _flights = flights; }
     void setLastFetchInfo(int flightCount, const String &note);
-
-    // Display whose framebuffer is served as a live preview (/api/framebuffer).
-    void setDisplay(BaseDisplay *display) { _display = display; }
 
     // Latest ambient light reading, surfaced in /api/status for calibration.
     void setLightStatus(int level, bool dark)
@@ -52,10 +53,9 @@ private:
     DNSServer _dns;
     bool _apMode = false;
     String _ip;
-    String _flightsJson = "[]";
+    const std::vector<FlightInfo> *_flights = nullptr;
     int _lastFlightCount = 0;
     String _lastNote;
-    BaseDisplay *_display = nullptr;
     int _lightLevel = -1;
     bool _lightDark = false;
 
@@ -67,7 +67,8 @@ private:
     void handlePostSettings();
     void handleGetStatus();
     void handleGetFlights();
-    void handleFramebuffer();
+    String buildFlightsJson() const;
+    void handleGeolocate();
     void handleWifiScan();
     void handleRestart();
     void handleRoot();
