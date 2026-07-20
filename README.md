@@ -4,7 +4,7 @@ TheFlightWall is an LED wall which shows live information of flights going by yo
 
 This open-source build is at **feature parity with the [FlightWall Mini](https://theflightwall.com/products/flightwall-mini-flight-tracking-led-display)**: configure and control everything from a built-in **web page** (no app required), with two tracking modes, live flight metrics, filters, and a day/night brightness schedule. See [Configuration & Control](#configuration--control-web-ui).
 
-This is the open source version with some basic guides to the panels, mounting them together, data services, and code. Check out our viral build video: [https://www.instagram.com/p/DLIbAtbJxPl](https://www.instagram.com/p/DLIbAtbJxPl)
+This is the open source version, with guides to the display, wiring, data services, and code. Check out our viral build video: [https://www.instagram.com/p/DLIbAtbJxPl](https://www.instagram.com/p/DLIbAtbJxPl)
 
 **Don't feel like building one? Check out the offical product: [theflightwall.com](https://theflightwall.com)**
 
@@ -12,34 +12,31 @@ This is the open source version with some basic guides to the panels, mounting t
 *Now with bundled airline logo tiles and a Mini-style flight card — see [Airline logos](#airline-logos).*
 
 # Component List
-- Main components
-    - 20x [16x16 LED panels](https://www.aliexpress.us/item/2255800358269772.html)
-    - ESP32 dev board (we used the [R32 D1](https://www.amazon.com/HiLetgo-ESP-32-Development-Bluetooth-Arduino/dp/B07WFZCBH8) but any ESP dev board should work)
-    - 3D printed brackets (or MDF / cardboard)
-    - 2x 6ft wooden trim pieces (for support)
-- Power
-    - [5V >20A power supply](https://www.amazon.com/dp/B07KC55TJF) (for 20 panels)
-    - [3.3V - 5V voltage level shifter](https://www.amazon.com/dp/B07F7W91LC)
-- Data
-    - [OpenSky](https://opensky-network.org/) for ADS-B flight data
-    - [FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) for route, aircraft, and airline information
+
+- **Display** — a **HUB75 RGB LED matrix**. The firmware targets the Mini's **128×64** geometry (e.g. two 64×64 panels chained, or a single 128×64), but tile size and chain length are set in the web UI, so other layouts work too. Any HUB75 panel supported by [ESP32-HUB75-MatrixPanel-DMA](https://github.com/mrcodetastic/ESP32-HUB75-MatrixPanel-DMA) should be fine.
+- **Controller** — an ESP32 dev board. A plain ESP32 works; an **ESP32-S3 with PSRAM** is recommended for the extra headroom (larger displays, TLS). We originally used an [R32 D1](https://www.amazon.com/HiLetgo-ESP-32-Development-Bluetooth-Arduino/dp/B07WFZCBH8).
+- **Level shifter** *(recommended)* — a fast push-pull **74HCT245 / 74AHCT245** on the HUB75 logic lines for a stable signal from the ESP32's 3.3 V. (A bidirectional I²C-type BSS138 shifter will **not** work — see [Unstable display?](#unstable-display-flicker--pixels-shifted-by-one).)
+- **Power** — a **5 V power supply** sized to your panel. A 128×64 can draw up to ~8 A at full white and far less at normal brightness, so a 5 V 5–10 A supply is comfortable. Tie the panel and ESP32 grounds together.
+- **Enclosure** — a frame or stand of your choice (3D-printed brackets, wood trim, or the panel's own frame).
+- **(Optional) ambient light sensor** — an analog LDR, or an I²C **BH1750** / **TCS3472**, to auto-dim at night.
+
+### Data services
+- **[OpenSky](https://opensky-network.org/)** — live ADS-B positions (free, needs an OAuth client id/secret). *Default.*
+- **[adsbdb.com](https://www.adsbdb.com/) + [hexdb.io](https://hexdb.io/)** — free route / airline / aircraft enrichment, no key. *Default.*
+- **[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/)** — optional paid enrichment for authoritative routes.
+- **Flightradar24** — optional, keyless, **unofficial** position+route source (personal use only).
+
+See [Data API Keys](#data-api-keys) and [`docs/data-sources.md`](docs/data-sources.md) for how each source is used, costs, and trade-offs.
 
 # Hardware
 
 ## Dimensions
 
-With 20 panels (10x2) - ~63 inches x ~12.6 inches
+Depends on the panel's pixel pitch. A 128×64 build from two 64×64 panels is roughly:
+- **P2.5** — ~320 × 160 mm (~12.6 × 6.3 in)
+- **P3** — ~384 × 192 mm (~15.1 × 7.6 in)
 
-## LED Panels
-[These are the LED panels we used](https://www.aliexpress.us/item/2255800358269772.html), but any similar LED matrix should work.
-
-We designed 3D printable brackets to attach the panels together, this is one approach, but you could also use MDF board or even cardboard (as we did originally haha)
-
-Then two 63 inch horizontal supports for extra strength. We bought wooden floor trim and cut it to size.
-
-![LED Panel Wiring and Brackets](images/led-panel-wiring-and-brackets.jpg)
-
-Obviously this is just one way to hold them together, but we're sure there are better ways!
+> **Legacy note:** this project started as a large wall built from 20× 16×16 **WS2812B** panels (~63 in) with 3D-printed brackets and wooden supports. That single-data-line design is **no longer driven by this firmware** — it's HUB75 only now. The old build photo ([`images/led-panel-wiring-and-brackets.jpg`](images/led-panel-wiring-and-brackets.jpg)) and WS2812 wiring diagram ([`images/wiring-diagram.png`](images/wiring-diagram.png)) are kept for reference.
 
 ## Display: HUB75 RGB matrix
 
@@ -67,8 +64,6 @@ Driving HUB75 directly at the ESP32's 3.3 V can be marginal. The web UI's **Hard
 The robust hardware fix is a **fast push-pull level shifter (74HCT245 / 74AHCT245)** on the 13–14 logic lines. Note: a *bidirectional I2C* level shifter (BSS138 type) will **not** work for HUB75 — it's too slow and has too few channels.
 
 ![HUB75 Wiring Diagram](images/hub75-wiring.svg)
-
-> The legacy WS2812B single-data-line wiring diagram (no longer used by this firmware) is kept at [`images/wiring-diagram.png`](images/wiring-diagram.png) for reference.
 
 # Data and Software
 
@@ -138,20 +133,20 @@ Then type commands (`help` lists them all):
 wifi MyNetwork MyPassword
 restart
 ```
-Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <adsbdb|aeroapi|off>`, `mode <area|flights>`, `loc <lat> <lon> <radiusKm>`, `get`, `set <json>`, `erase`. Changes are saved to the device immediately.
+Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <adsbdb|aeroapi|off>`, `mode <area|flights>`, `loc <lat> <lon> <radiusKm>`, `light` / `light watch` (live sensor reading for calibration), `get`, `set <json>`, `erase`. Changes are saved to the device immediately. (The position source — OpenSky vs Flightradar24 — is set from the web UI.)
 
 ### What you can configure from the web page
 - **WiFi** — scan + select your network (changes apply after a restart).
-- **API keys** — OpenSky client id/secret and the FlightAware AeroAPI key.
+- **API keys & sources** — OpenSky client id/secret and the FlightAware AeroAPI key; dropdowns to pick the **position source** (OpenSky / Flightradar24) and **enrichment source** (adsbdb / AeroAPI / off).
 - **Tracking mode**:
   - **Area** — show everything within a radius of a center point (your home/window). An **Auto-detect** button fills the center from IP geolocation (free, no key, approximate — review before saving), with an optional "auto-detect on every boot" toggle.
   - **Flights** — track a specific list of flights by flight number, callsign, or tail.
-- **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, and which **fields** appear on each card (airline+flight, route, aircraft, **altitude, speed, heading, vertical rate**).
+- **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, which **fields** appear on each card (airline+flight, route, aircraft, **altitude, speed, heading, vertical rate**), and the **no-flights screen** (clock / aviation fun facts).
 - **Filters** — altitude band, hide aircraft on the ground, and an airline allow-list.
-- **Brightness schedule** — separate day/night brightness with configurable night hours (uses NTP time + a UTC offset).
-- **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (34/35/36/39/33 — ADC2 can't be used with WiFi on) or an **I2C BH1750** lux sensor on SDA=21/SCL=22. Threshold + hysteresis are tunable, and the web UI shows the live reading for calibration.
+- **Brightness schedule** — separate day/night brightness with configurable night hours, using a **POSIX timezone string** (e.g. `EST5EDT,M3.2.0,M11.1.0`) so daylight-saving transitions are handled automatically.
+- **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (34/35/36/39/33 — ADC2 can't be used with WiFi on), or an I²C **BH1750** lux sensor or **TCS3472** RGBC sensor on SDA=21/SCL=22. Threshold + hysteresis are tunable, and the web UI shows the live reading for calibration.
 - **Hardware** — tile size and tile count, so you can match any panel layout (changes apply after a restart).
-- **Live status** — current connection, mode, the flights currently on the wall, and a **live pixel preview** of exactly what the LED matrix is showing right now (mirrored from the device framebuffer).
+- **Live status** — current connection, mode, and the flights currently on the wall, each with its **distance** (the list is ordered nearest-first).
 
 Settings are stored on the device (LittleFS) and survive reboots — no re-flashing needed to change anything except the data pin.
 
@@ -159,7 +154,7 @@ Settings are stored on the device (LittleFS) and survive reboots — no re-flash
 
 The wall renders a **Mini-style flight card**: an airline logo tile on the left, then the flight number, route, aircraft, and your chosen metrics on the right. Logos are 16×16 tiles stored on the device at `firmware/data/logos/<ICAO>.rgb565` (keyed by the airline's ICAO code, e.g. `UAL.rgb565`).
 
-- A bundled set of **~78 major carriers worldwide** ships in the repo as brand-colored code-badge tiles (the airline's 2-letter code on its brand color — not trademarked logo artwork). Airlines without a tile fall back to the same brand-style badge generated on the fly.
+- A bundled set of **150+ carriers worldwide** (passenger and cargo) ships in the repo as brand-colored code-badge tiles — the airline's 2-letter code on its brand color, not trademarked logo artwork. Airlines without a tile fall back to the same brand-style badge generated on the fly.
 - They're flashed as part of the LittleFS image (`pio run -t uploadfs`).
 
 ### Add or replace logos
