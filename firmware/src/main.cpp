@@ -577,7 +577,15 @@ void loop()
         // first real arrival for no reason. Self-correcting either way: fewer requests
         // let the limit lapse, flights come back, the counter resets, and the interval
         // returns to whatever the user configured without anyone touching a setting.
-        const uint8_t extra = g_consecutiveEmpty - kEmptyConfirmCycles;
+        // Engages on the SECOND consecutive empty, not the third. FR24's limiting
+        // alternates rather than clustering: measured over 13 minutes at a 50% throttle
+        // rate, the longest run of consecutive empties was two, so a ladder that waited
+        // for three stayed dormant through the entire window it was written for. Biasing
+        // the shift by one means the pair that actually occurs is enough to slow us down.
+        // The cost is that two quiet cycles over a genuinely empty sky now stretch the
+        // interval too — bounded by the 2-minute cap below, and cleared by the first
+        // cycle that returns any flight.
+        const uint8_t extra = (uint8_t)(g_consecutiveEmpty - kEmptyConfirmCycles + 1);
         const uint8_t shift = extra > 2 ? 2 : extra;
         unsigned long backoff = intervalMs << shift;
         const unsigned long kMaxEmptyBackoffMs = 120000UL;
