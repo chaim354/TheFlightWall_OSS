@@ -174,6 +174,13 @@ void WebConfigServer::handleGetStatus()
     _server.send(200, "application/json", out);
 }
 
+// Prefer IATA, fall back to ICAO — the rule AirportInfo documents as the display code,
+// and the same one iataRoute() applies when drawing the panel.
+static String displayCode(const AirportInfo &a)
+{
+    return a.code_iata.length() ? a.code_iata : a.code_icao;
+}
+
 String WebConfigServer::buildFlightsJson() const
 {
     JsonDocument doc;
@@ -184,10 +191,24 @@ String WebConfigServer::buildFlightsJson() const
         {
             JsonObject o = arr.createNestedObject();
             o["ident"] = f.ident.length() ? f.ident : f.ident_icao;
-            o["airline"] = f.airline_display_name_full;
+            // Same fallback chain buildFlightLines uses on the panel, and that the
+            // aircraft line below already used here. Only the enrichment fetchers set
+            // airline_display_name_full, so under Flightradar24 — whose inline route data
+            // makes those lookups unnecessary and skipped — this was always the empty
+            // string and the card's airline column rendered blank, even though the wall
+            // knew the operator well enough to draw its logo.
+            o["airline"] = f.airline_display_name_full.length() ? f.airline_display_name_full
+                           : (f.operator_iata.length() ? f.operator_iata
+                              : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
             o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
-            o["origin"] = f.origin.code_icao;
-            o["destination"] = f.destination.code_icao;
+            // Reading code_icao alone blanked this list for any source that supplies only
+            // IATA — which is every flight under Flightradar24, whose feed carries IATA
+            // origin/destination inline and no ICAO at all. The UI renders these as
+            // `${x.origin||'?'}`, so the card showed "? → ?" for traffic the panel beside
+            // it was displaying correctly. Under OpenSky/adsbdb both codes are populated,
+            // so this also switches the list from KJFK to JFK and matches the wall.
+            o["origin"] = displayCode(f.origin);
+            o["destination"] = displayCode(f.destination);
             o["helicopter"] = f.is_helicopter;
             o["cargo"] = f.is_cargo;
             o["private"] = f.is_private;
