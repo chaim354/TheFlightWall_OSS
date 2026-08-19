@@ -87,7 +87,15 @@ bool FlightRadar24Fetcher::fetchStateVectors(double centerLat,
 
     HTTPClient http;
     http.begin(secureClient(), url);
-    http.useHTTP10(true); // feed.js is unchunked; lets us stream-parse
+    // Deliberately HTTP/1.1, NOT useHTTP10(true). Under HTTP/1.0 HTTPClient omits its
+    // Accept-Encoding header and the CDN answers with no Content-Length, delimiting the
+    // body by connection close alone. That is unsafe here: WiFiClientSecure::read()
+    // calls stop() on any error, and once the peer's close_notify is processed, plaintext
+    // still buffered in mbedTLS is discarded. Small replies survive (one TLS record), but
+    // anything spanning records loses its tail -- measured on hardware as a body cut off
+    // mid-object and a "JSON parse error: IncompleteInput" every cycle, which the caller
+    // reports as a failed fetch and renders as "nothing ever updates". HTTP/1.1 gets a
+    // Content-Length or chunked framing, and getString() below honours both.
     http.setTimeout(15000);
     // These headers are what separate a 200 from a 403 — the endpoint checks them.
     http.addHeader("User-Agent",
@@ -117,8 +125,20 @@ bool FlightRadar24Fetcher::fetchStateVectors(double centerLat,
 #else
     JsonDocument doc; // no PSRAM: internal RAM, radius-bound — keep it tight
 #endif
-    DeserializationError err = deserializeJson(doc, http.getStream());
+    // Read the body to completion before parsing rather than streaming the socket into
+    // deserializeJson(). getString() goes through HTTPClient's own transfer-encoding
+    // handling, so it de-frames a chunked reply and honours Content-Length; a partial
+    // read then surfaces as a short String we can spot, not as a truncated parse. The
+    // body itself is >4KB, and CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL is 4096, so on the S3
+    // this String lands in PSRAM too — the internal-RAM footprint stays flat.
+    String body = http.getString();
     http.end();
+    if (body.length() == 0)
+    {
+        Serial.println("FlightRadar24Fetcher: empty body");
+        return false;
+    }
+    DeserializationError err = deserializeJson(doc, body);
     if (err)
     {
         Serial.print("FlightRadar24Fetcher: JSON parse error: ");
