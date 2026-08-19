@@ -25,7 +25,7 @@ Selectable in the web UI under **API keys → Position source**.
 | Source | Key needed | Cost | Notes |
 |---|---|---|---|
 | **OpenSky** *(default)* | OAuth client id/secret (free) | Free | Official, stable, well-documented public API. Streams one aircraft at a time, so its RAM use is flat regardless of how busy your sky is. Recommended. |
-| **Flightradar24** *(opt-in)* | None | Free | **Unofficial** — see the warning below. Returns position **and** route/airline/aircraft in a single response, so no separate enrichment lookup is needed, and its routes handle diversions and non-scheduled traffic that the free enrichment databases miss. |
+| **Flightradar24** *(opt-in)* | None | Free | **Unofficial** — see the warning below. Returns position **and** route/airline/aircraft in a single response, so the route lookup is not needed, and its routes handle diversions and non-scheduled traffic that the free enrichment databases miss. |
 
 ### ⚠️ About the Flightradar24 source
 
@@ -47,7 +47,13 @@ an official API. Understand the trade-offs before enabling it:
 - Keep polling gentle (the default 30 s cadence is fine) and the radius modest.
 
 When FR24 is the position source, the per-flight enrichment lookups are skipped
-entirely — the route, airline, and aircraft type ride along in the position feed.
+entirely — the route, aircraft type, and operator ride along in the position feed.
+
+The feed identifies the operator by **ICAO code only**, so the airline's display name is
+resolved on device from a built-in table (`firmware/utils/AirlineNames.h`, ~177 carriers,
+about 4 KB of flash and no RAM). Without it the wall shows "DAL" instead of "Delta". An
+operator missing from the table simply displays its ICAO code; add a line to that header
+to cover it.
 
 ---
 

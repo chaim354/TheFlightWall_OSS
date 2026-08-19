@@ -11,6 +11,7 @@ Filters (altitude band, on-ground, airline allow-list) and the maxFlights cap ar
 applied before the (relatively expensive) name enrichment where possible.
 */
 #include "core/FlightDataFetcher.h"
+#include "utils/AirlineNames.h"
 #include "core/Settings.h"
 #include "core/Filters.h"
 #include "utils/FlightClassify.h"
@@ -106,6 +107,19 @@ void FlightDataFetcher::applyLocalIdentity(const String &callsign, FlightInfo &i
     char prefix[4];
     if (parseAirlineIcao(callsign.c_str(), prefix) && info.operator_icao.length() == 0)
         info.operator_icao = prefix;
+
+    // Resolve the operator's display name on device. Guarded on the field being empty so
+    // adsbdb stays authoritative under OpenSky — this fills the gap, it does not
+    // override enrichment. Under Flightradar24 nothing else ever sets it, which is why
+    // the panel and the web list both rendered "DAL" rather than "Delta". An unlisted
+    // code leaves the field empty and both surfaces fall back to showing the code, which
+    // is the pre-existing behaviour rather than a regression.
+    if (info.airline_display_name_full.length() == 0 && info.operator_icao.length())
+    {
+        const char *name = airlineNameForIcao(info.operator_icao.c_str());
+        if (name)
+            info.airline_display_name_full = name;
+    }
 }
 
 bool FlightDataFetcher::passesAirlineAllowList(const FlightInfo &info)
@@ -186,9 +200,10 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         if (s.has_inline_enrichment)
         {
             // The position source (e.g. FlightRadar24) already carried the route,
-            // aircraft type, and airline in the same feed — no per-flight network
-            // lookup, no enrichment-budget spend. IATA codes here; applyLocalIdentity
-            // below still supplies the airline display name + logo from the callsign.
+            // aircraft type, and operator in the same feed — no per-flight network
+            // lookup, no enrichment-budget spend. IATA codes here. The feed identifies
+            // the operator by ICAO code only; applyLocalIdentity below turns that into a
+            // display name from the on-device table.
             info.origin.code_iata = s.origin_iata;
             info.destination.code_iata = s.dest_iata;
             info.aircraft_code = s.aircraft_type;
