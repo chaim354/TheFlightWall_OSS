@@ -72,6 +72,17 @@ static int g_appliedBrightness = -1;
 static std::vector<FlightInfo> g_lastFlights;
 static uint8_t g_consecutiveFailures = 0;      // drives the fetch backoff
 static unsigned long g_lastGoodFetchMs = 0;    // for the stale-data cutoff
+static uint8_t g_consecutiveEmpty = 0;         // successful fetches that returned nothing
+
+// How many consecutive empty-but-successful fetches to see before believing the sky
+// really is empty. A rate-limited Flightradar24 reply is HTTP 200 carrying valid JSON
+// with the scalar keys and no flight rows, so it is indistinguishable from an empty
+// bounding box by content — full_count is FR24's GLOBAL tracked count, not ours. At 2
+// the cost is one extra cycle of stale data over a genuinely quiet sky; at 1 (i.e.
+// disabled) a throttled source flips the wall between flights and noFlightsMode every
+// cycle. Deliberately NOT routed through g_consecutiveFailures: that would back the
+// poll interval out to 5 minutes over a quiet sky and delay the first real arrival.
+static const uint8_t kEmptyConfirmCycles = 2;
 
 static const char *kSetupApSsid = "FlightWall-Setup";
 
@@ -321,6 +332,28 @@ static void doFetchAndRender()
 
     Serial.print("Enriched flights: ");
     Serial.println((int)enriched);
+
+    // Hold the previous list through the first empty result rather than blanking on it.
+    // The !ok path above already protects a FAILED fetch this way; an empty SUCCESSFUL
+    // fetch had no such grace, so a throttled source blanked the wall instantly.
+    if (flights.empty())
+    {
+        if (g_consecutiveEmpty < 255)
+            g_consecutiveEmpty++;
+        if (g_consecutiveEmpty < kEmptyConfirmCycles && !g_lastFlights.empty())
+        {
+            Serial.printf("Empty result (%u of %u) — holding last flights\n",
+                          (unsigned)g_consecutiveEmpty, (unsigned)kEmptyConfirmCycles);
+            g_web.setLastFetchInfo((int)g_lastFlights.size(), "empty result - holding last known");
+            g_lastRenderMs = millis();
+            g_firstFetchDone = true;
+            return;
+        }
+    }
+    else
+    {
+        g_consecutiveEmpty = 0;
+    }
 
     g_web.setLastFetchInfo((int)flights.size(),
                            g_settings.mode == TrackingMode::Flights ? "flights mode" : "area mode");
