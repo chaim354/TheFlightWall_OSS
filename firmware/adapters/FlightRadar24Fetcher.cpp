@@ -20,6 +20,7 @@ feed.js row layout (index -> field), as of this writing:
 The object also has scalar keys "full_count" and "version" that are NOT flights.
 */
 #include "adapters/FlightRadar24Fetcher.h"
+#include "core/Settings.h"
 #include "utils/GeoUtils.h"
 #include <esp_heap_caps.h>
 
@@ -55,7 +56,13 @@ static constexpr double kKnotsToMetersPerSec = 1.0 / 1.94384;
 static constexpr double kFpmToMetersPerSec = 1.0 / 196.850;
 
 // Undocumented but stable enough. faa/mlat/adsb=1 widen coverage; vehicles=0 drops
-// ground vehicles; gnd=1 keeps taxiing aircraft (Area mode filters on_ground itself).
+// ground vehicles. `gnd` tracks filters.excludeOnGround so the parked fleet is dropped
+// BY FR24 rather than by us: the 40-flight cap below is applied in feed order, before
+// fetchAreaMode gets to sort by distance or drop on-ground aircraft, so a big airport
+// inside the radius would otherwise fill every slot with parked metal and crowd out the
+// airborne traffic. Measured on a 55km box over JFK: gnd=1 returns 230 aircraft (109 of
+// them parked) and blows the cap past a 15km radius, while gnd=0 returns 117 and stays
+// under it out to 30km.
 static constexpr const char *kFeedHost = "https://data-cloud.flightradar24.com";
 
 WiFiClientSecure &FlightRadar24Fetcher::secureClient()
@@ -81,9 +88,10 @@ bool FlightRadar24Fetcher::fetchStateVectors(double centerLat,
     // FR24 bounds order is north,south,west,east.
     String bounds = String(latMax, 4) + "," + String(latMin, 4) + "," +
                     String(lonMin, 4) + "," + String(lonMax, 4);
+    const char *gnd = g_settings.filters.excludeOnGround ? "0" : "1";
     String url = String(kFeedHost) + "/zones/fcgi/feed.js?bounds=" + bounds +
-                 "&faa=1&mlat=1&flarm=1&adsb=1&gnd=1&air=1&vehicles=0&estimated=1"
-                 "&maxage=14400&gliders=0&stats=0";
+                 "&faa=1&mlat=1&flarm=1&adsb=1&air=1&gnd=" + gnd +
+                 "&vehicles=0&estimated=1&maxage=14400&gliders=0&stats=0";
 
     HTTPClient http;
     http.begin(secureClient(), url);
@@ -160,10 +168,14 @@ bool FlightRadar24Fetcher::fetchStateVectors(double centerLat,
     // delta confirms the doc is in octal RAM (not silently in internal heap); a delta
     // near zero on a busy box means the allocator is NOT being used — investigate.
 #if defined(BOARD_HAS_PSRAM)
-    Serial.printf("[fetch] FR24: %u flights in radius, doc used ~%u B PSRAM (free %u->%u)\n",
+    // Signed delta deliberately: the body String is freed inside this call, so free PSRAM
+    // can end up HIGHER than it started and an unsigned subtraction wraps to ~4.29e9,
+    // which reads as a catastrophic allocation instead of the small negative it is.
+    const uint32_t psramAfter = ESP.getFreePsram();
+    Serial.printf("[fetch] FR24: %u flights in radius, doc used ~%ld B PSRAM (free %u->%u)\n",
                   (unsigned)outStateVectors.size(),
-                  (unsigned)(psramBefore - ESP.getFreePsram()),
-                  (unsigned)psramBefore, (unsigned)ESP.getFreePsram());
+                  (long)((int32_t)psramBefore - (int32_t)psramAfter),
+                  (unsigned)psramBefore, (unsigned)psramAfter);
 #else
     Serial.printf("[fetch] FR24: %u flights in radius\n", (unsigned)outStateVectors.size());
 #endif
