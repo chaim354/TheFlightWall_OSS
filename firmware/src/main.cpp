@@ -327,7 +327,16 @@ static void doFetchAndRender()
         g_lastRenderMs = millis();
         return;
     }
-    g_consecutiveFailures = 0;
+    // Only a fetch that actually produced flights clears the failure backoff. An empty
+    // result is not evidence the source is healthy — under Flightradar24 a rate-limited
+    // reply IS this shape (HTTP 200, valid JSON, no rows). Measured over 16 minutes on
+    // hardware: the backoff had correctly grown to 245s between attempts, then an empty
+    // result reset it and the next gap was 71s; that happened twice in one window. The
+    // one mechanism relieving pressure was being discarded by the very responses that
+    // signal it. A genuinely quiet sky is unaffected: nothing increments the counter
+    // unless fetches are actually failing.
+    if (!flights.empty())
+        g_consecutiveFailures = 0;
     g_lastGoodFetchMs = millis();
 
     Serial.print("Enriched flights: ");
@@ -554,6 +563,25 @@ void loop()
         unsigned long backoff = intervalMs << shift;
         const unsigned long kMaxBackoffMs = 300000UL;
         intervalMs = backoff > kMaxBackoffMs ? kMaxBackoffMs : backoff;
+    }
+    else if (g_consecutiveEmpty >= kEmptyConfirmCycles)
+    {
+        // Sustained empties get their own, gentler ladder. This covers the case the
+        // branch above cannot see: a source that is rate-limiting us purely with
+        // well-formed empty replies never sets ok=false, so g_consecutiveFailures stays
+        // 0 and we would otherwise keep polling at the base rate indefinitely — which is
+        // precisely the behaviour that sustains a rate limit.
+        //
+        // Capped at 2 minutes rather than the 5 above, because unlike a failure an empty
+        // result may simply be a quiet sky, and a 5-minute hole there would delay the
+        // first real arrival for no reason. Self-correcting either way: fewer requests
+        // let the limit lapse, flights come back, the counter resets, and the interval
+        // returns to whatever the user configured without anyone touching a setting.
+        const uint8_t extra = g_consecutiveEmpty - kEmptyConfirmCycles;
+        const uint8_t shift = extra > 2 ? 2 : extra;
+        unsigned long backoff = intervalMs << shift;
+        const unsigned long kMaxEmptyBackoffMs = 120000UL;
+        intervalMs = backoff > kMaxEmptyBackoffMs ? kMaxEmptyBackoffMs : backoff;
     }
     const unsigned long now = millis();
     if (!g_firstFetchDone || (now - g_lastFetchMs >= intervalMs))
