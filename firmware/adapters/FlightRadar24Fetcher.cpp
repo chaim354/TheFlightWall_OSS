@@ -129,7 +129,6 @@ bool FlightRadar24Fetcher::fetchStateVectors(double centerLat,
 #if defined(BOARD_HAS_PSRAM)
     static PsramAllocator psramAllocator;
     JsonDocument doc(&psramAllocator);
-    const uint32_t psramBefore = ESP.getFreePsram();
 #else
     JsonDocument doc; // no PSRAM: internal RAM, radius-bound — keep it tight
 #endif
@@ -146,6 +145,14 @@ bool FlightRadar24Fetcher::fetchStateVectors(double centerLat,
         Serial.println("FlightRadar24Fetcher: empty body");
         return false;
     }
+#if defined(BOARD_HAS_PSRAM)
+    // Captured here, immediately before the parse, and NOT before the request: http.end()
+    // above releases mbedTLS's buffers, which live in PSRAM on the S3 because they exceed
+    // CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL. A window spanning that free measures the
+    // document minus the released TLS buffers, which reads negative whenever the response
+    // is small. Bracketing deserializeJson alone makes the logged number mean what it says.
+    const uint32_t psramBefore = ESP.getFreePsram();
+#endif
     DeserializationError err = deserializeJson(doc, body);
     if (err)
     {
