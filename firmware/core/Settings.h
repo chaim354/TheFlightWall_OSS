@@ -39,6 +39,15 @@ enum class PositionSource : uint8_t
                        // route/aircraft/airline inline (no separate enrichment
                        // call), but violates FR24 ToS and can break/rate-limit.
                        // Never the default; intended for personal use on the S3.
+    AdsbLol = 2,       // keyless community ADS-B aggregator. No account, no ToS
+                       // problem. Carries ICAO type, registration and a
+                       // precomputed distance/bearing inline, so it replaces the
+                       // per-flight aircraft lookup as well as the position feed.
+                       // Carries NO route -- enrichment still runs for that.
+    FlightWallServer = 3, // the FlightWall server does the fetching, joining and
+                          // ETA maths and returns a display-ready list. One HTTP
+                          // call per cycle instead of up to 1 + 2*maxFlights.
+                          // Needs serverUrl; falls back to AdsbLol if unreachable.
 };
 
 enum class LightSensorType : uint8_t
@@ -103,6 +112,10 @@ struct Settings
     String openSkyClientId;
     String openSkyClientSecret;
     String aeroApiKey;
+    // Base URL of the FlightWall server, e.g. "https://flightwall.example.workers.dev".
+    // Stored without a trailing slash (normalised on load). Empty means the
+    // server source is unusable and the fetcher falls back to AdsbLol.
+    String serverUrl;
 
     // ---- Position source (Area mode) ----
     PositionSource positionSource = PositionSource::OpenSky;

@@ -43,6 +43,30 @@ static LightSensorType lightSensorTypeFromName(const char *name)
     return LightSensorType::Analog;
 }
 
+// Round-trips PositionSource through the settings JSON. An unrecognised string
+// falls back to OpenSky rather than to whatever enum value happens to be 0 --
+// a config written by a NEWER firmware must degrade to the safe default, not to
+// an arbitrary source.
+static const char *positionSourceToString(PositionSource s)
+{
+    switch (s)
+    {
+    case PositionSource::FlightRadar24:    return "fr24";
+    case PositionSource::AdsbLol:          return "adsblol";
+    case PositionSource::FlightWallServer: return "server";
+    case PositionSource::OpenSky:
+    default:                               return "opensky";
+    }
+}
+
+static PositionSource positionSourceFromString(const String &s)
+{
+    if (s == "fr24")    return PositionSource::FlightRadar24;
+    if (s == "adsblol") return PositionSource::AdsbLol;
+    if (s == "server")  return PositionSource::FlightWallServer;
+    return PositionSource::OpenSky;
+}
+
 Settings g_settings;
 
 static const char *kSettingsPath = "/settings.json";
@@ -182,7 +206,8 @@ String Settings::toJson() const
     api["openSkyClientId"] = openSkyClientId;
     api["openSkyClientSecret"] = openSkyClientSecret;
     api["aeroApiKey"] = aeroApiKey;
-    api["positionSource"] = (positionSource == PositionSource::FlightRadar24) ? "fr24" : "opensky";
+    api["positionSource"] = positionSourceToString(positionSource);
+    api["serverUrl"] = serverUrl;
     api["enrichmentSource"] = (enrichmentSource == EnrichmentSource::AeroApi) ? "aeroapi"
                               : (enrichmentSource == EnrichmentSource::Off) ? "off"
                                                                             : "adsbdb";
@@ -294,9 +319,15 @@ bool Settings::fromJson(const String &in)
         if (api.containsKey("aeroApiKey"))
             aeroApiKey = api["aeroApiKey"].as<String>();
         if (api.containsKey("positionSource"))
+            positionSource = positionSourceFromString(api["positionSource"].as<String>());
+        if (api.containsKey("serverUrl"))
         {
-            String s = api["positionSource"].as<String>();
-            positionSource = (s == "fr24") ? PositionSource::FlightRadar24 : PositionSource::OpenSky;
+            serverUrl = api["serverUrl"].as<String>();
+            serverUrl.trim();
+            // A trailing slash would produce "...//v1/flights". Normalise once
+            // here rather than defensively at the call site.
+            while (serverUrl.endsWith("/"))
+                serverUrl.remove(serverUrl.length() - 1);
         }
         if (api.containsKey("enrichmentSource"))
         {

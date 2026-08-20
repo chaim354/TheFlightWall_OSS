@@ -112,6 +112,65 @@ void test_settings_roundtrip()
     TEST_ASSERT_EQUAL(23, tmp.schedule.nightStartHour);
 }
 
+// Every recognised positionSource string must survive fromJson -> toJson unchanged.
+// Guards the string<->enum table in Settings.cpp staying in sync in both directions
+// (a typo in one direction round-trips silently otherwise).
+void test_position_source_roundtrip()
+{
+    struct Case { const char *str; PositionSource src; };
+    const Case cases[] = {
+        {"opensky", PositionSource::OpenSky},
+        {"fr24", PositionSource::FlightRadar24},
+        {"adsblol", PositionSource::AdsbLol},
+        {"server", PositionSource::FlightWallServer},
+    };
+    for (const auto &c : cases)
+    {
+        g_settings.seedDefaults();
+        String in = String("{\"api\":{\"positionSource\":\"") + c.str + "\"}}";
+        TEST_ASSERT_TRUE(g_settings.fromJson(in));
+        TEST_ASSERT_EQUAL((int)c.src, (int)g_settings.positionSource);
+
+        String out = g_settings.toJson();
+        String needle = String("\"positionSource\":\"") + c.str + "\"";
+        TEST_ASSERT_TRUE(out.indexOf(needle) >= 0);
+    }
+}
+
+// An unrecognised string must fall back to the named OpenSky enumerator, not to
+// "whatever value happens to be 0" (they are the same value today, but only one
+// of those is a real guarantee). Starting from FlightWallServer -- a non-zero,
+// non-default source -- means a fallback that just leaves positionSource
+// untouched would also fail this, not only one that lands on the wrong enumerator.
+void test_position_source_unknown_falls_back_to_opensky()
+{
+    g_settings.seedDefaults();
+    g_settings.positionSource = PositionSource::FlightWallServer;
+    TEST_ASSERT_TRUE(g_settings.fromJson(String("{\"api\":{\"positionSource\":\"bogus\"}}")));
+    TEST_ASSERT_EQUAL((int)PositionSource::OpenSky, (int)g_settings.positionSource);
+}
+
+// serverUrl is normalised on load: no trailing slash, however many were sent,
+// down to and including a URL that is nothing else.
+void test_server_url_trailing_slash_normalized()
+{
+    g_settings.seedDefaults();
+    TEST_ASSERT_TRUE(g_settings.fromJson(String("{\"api\":{\"serverUrl\":\"https://example.com/flightwall/\"}}")));
+    TEST_ASSERT_TRUE(g_settings.serverUrl == "https://example.com/flightwall");
+
+    // Multiple trailing slashes are all stripped, not just the outermost one.
+    TEST_ASSERT_TRUE(g_settings.fromJson(String("{\"api\":{\"serverUrl\":\"https://example.com///\"}}")));
+    TEST_ASSERT_TRUE(g_settings.serverUrl == "https://example.com");
+
+    // Nothing but slashes must reduce to empty, not underflow/loop forever.
+    TEST_ASSERT_TRUE(g_settings.fromJson(String("{\"api\":{\"serverUrl\":\"///\"}}")));
+    TEST_ASSERT_TRUE(g_settings.serverUrl == "");
+
+    // No trailing slash: left alone.
+    TEST_ASSERT_TRUE(g_settings.fromJson(String("{\"api\":{\"serverUrl\":\"https://example.com\"}}")));
+    TEST_ASSERT_TRUE(g_settings.serverUrl == "https://example.com");
+}
+
 // ---- runner ---------------------------------------------------------------
 
 void setup()
@@ -123,6 +182,9 @@ void setup()
     RUN_TEST(test_settings_parse);
     RUN_TEST(test_settings_partial_update_preserves_other_fields);
     RUN_TEST(test_settings_roundtrip);
+    RUN_TEST(test_position_source_roundtrip);
+    RUN_TEST(test_position_source_unknown_falls_back_to_opensky);
+    RUN_TEST(test_server_url_trailing_slash_normalized);
     UNITY_END();
 }
 
