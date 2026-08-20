@@ -203,16 +203,12 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // is spent this serves cache-only, so the card still renders (callsign +
         // logo below) just without a route.
         //
-        // Cost note: this is also the path for GA/private and unscheduled traffic —
-        // FR24 has no schedule for them either, so it's the common case here, not a
-        // rare one. The lookup still can't help much: adsbdb/hexdb's callsign lookup
-        // is keyed on airline-format callsigns and always misses a tail number, and
-        // the one thing that could hit (aircraft-by-ICAO24) gets overwritten by the
-        // aircraft_type overlay below anyway when FR24 already had it. Bounded by
-        // maxFlights, the 45s budget, and the cache's positive TTL (600s by
-        // default), so not a watchdog risk — just wasted round trips.
-        // parseAirlineIcao() is already computed in both passes below if this is
-        // ever worth gating on callsign shape.
+        // Under OpenSky this is simply the normal path — the flag is never set
+        // there. Under FR24 it is the GA/private and unscheduled case: FR24 has no
+        // schedule for them either, and the lookup usually misses too (adsbdb/hexdb
+        // key routes on airline-format callsigns, never a tail number). Bounded by
+        // maxFlights and the 45s budget, so the cost is wasted round trips, not
+        // watchdog headroom.
         if (!s.has_inline_enrichment)
             getEnriched(s.callsign, s.icao24, info, withinEnrichBudget());
 
@@ -245,17 +241,25 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
             info.aircraft_code = s.aircraft_type;
 
         // airline: fill-gap, NOT overwrite — unlike origin/dest/aircraft_type
-        // above. AdsbdbFetcher::fetchRoute sets operator_icao/operator_iata/
-        // operator_code/airline_display_name_full together from ONE airline
-        // object; overwriting only operator_icao here would leave the other three
-        // holding a different network-sourced carrier's values, so the logo
-        // (keyed off operator_icao) and the airline text (prefers
-        // airline_display_name_full) could end up naming two different airlines.
-        // Only step in when the lookup left the group empty — applyLocalIdentity
-        // below then derives a matching display name from this same ICAO code, so
-        // the group stays internally consistent either way.
+        // above. Only step in when operator_icao specifically is empty:
+        // AdsbdbFetcher::fetchRoute and AeroAPIFetcher::fetchFlightInfo can each
+        // leave operator_icao empty while operator_iata/operator_code/
+        // airline_display_name_full are already set from a partial match (an
+        // airline object with a name but no icao; an AeroAPI response with iata
+        // but no icao). Clear those three when we overlay operator_icao so
+        // applyLocalIdentity below re-derives the display name from THIS icao,
+        // instead of leaving a leftover value from whatever the lookup partially
+        // matched — an uncleared operator_iata in particular would still leak
+        // into Hub75Display's text fallback and into Filters::airlineAllowed's
+        // OR-match. That is what makes the group unconditionally consistent, not
+        // just in the common case.
         if (s.airline_icao.length() && info.operator_icao.length() == 0)
+        {
             info.operator_icao = s.airline_icao;
+            info.operator_iata = "";
+            info.operator_code = "";
+            info.airline_display_name_full = "";
+        }
 
         // Local, free identity (logo) is applied whether or not the network lookup
         // succeeded — so airliners always show their logo/airline. In Area mode we

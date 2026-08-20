@@ -25,7 +25,7 @@ Selectable in the web UI under **API keys → Position source**.
 | Source | Key needed | Cost | Notes |
 |---|---|---|---|
 | **OpenSky** *(default)* | OAuth client id/secret (free) | Free | Official, stable, well-documented public API. Streams one aircraft at a time, so its RAM use is flat regardless of how busy your sky is. Recommended. |
-| **Flightradar24** *(opt-in)* | None | Free | **Unofficial** — see the warning below. Returns position **and** route/airline/aircraft in a single response, so the route lookup is not needed, and its routes handle diversions and non-scheduled traffic that the free enrichment databases miss. |
+| **Flightradar24** *(opt-in)* | None | Free | **Unofficial** — see the warning below. When the feed row includes a route, it returns position and route/airline/aircraft together, so the per-flight lookup is skipped for that flight. Diversions can benefit from FR24's live tracking, but non-scheduled/GA traffic is usually the opposite case — FR24 lacks a route for those too (see the takeaway below). |
 
 ### ⚠️ About the Flightradar24 source
 
