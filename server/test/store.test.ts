@@ -4,13 +4,14 @@ import type { ScheduleRow } from '../src/types';
 
 // NOTE: this file covers only the KV-indexing half of Task 7
 // (indexRows/lookupRows/lookupByCallsign/STALE_AFTER_MS). The FIDS-parsing
-// half (parseFids, fetchBoard, BOARD_AIRPORTS in src/schedule/aerodatabox.ts)
-// is deliberately not implemented here -- it needs a live FIDS fixture that
-// requires an AeroDataBox API key, which is not available in this session.
-// The plan puts both halves' tests in test/schedule.test.ts with a
-// module-scope fixture import; splitting the store tests into this file lets
-// them land and pass on their own, with the aerodatabox tests free to join
-// this file (or their own) once that fixture exists.
+// half (parseFids, fetchBoard, BOARD_AIRPORTS/FAR_AIRPORT_COORDS in
+// src/schedule/aerodatabox.ts and src/schedule/airports.ts) lives in its own
+// file, test/fids.test.ts, rather than joining this one -- it was blocked on
+// an AeroDataBox key and a live fixture at the time this file was split off;
+// both exist now, see test/fids.test.ts and fixtures/README.md. The plan's
+// original sketch put both halves in one test/schedule.test.ts with a single
+// module-scope fixture import; keeping them in two files instead avoids that
+// file importing a fixture the store tests never use.
 
 describe('indexRows / lookupRows', () => {
   const rows: ScheduleRow[] = [
