@@ -157,17 +157,22 @@ describe('parseFids', () => {
   });
 
   it('resolves far-end coordinates from the bundled table for a real arrival row', () => {
-    // "JL 4" arrives from RJTT (Tokyo Haneda). FAR_AIRPORT_COORDS carries
-    // RJTT at {35.5523, 139.78}, fetched live from AeroDataBox's own
-    // Airport-by-ICAO endpoint (see airports.ts).
+    // "JL 4" arrives from RJTT (Tokyo Haneda). The generated table (see
+    // airports.ts, sourced from OurAirports) carries RJTT at
+    // {35.5497, 139.787} -- close to, but not bit-identical to, the old
+    // bootstrap table's AeroDataBox-spot-fetched {35.5523, 139.78}. A large
+    // multi-runway airport commonly has more than one plausible reference
+    // point across providers; a few hundred meters here is well within the
+    // 300 km corridor-plausibility margin this feeds (MAX_CORRIDOR_EXCESS_KM
+    // in join.ts).
     const r = rows.find((row) => row.carrierIata === 'JL' && row.number === '4');
     expect(r).toBeDefined();
     expect(r!.origIata).toBe('HND');
-    expect(r!.origLat).toBeCloseTo(35.5523, 3);
-    expect(r!.origLon).toBeCloseTo(139.78, 3);
-    // The near end is always the board airport, from BOARD_AIRPORTS.
+    expect(r!.origLat).toBeCloseTo(35.5497, 3);
+    expect(r!.origLon).toBeCloseTo(139.787, 3);
+    // The near end is always the board airport, from the same generated table.
     expect(r!.destIata).toBe('JFK');
-    expect(r!.destLat).toBeCloseTo(40.6413, 3);
+    expect(r!.destLat).toBeCloseTo(40.6394, 3);
   });
 
   it('leaves far-end coordinates null for an airport not in the bundled table, without throwing', () => {
@@ -215,10 +220,10 @@ describe('puts the board airport on the correct end for each direction', () => {
     expect(arr).toHaveLength(1);
     expect(arr[0]!.origIata).toBe('CVG');
     expect(arr[0]!.destIata).toBe('JFK');
-    expect(arr[0]!.origLat).toBeCloseTo(39.0488, 3); // CVG, from FAR_AIRPORT_COORDS
+    expect(arr[0]!.origLat).toBeCloseTo(39.0488, 3); // CVG, from the generated table
     expect(arr[0]!.origLon).toBeCloseTo(-84.6678, 3);
-    expect(arr[0]!.destLat).toBeCloseTo(40.6413, 3); // JFK, from BOARD_AIRPORTS
-    expect(arr[0]!.destLon).toBeCloseTo(-73.7781, 3);
+    expect(arr[0]!.destLat).toBeCloseTo(40.6394, 3); // JFK, from the generated table
+    expect(arr[0]!.destLon).toBeCloseTo(-73.7793, 3);
     expect(arr[0]!.schedArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:00Z') / 1000));
   });
 
@@ -242,8 +247,8 @@ describe('puts the board airport on the correct end for each direction', () => {
     expect(dep).toHaveLength(1);
     expect(dep[0]!.origIata).toBe('JFK');
     expect(dep[0]!.destIata).toBe('CVG');
-    expect(dep[0]!.origLat).toBeCloseTo(40.6413, 3); // JFK, from BOARD_AIRPORTS
-    expect(dep[0]!.destLat).toBeCloseTo(39.0488, 3); // CVG, from FAR_AIRPORT_COORDS
+    expect(dep[0]!.origLat).toBeCloseTo(40.6394, 3); // JFK, from the generated table
+    expect(dep[0]!.destLat).toBeCloseTo(39.0488, 3); // CVG, from the generated table
     // Same JSON shape, opposite direction: schedArrEpoch is still the
     // arrival time -- at the far end this time, not at the board.
     expect(dep[0]!.schedArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:00Z') / 1000));

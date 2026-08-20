@@ -1,4 +1,4 @@
-import { BOARD_AIRPORTS, FAR_AIRPORT_COORDS } from './airports';
+import { getAirportCoord } from './airports';
 import type { ScheduleRow } from '../types';
 
 /**
@@ -19,7 +19,7 @@ import type { ScheduleRow } from '../types';
  *
  * Only ONE side carries an `airport` sub-object: the far end. The near end
  * (this board's own airport) is implicit -- confirmed by inspecting every row
- * in the fixture, so `BOARD_AIRPORTS` supplies it, exactly as the plan says.
+ * in the fixture, so `getAirportCoord` supplies it, exactly as the plan says.
  *
  * The `arrivals`/`departures` array a row came from still tells you which
  * side is which: for an `arrivals`-array row, `departure` is the far end and
@@ -65,7 +65,7 @@ function collect(
   out: ScheduleRow[],
 ): void {
   if (!Array.isArray(list)) return;
-  const self = BOARD_AIRPORTS[airportIcao.toUpperCase()];
+  const self = getAirportCoord(airportIcao);
   if (!self) return; // a board we have no coordinates for cannot be checked
 
   const isArrival = dir === 'arrival';
@@ -87,9 +87,9 @@ function collect(
     const farIata = str(farAirport?.iata) || null;
     // FIDS carries no coordinates for either end (verified: neither `lat`,
     // `lon`, nor `location` appears anywhere in the captured fixture). The
-    // far end's coordinates come from a table built by looking each one up
-    // separately -- see airports.ts for how and its documented coverage gap.
-    const farCoord = farIcao ? FAR_AIRPORT_COORDS[farIcao] : undefined;
+    // far end's coordinates come from a bundled table generated from
+    // OurAirports -- see airports.ts for provenance and coverage.
+    const farCoord = farIcao ? getAirportCoord(farIcao) : undefined;
 
     // The row's own `arrival` sub-object is always the scheduled arrival --
     // at this board for an arrivals-array row, at the far end for a

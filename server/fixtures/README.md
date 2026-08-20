@@ -66,10 +66,13 @@ two false positives ("Citation *Latitude*", an aircraft model name, and
 "*Lon*don", a city name). The far end of a leg carries only
 `{icao, iata, name, countryCode, timeZone}`.
 
-`src/schedule/airports.ts` fills both ends from two different places:
-`BOARD_AIRPORTS` (the four boards this Worker polls, hand-maintained) and
-`FAR_AIRPORT_COORDS` (109 entries — every distinct far-end airport observed in
-this fixture — fetched live, one ICAO code at a time, from AeroDataBox's own
-Airport-by-ICAO endpoint, not guessed). See that file's doc comment for the
-coverage gap this leaves for an airport not seen in this particular capture,
-and the two options considered for closing it for real.
+`src/schedule/airports.ts` fills both ends from one generated table,
+`getAirportCoord()`, covering 4,565 airports worldwide — built from
+OurAirports' public-domain `airports.csv` by `tools/gen-airports.js`, not
+fetched or hand-maintained one ICAO at a time. This fixture's 109 distinct
+far-end airports are a floor this table is checked against
+(`test/airports.test.ts`), not the whole of what it covers; see that file and
+`src/schedule/airports.ts`'s header comment for the filter/key logic and the
+(much smaller, residual) coverage gap that remains: an airport OurAirports
+does not classify as `large_airport`/`medium_airport`, or does not catalogue
+at all.

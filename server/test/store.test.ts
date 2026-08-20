@@ -4,7 +4,7 @@ import type { ScheduleRow } from '../src/types';
 
 // NOTE: this file covers only the KV-indexing half of Task 7
 // (indexRows/lookupRows/lookupByCallsign/STALE_AFTER_MS). The FIDS-parsing
-// half (parseFids, fetchBoard, BOARD_AIRPORTS/FAR_AIRPORT_COORDS in
+// half (parseFids, fetchBoard, getAirportCoord in
 // src/schedule/aerodatabox.ts and src/schedule/airports.ts) lives in its own
 // file, test/fids.test.ts, rather than joining this one -- it was blocked on
 // an AeroDataBox key and a live fixture at the time this file was split off;
