@@ -2051,10 +2051,30 @@ const json = (body: unknown, status = 200): Response =>
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
 
+/**
+ * Parse an optional-looking-but-guarded numeric query param as NaN when the
+ * param is absent or blank, instead of as `0`.
+ *
+ * `Number(null)` and `Number('')` both coerce to `0`, which is a legitimate
+ * value for every param this guards -- a coordinate of 0 (null island), or an
+ * altitude bound of 0 ft. Every caller below uses `Number.isFinite(...)` to
+ * mean "the caller actually supplied this", so an absent param must parse to
+ * something that check rejects. Without this, two different failures both
+ * happened to hide behind the same coercion: a missing `lat`/`lon` silently
+ * queried position data for (0, 0) instead of returning 400, and an absent
+ * `max_alt_ft` silently became "reject every aircraft above 0 ft" -- i.e. an
+ * always-on filter that empties every ordinary request's flight list, since
+ * `max_alt_ft` is documented as optional and the common case omits it
+ * entirely. `radius_km` and `max` below don't need this: they use `X || default`,
+ * and `0`/NaN are both already falsy, so absence already falls through to
+ * their default there.
+ */
+const parseNum = (raw: string | null): number => (raw === null || raw.trim() === '' ? NaN : Number(raw));
+
 export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<Response> {
   const q = url.searchParams;
-  const lat = Number(q.get('lat'));
-  const lon = Number(q.get('lon'));
+  const lat = parseNum(q.get('lat'));
+  const lon = parseNum(q.get('lon'));
   if (!Number.isFinite(lat) || Math.abs(lat) > 90) return json({ ok: false, error: 'bad lat', flights: [] }, 400);
   if (!Number.isFinite(lon) || Math.abs(lon) > 180) return json({ ok: false, error: 'bad lon', flights: [] }, 400);
 
@@ -2062,8 +2082,8 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
   const max = clamp(Math.trunc(Number(q.get('max'))) || 8, 1, MAX_FLIGHTS_CEILING);
   const units = q.get('units') === 'metric' ? 'metric' : 'imperial';
   const excludeGround = q.get('exclude_ground') === '1';
-  const minAlt = Number(q.get('min_alt_ft'));
-  const maxAlt = Number(q.get('max_alt_ft'));
+  const minAlt = parseNum(q.get('min_alt_ft'));
+  const maxAlt = parseNum(q.get('max_alt_ft'));
   const ts = Math.floor(nowMs / 1000);
 
   // A KV read failure degrades to "no routes", not to a failed request.
@@ -2107,6 +2127,38 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
 ```
 
 `lookupByCallsign` and the two-index `ScheduleIndex` are already defined in Task 7 — this handler is their only consumer. Confirm the import resolves and that `byCallsign` being empty (the state Task 1 may well have found) degrades to the number path rather than throwing.
+
+**Found during implementation:** the first version of this Step parsed `lat`,
+`lon`, `min_alt_ft` and `max_alt_ft` with bare `Number(q.get(...))`. `Number(null)`
+and `Number('')` both coerce to `0`, and `0` is a legitimate value for every one
+of those params — so `Number.isFinite(...)` cannot be used as a "did the caller
+supply this" gate the way this Step used it, because an absent or blank param
+is indistinguishable from an explicit `0` once it has gone through `Number()`.
+That shipped two failures at once. A missing or blank `lat`/`lon` silently
+passed the `Number.isFinite(lat) && Math.abs(lat) <= 90` check as `(0, 0)`
+instead of returning 400. Worse: `max_alt_ft` is documented as optional and an
+ordinary request omits it, so `maxAlt` defaulted to `0`, which is finite —
+making `a.altFt > maxAlt` reject every airborne aircraft on every request that
+didn't explicitly pass an altitude band. The handler still returned `ok: true`,
+just with an empty `flights` array, which is exactly the shape Task 9's own
+Step 1 says must never happen on anything but a genuinely empty sky: the
+ESP32 reads `ok: true` with an empty list as "the sky is confirmed empty" and
+blanks the display immediately, rather than holding the last-known flights the
+way it does on `ok: false`. A deployment in this state would have looked like
+it was working right up until someone noticed the panel never showed anything.
+The `parseNum()` helper above is the fix: it parses an absent or blank param to
+`NaN` instead of `0`, used everywhere `Number.isFinite(...)` means "was this
+supplied" — `lat`, `lon`, `min_alt_ft`, `max_alt_ft`. `radius_km` and `max`
+above deliberately do NOT use `parseNum` and do not need it — they're parsed
+with `Number(q.get(...)) || default`, and `0` and `NaN` are both already
+falsy, so an absent or blank value already falls through to the default
+there. Applying `parseNum` to those two anyway would change `max=0`'s
+documented behavior (falls back to the default of 8) into a hard-clamped `1`,
+which is not this fix's job — leave them as `||`-defaulted if re-running this
+task. Verified by reverting to the literal `Number(...)` form and confirming
+the tests in `flights.test.ts` that don't pass `min_alt_ft`/`max_alt_ft` fail
+exactly this way — empty `flights` where aircraft were expected — then
+restoring the fix.
 
 - [ ] **Step 3: Implement `index.ts`**
 
