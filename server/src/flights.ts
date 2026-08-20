@@ -64,7 +64,11 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
   let aircraft;
   try {
     aircraft = await fetchAircraft(lat, lon, radiusKm / KM_PER_NM);
-  } catch {
+  } catch (err) {
+    // Log before swallowing. A bare `catch {}` here made a live failure
+    // undiagnosable: the Worker returned ok:false with outcome "ok" and no
+    // exception, so `wrangler tail` showed a healthy request and nothing else.
+    console.error('position fetch failed:', err instanceof Error ? err.message : String(err));
     // ok:false, NOT an empty success. The firmware keeps its previous flights
     // on ok:false and would blank the display on an empty list.
     return json({ ok: false, ts, stale, flights: [] });

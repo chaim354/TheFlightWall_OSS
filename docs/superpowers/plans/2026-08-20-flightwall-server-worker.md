@@ -2332,6 +2332,41 @@ target, so Plan 3 builds against numbers rather than assumptions."
 
 **Not verified by this plan:** nothing runs on the ESP32. Plan 3 covers the firmware adapter and is the first time the contract meets the device.
 
+## Findings from the live deployment (2026-08-20)
+
+Deployed to `https://flightwall-server.chaim354.workers.dev`. The pipeline works
+end to end — one flight resolved `WJA2101 -> DL2101 "Delta" ATL->JFK` with an
+ETA, which is exactly the operator-vs-marketing-carrier case the join exists for.
+Three problems surfaced that only a real deployment could show:
+
+**1. adsb.lol rate-limits Cloudflare Workers.** `adsb.lol 429` on roughly 4 of
+every 5 requests from the Worker, while the same request from a residential IP
+succeeds every time (~150 consecutive successes during development). Workers
+egress from shared Cloudflare IPs, and adsb.lol throttles per IP. This is the
+most serious finding: the position source is unreliable *specifically* from the
+place we deployed it. Options, none yet chosen: ask adsb.lol about an allowance
+or key; use a different position source server-side; or invert the design so the
+device fetches positions directly (which is proven to work from its own IP) and
+the Worker serves only the schedule join.
+
+**2. AeroDataBox's free plan rate-limits back-to-back board fetches.** The cron
+got KJFK (458 rows) and `429` on KLGA/KEWR/KBOS. The "don't overwrite on total
+failure" guard behaved correctly — `1/4 boards` still saved. The cron needs
+paced requests (~1.5s apart) rather than a tight loop.
+
+**3. The ETA model ignores altitude, and says LANDING when it should not.**
+`WJA2101` was 16 km from JFK — its own destination — and got `eta_text:
+"LANDING"`, while at **38,000 ft**. Horizontal distance alone is not
+time-to-go: an aircraft overhead its destination at cruise altitude still has a
+full descent ahead of it. `formatEta`'s `LANDING_NM` cutoff needs an altitude
+guard (e.g. only claim LANDING below ~10,000 ft), or it will confidently
+mislabel every overflight of its own destination airport.
+
+Route fill measured 1/8 = 12.5%, far below the ~86% design target — but that
+number is not meaningful yet, because only one of four boards loaded (see 2) and
+the schedule window was forward-looking while the aircraft overhead had already
+departed. Re-measure after fixing 1 and 2 before drawing any conclusion.
+
 ## Open risk carried into Plan 3
 
 If Task 10's measured route-fill rate comes in well below ~86%, do **not** start Plan 3. The likely causes, in order: the FIDS window is too narrow to cover flights already airborne; the arrival/departure coordinate backfill in Task 7 is wrong for one direction; or the carrier-candidate table is excluding valid rows. All three are diagnosable from the Task 10 output and all three are cheaper to fix here than after the firmware depends on them.
