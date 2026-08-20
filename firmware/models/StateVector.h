@@ -21,7 +21,7 @@ struct StateVector
 
     // Inline enrichment. OpenSky leaves these empty (route/type/airline come from a
     // separate adsbdb/hexdb lookup). Sources that carry this data in the position
-    // feed — e.g. FlightRadar24Fetcher — fill whichever of these fields it supplied,
+    // feed — e.g. FlightRadar24Fetcher — fill whichever of these fields they supplied,
     // and Area mode overlays them onto the result regardless of whether a network
     // lookup also ran. IATA codes here; the enrichment consumer maps them to display
     // names. See has_inline_enrichment below for when a route in the feed skips that

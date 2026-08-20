@@ -46,8 +46,11 @@ an official API. Understand the trade-offs before enabling it:
   S3.**
 - Keep polling gentle (the default 30 s cadence is fine) and the radius modest.
 
-When FR24 is the position source, the per-flight enrichment lookups are skipped
-entirely — the route, aircraft type, and operator ride along in the position feed.
+When FR24 is the position source, the per-flight enrichment lookup is skipped only
+for flights whose feed row already includes a route — for those, the route,
+aircraft type, and operator all ride along in the position feed. A row with type
+and/or operator but no route (common for GA/private and unscheduled traffic) still
+triggers the normal per-flight lookup below to try to fill the route in.
 
 The feed identifies the operator by **ICAO code only**, so the airline's display name is
 resolved on device from a built-in table (`firmware/utils/AirlineNames.h`, ~177 carriers,
@@ -59,8 +62,10 @@ to cover it.
 
 ## 2. Enrichment sources
 
-Selectable in the web UI under **API keys → Flight enrichment source**. Only used when
-the position source doesn't already supply enrichment (i.e. with OpenSky).
+Selectable in the web UI under **API keys → Flight enrichment source**. Always used
+with OpenSky. Under Flightradar24 it is skipped only for flights whose feed row
+already carries a route — any FR24 flight without one (GA/private, unscheduled)
+still calls out to whichever source is configured here.
 
 | Source | Key needed | Cost | Provides |
 |---|---|---|---|
@@ -95,9 +100,13 @@ see per month; a busy location near a major airport can see tens of thousands.
 
 **Takeaway:** the free stack is the best value. Paid enrichment (AeroAPI) mainly buys
 route accuracy for the hard cases — diversions, reroutes, and non-scheduled/GA traffic
-that the free callsign→route databases don't have. If that's what you're after, the
-Flightradar24 position source gets you comparable route quality for free (with the ToS
-and reliability caveats above).
+that the free callsign→route databases don't have. Flightradar24 as the position
+source gets you comparable route quality for free, but only for flights where FR24's
+own feed already includes a route — and the hard cases above are disproportionately
+the ones FR24 has no route for either. Those still fall through to whichever
+enrichment source is configured, so on AeroAPI they're billed per lookup like any
+other flight; the position source alone doesn't make them free (with the ToS and
+reliability caveats above).
 
 ---
 

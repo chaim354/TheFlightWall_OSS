@@ -3,10 +3,12 @@
 Purpose: OPT-IN, no-key position source backed by Flightradar24's INTERNAL web
 feed (the same JSON fr24.com's live map fetches). Unlike OpenSky, one bounding-box
 call to feed.js returns position AND route AND aircraft type AND airline together,
-so this fills the inline-enrichment fields on StateVector and the Area-mode path can
-skip the per-flight adsbdb/hexdb lookups entirely. The one thing the feed does not carry
-is a readable airline NAME — it gives the operator as an ICAO code — so that is resolved
-on device from utils/AirlineNames.h.
+so this fills the inline-enrichment fields on StateVector. A row that includes a
+route lets the Area-mode path skip the per-flight adsbdb/hexdb lookup entirely;
+type and airline ride along regardless of whether a route was present, and are
+layered onto that lookup's result when it does run. The one thing the feed does
+not carry is a readable airline NAME — it gives the operator as an ICAO code — so
+that is resolved on device from utils/AirlineNames.h.
 
   !!  This is an UNOFFICIAL scrape, not an API.  !!
   - It violates Flightradar24's Terms of Service (personal/educational use only;

@@ -202,22 +202,59 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // that is the expensive thing we are avoiding. Best-effort: once the budget
         // is spent this serves cache-only, so the card still renders (callsign +
         // logo below) just without a route.
+        //
+        // Cost note: this is also the path for GA/private and unscheduled traffic —
+        // FR24 has no schedule for them either, so it's the common case here, not a
+        // rare one. The lookup still can't help much: adsbdb/hexdb's callsign lookup
+        // is keyed on airline-format callsigns and always misses a tail number, and
+        // the one thing that could hit (aircraft-by-ICAO24) gets overwritten by the
+        // aircraft_type overlay below anyway when FR24 already had it. Bounded by
+        // maxFlights, the 45s budget, and the cache's positive TTL (600s by
+        // default), so not a watchdog risk — just wasted round trips.
+        // parseAirlineIcao() is already computed in both passes below if this is
+        // ever worth gating on callsign shape.
         if (!s.has_inline_enrichment)
             getEnriched(s.callsign, s.icao24, info, withinEnrichBudget());
 
         // Overlay whatever the position source carried inline (e.g. FlightRadar24
         // ships route, type and operator in the same feed). Applied AFTER the
         // lookup on purpose: getEnriched() assigns `info` wholesale on a cache hit,
-        // so anything written before the call would be thrown away. The feed
-        // identifies the operator by ICAO code only; applyLocalIdentity below turns
-        // that into a display name from the on-device table.
+        // so anything written before the call would be thrown away. None of this is
+        // written back into the enrichment cache (_cache in FlightDataFetcher.h) —
+        // it's specific to this feed row, not something a different flight sharing
+        // that cache key should ever be served.
+        //
+        // origin/dest: unconditional. Safe only because has_inline_enrichment is
+        // exactly origin||dest, which already skipped the lookup above — there is
+        // no network value to defer to. If that flag is ever narrowed to
+        // origin&&dest, these two guards need re-deriving, or a leg with only one
+        // side inline would confidently pair FR24's origin with adsbdb's destination.
         if (s.origin_iata.length())
             info.origin.code_iata = s.origin_iata;
         if (s.dest_iata.length())
             info.destination.code_iata = s.dest_iata;
+
+        // aircraft_type: unconditional, and deliberately overwrites whatever the
+        // lookup just set — this isn't just "runs after" it. The enrichment cache
+        // (_cache in FlightDataFetcher.h) is keyed by callsign, and its comment
+        // documents that two airframes sharing a generic callsign within one TTL
+        // can cross-serve aircraft_code. FR24's type is per-feed-row — scoped to
+        // this exact icao24, this cycle — so this overlay actively corrects that
+        // documented hazard rather than leaving it to chance.
         if (s.aircraft_type.length())
             info.aircraft_code = s.aircraft_type;
-        if (s.airline_icao.length())
+
+        // airline: fill-gap, NOT overwrite — unlike origin/dest/aircraft_type
+        // above. AdsbdbFetcher::fetchRoute sets operator_icao/operator_iata/
+        // operator_code/airline_display_name_full together from ONE airline
+        // object; overwriting only operator_icao here would leave the other three
+        // holding a different network-sourced carrier's values, so the logo
+        // (keyed off operator_icao) and the airline text (prefers
+        // airline_display_name_full) could end up naming two different airlines.
+        // Only step in when the lookup left the group empty — applyLocalIdentity
+        // below then derives a matching display name from this same ICAO code, so
+        // the group stays internally consistent either way.
+        if (s.airline_icao.length() && info.operator_icao.length() == 0)
             info.operator_icao = s.airline_icao;
 
         // Local, free identity (logo) is applied whether or not the network lookup

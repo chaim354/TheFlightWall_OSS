@@ -4,7 +4,7 @@
 
 **Goal:** Fix three independent defects that make the wall display wrong or missing routes, before any of the larger server work begins.
 
-**Architecture:** Each fix extracts the decision into a pure, Arduino-free helper in `utils/` (the existing `CallsignUtils.h` pattern), host-tested with g++, then wires that helper into the adapter. No behavior depends on hardware, so every task is verifiable in seconds.
+**Architecture:** Tasks 1–2 extract the decision into a pure, Arduino-free helper in `utils/` (the existing `CallsignUtils.h` pattern), host-tested with g++, then wire that helper into the adapter — no behavior depends on hardware, so those tasks are verifiable in seconds. Task 3 does not: the guarding condition (`origin.length() || dest.length()`) is too thin to justify a header plus test file, and the overlay matrix it guards is built on Arduino's `String`/`FlightInfo`, which can't be lifted out cheaply. Task 3 is instead verified by full firmware compilation on both targets plus the existing host suite, which exercises regressions but does not cover this exact code path.
 
 **Tech Stack:** C++17, PlatformIO (`esp32dev` / `esp32s3`), header-only pure helpers, hand-rolled `CHECK` host tests compiled directly with g++.
 

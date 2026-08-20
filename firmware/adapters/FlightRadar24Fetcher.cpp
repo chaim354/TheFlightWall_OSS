@@ -6,8 +6,10 @@ Responsibilities:
 - Parse the flight-id-keyed object into StateVector, converting FR24's imperial
   units into StateVector's SI contract (metres, m/s) so the downstream Area-mode
   code — written for OpenSky — needs no changes.
-- Carry FR24's inline route/aircraft/airline through the new StateVector fields so
-  enrichment can be skipped for these flights.
+- Carry FR24's inline route/aircraft/airline through the new StateVector fields.
+  Only a row that includes a route skips the per-flight enrichment lookup entirely
+  (has_inline_enrichment in StateVector.h); type/airline ride along regardless and
+  are layered onto that lookup's result in fetchAreaMode.
 Inputs: centerLat, centerLon, radiusKm.
 Outputs: outStateVectors within radius, with has_inline_enrichment set.
 
@@ -228,7 +230,9 @@ void FlightRadar24Fetcher::parseFeedInto(JsonDocument &doc, double centerLat,
         s.callsign.trim();
 
         // ---- Inline enrichment: the payoff of using FR24 as the source ----
-        // These come free in the same response, so Area mode need not call adsbdb.
+        // These come free in the same response. A route here lets Area mode skip
+        // adsbdb entirely (has_inline_enrichment below); type/airline ride along
+        // regardless and are overlaid onto adsbdb's result when a route is missing.
         s.origin_iata = a[11].isNull() ? String("") : String(a[11].as<const char *>());
         s.dest_iata = a[12].isNull() ? String("") : String(a[12].as<const char *>());
         s.aircraft_type = a[8].isNull() ? String("") : String(a[8].as<const char *>());
