@@ -59,9 +59,10 @@ private:
         return (millis() - _cycleStartMs) < kEnrichBudgetMs;
     }
 
-    // Per-aircraft enrichment cache (keyed by ICAO24 or callsign). Static flight
-    // data (route/airline/aircraft) rarely changes during a pass, so caching it
-    // avoids re-querying the provider every fetch cycle.
+    // Per-leg enrichment cache (keyed by callsign, falling back to ICAO24 — see
+    // enrichmentCacheKey()). Static flight data (route/airline/aircraft) rarely
+    // changes during a pass, so caching it avoids re-querying the provider every
+    // fetch cycle.
     struct CacheEntry
     {
         FlightInfo info;

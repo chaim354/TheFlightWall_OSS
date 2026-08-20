@@ -73,7 +73,7 @@ The data for this project consists of two parts:
    - **[FlightAware AeroAPI](https://flightaware.com/aeroapi)** — paid; optional. Can be the primary source, or just a **backup** that only fires when adsbdb misses a flight (so you pay only for the gaps).
    - **Off** — show callsign only.
 
-Enrichment results are **cached per aircraft** (default 10 min) so loitering planes aren't re-queried every cycle. Out of the box the wall costs **$0** for enrichment — you only need the OpenSky credentials. Enter everything later in the web UI — you do **not** have to hardcode anything.
+Enrichment results are **cached per flight leg** (default 10 min) so loitering planes aren't re-queried every cycle. Out of the box the wall costs **$0** for enrichment — you only need the OpenSky credentials. Enter everything later in the web UI — you do **not** have to hardcode anything.
 
 > **📖 See [docs/data-sources.md](docs/data-sources.md)** for the full rundown: every position and enrichment source, approximate monthly costs, how to configure each, and the trade-offs of the opt-in Flightradar24 source (including its Terms-of-Service and memory caveats).
 
