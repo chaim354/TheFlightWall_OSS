@@ -104,12 +104,21 @@ Create `server/package.json`:
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",
+    "@types/node": "^20.19.43",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5",
     "wrangler": "^3.78.0"
   }
 }
 ```
+
+`@types/node` is needed starting Task 6: its test reads a fixture via `node:fs`
+and `import.meta.url`, and without Node's ambient types `tsc --noEmit` fails
+with `Cannot find module 'node:fs'`. Pin it to the `^20` line specifically —
+newer major versions (v26 at time of writing) assume `Symbol.dispose` support
+that this project's `"lib": ["ES2022"]` doesn't provide, which collides with
+`@cloudflare/workers-types`'s `URL` global and breaks `tsc` on any `URL` use.
+Scaffolding it now avoids rediscovering this the hard way in Task 6.
 
 Create `server/tsconfig.json`:
 
@@ -120,7 +129,15 @@ Create `server/tsconfig.json`:
     "lib": ["ES2022"],
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "types": ["@cloudflare/workers-types"],
+    // "node" is here only because test/**/*.ts reads fixtures via node:fs
+    // and import.meta.url — nothing in src/ needs it. Pinned to ^20 in
+    // package.json: @types/node's v26 line assumes Symbol.dispose support
+    // that this project's ES2022 lib doesn't provide, which collides with
+    // @cloudflare/workers-types' URL global (their URLSearchParamsIterator
+    // types stop matching, so tsc fails on any URL use). Trade-off: Node
+    // globals are now visible to src/** at type-check time even though they
+    // do not exist at runtime in a Worker — src/ code must not reach for them.
+    "types": ["@cloudflare/workers-types", "node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
@@ -1255,6 +1272,48 @@ describe('parseAdsbLol', () => {
     expect(parseAdsbLol({})).toEqual([]);
     expect(parseAdsbLol({ ac: null })).toEqual([]);
   });
+
+  it('degrades a wrong-typed string field to empty/null instead of throwing', () => {
+    // hex/flight/r/t/category are declared as strings but nothing guarantees
+    // that at runtime -- an upstream schema change could ship any of them as
+    // a number or boolean. A bad field must not crash the row.
+    const base = { hex: 'abc123', flight: 'TEST1', lat: 40, lon: -73 };
+    expect(() => parseAdsbLol({ ac: [{ ...base, r: 12345 }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, t: 12345 }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, category: true }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, hex: 999 }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, flight: 12345 }] })).not.toThrow();
+
+    expect(parseAdsbLol({ ac: [{ ...base, r: 12345 }] })[0]!.registration).toBeNull();
+    expect(parseAdsbLol({ ac: [{ ...base, t: 12345 }] })[0]!.typeIcao).toBeNull();
+    expect(parseAdsbLol({ ac: [{ ...base, category: true }] })[0]!.category).toBeNull();
+    expect(parseAdsbLol({ ac: [{ ...base, hex: 999 }] })[0]!.hex).toBe('');
+    expect(parseAdsbLol({ ac: [{ ...base, flight: 12345 }] })[0]!.callsign).toBe('');
+  });
+
+  it('degrades only the malformed row, not the whole batch', () => {
+    // Partial degradation is the point: one bad row from an upstream schema
+    // change must not blank out every other aircraft in the same response.
+    const parsed = parseAdsbLol({
+      ac: [
+        { hex: 'aaa111', flight: 'GOOD1', r: 'N123AB', t: 'B738', lat: 40.1, lon: -73.1 },
+        { hex: 'bbb222', flight: 'BAD1', r: 12345, t: true, category: 42, lat: 40.2, lon: -73.2 },
+        { hex: 'ccc333', flight: 'GOOD2', r: 'N456CD', t: 'A320', lat: 40.3, lon: -73.3 },
+      ],
+    });
+
+    expect(parsed).toHaveLength(3);
+    expect(parsed.map((a) => a.callsign)).toEqual(['GOOD1', 'BAD1', 'GOOD2']);
+
+    const [good1, bad, good2] = parsed;
+    expect(good1!.registration).toBe('N123AB');
+    expect(good1!.typeIcao).toBe('B738');
+    expect(bad!.registration).toBeNull();
+    expect(bad!.typeIcao).toBeNull();
+    expect(bad!.category).toBeNull();
+    expect(good2!.registration).toBe('N456CD');
+    expect(good2!.typeIcao).toBe('A320');
+  });
 });
 ```
 
@@ -1297,6 +1356,8 @@ interface RawAircraft {
 const num = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : null;
 
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
 /**
  * Parse an adsb.lol /v2 response.
  *
@@ -1304,8 +1365,14 @@ const num = (v: unknown): number | null =>
  * bearing (`dst`/`dir`) inline — which is why this source removes the per-flight
  * aircraft lookup entirely rather than just replacing the position feed.
  *
- * Never throws: a malformed payload yields an empty list, which the caller
- * reports as a failed fetch rather than as an empty sky.
+ * Never throws, at the payload level or the row level. A row with a
+ * wrong-typed field (`t` arriving as a number, say) degrades just that field
+ * to empty/null rather than losing the row or the request. That distinction
+ * matters downstream: a thrown error fails the whole fetch, which the device
+ * treats as "keep showing the last flights" — survivable. An empty list looks
+ * like a successful fetch of an empty sky, which blanks the display instead.
+ * One malformed row must not manufacture either outcome for every aircraft
+ * riding along in the same response.
  */
 export function parseAdsbLol(body: unknown): Aircraft[] {
   const rows = (body as { ac?: unknown })?.ac;
@@ -1322,10 +1389,10 @@ export function parseAdsbLol(body: unknown): Aircraft[] {
     const altFt = onGround ? null : num(r.alt_baro) ?? num(r.alt_geom);
 
     out.push({
-      hex: (r.hex ?? '').trim().toLowerCase(),
-      callsign: (r.flight ?? '').trim(),
-      registration: r.r?.trim() || null,
-      typeIcao: r.t?.trim() || null,
+      hex: str(r.hex).toLowerCase(),
+      callsign: str(r.flight),
+      registration: str(r.r) || null,
+      typeIcao: str(r.t) || null,
       lat,
       lon,
       altFt,
@@ -1333,7 +1400,7 @@ export function parseAdsbLol(body: unknown): Aircraft[] {
       trackDeg: num(r.track),
       verticalRateFpm: num(r.baro_rate) ?? num(r.geom_rate),
       onGround,
-      category: r.category?.trim() || null,
+      category: str(r.category) || null,
       distanceNm: num(r.dst),
       bearingDeg: num(r.dir),
     });
@@ -1351,6 +1418,17 @@ export async function fetchAircraft(lat: number, lon: number, radiusNm: number):
   return parseAdsbLol(await res.json());
 }
 ```
+
+**Defect this plan originally shipped:** the first draft of this Step used
+`r.r?.trim()` (and the equivalent for `hex`/`flight`/`t`/`category`), which
+guards only `null`/`undefined` — a row where any of those five fields arrives
+as a number or boolean (a plausible upstream schema change, not just a
+theoretical one) threw a `TypeError` and, per Task 9's handler contract, would
+have failed the *entire* fetch over one bad row. The top-level malformed-payload
+test above did not catch this because it only exercises payload shape, never
+per-row field types. The `str()` helper above and the two tests covering it
+(the wrong-typed-field case and the mixed-batch case) are the fix; keep both
+if re-running this task.
 
 - [ ] **Step 5: Run tests**
 

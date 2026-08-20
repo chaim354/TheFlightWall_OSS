@@ -24,6 +24,8 @@ interface RawAircraft {
 const num = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : null;
 
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
 /**
  * Parse an adsb.lol /v2 response.
  *
@@ -31,8 +33,14 @@ const num = (v: unknown): number | null =>
  * bearing (`dst`/`dir`) inline — which is why this source removes the per-flight
  * aircraft lookup entirely rather than just replacing the position feed.
  *
- * Never throws: a malformed payload yields an empty list, which the caller
- * reports as a failed fetch rather than as an empty sky.
+ * Never throws, at the payload level or the row level. A row with a
+ * wrong-typed field (`t` arriving as a number, say) degrades just that field
+ * to empty/null rather than losing the row or the request. That distinction
+ * matters downstream: a thrown error fails the whole fetch, which the device
+ * treats as "keep showing the last flights" — survivable. An empty list looks
+ * like a successful fetch of an empty sky, which blanks the display instead.
+ * One malformed row must not manufacture either outcome for every aircraft
+ * riding along in the same response.
  */
 export function parseAdsbLol(body: unknown): Aircraft[] {
   const rows = (body as { ac?: unknown })?.ac;
@@ -49,10 +57,10 @@ export function parseAdsbLol(body: unknown): Aircraft[] {
     const altFt = onGround ? null : num(r.alt_baro) ?? num(r.alt_geom);
 
     out.push({
-      hex: (r.hex ?? '').trim().toLowerCase(),
-      callsign: (r.flight ?? '').trim(),
-      registration: r.r?.trim() || null,
-      typeIcao: r.t?.trim() || null,
+      hex: str(r.hex).toLowerCase(),
+      callsign: str(r.flight),
+      registration: str(r.r) || null,
+      typeIcao: str(r.t) || null,
       lat,
       lon,
       altFt,
@@ -60,7 +68,7 @@ export function parseAdsbLol(body: unknown): Aircraft[] {
       trackDeg: num(r.track),
       verticalRateFpm: num(r.baro_rate) ?? num(r.geom_rate),
       onGround,
-      category: r.category?.trim() || null,
+      category: str(r.category) || null,
       distanceNm: num(r.dst),
       bearingDeg: num(r.dir),
     });

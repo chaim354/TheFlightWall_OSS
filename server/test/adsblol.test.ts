@@ -47,4 +47,46 @@ describe('parseAdsbLol', () => {
     expect(parseAdsbLol({})).toEqual([]);
     expect(parseAdsbLol({ ac: null })).toEqual([]);
   });
+
+  it('degrades a wrong-typed string field to empty/null instead of throwing', () => {
+    // hex/flight/r/t/category are declared as strings but nothing guarantees
+    // that at runtime -- an upstream schema change could ship any of them as
+    // a number or boolean. A bad field must not crash the row.
+    const base = { hex: 'abc123', flight: 'TEST1', lat: 40, lon: -73 };
+    expect(() => parseAdsbLol({ ac: [{ ...base, r: 12345 }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, t: 12345 }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, category: true }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, hex: 999 }] })).not.toThrow();
+    expect(() => parseAdsbLol({ ac: [{ ...base, flight: 12345 }] })).not.toThrow();
+
+    expect(parseAdsbLol({ ac: [{ ...base, r: 12345 }] })[0]!.registration).toBeNull();
+    expect(parseAdsbLol({ ac: [{ ...base, t: 12345 }] })[0]!.typeIcao).toBeNull();
+    expect(parseAdsbLol({ ac: [{ ...base, category: true }] })[0]!.category).toBeNull();
+    expect(parseAdsbLol({ ac: [{ ...base, hex: 999 }] })[0]!.hex).toBe('');
+    expect(parseAdsbLol({ ac: [{ ...base, flight: 12345 }] })[0]!.callsign).toBe('');
+  });
+
+  it('degrades only the malformed row, not the whole batch', () => {
+    // Partial degradation is the point: one bad row from an upstream schema
+    // change must not blank out every other aircraft in the same response.
+    const parsed = parseAdsbLol({
+      ac: [
+        { hex: 'aaa111', flight: 'GOOD1', r: 'N123AB', t: 'B738', lat: 40.1, lon: -73.1 },
+        { hex: 'bbb222', flight: 'BAD1', r: 12345, t: true, category: 42, lat: 40.2, lon: -73.2 },
+        { hex: 'ccc333', flight: 'GOOD2', r: 'N456CD', t: 'A320', lat: 40.3, lon: -73.3 },
+      ],
+    });
+
+    expect(parsed).toHaveLength(3);
+    expect(parsed.map((a) => a.callsign)).toEqual(['GOOD1', 'BAD1', 'GOOD2']);
+
+    const [good1, bad, good2] = parsed;
+    expect(good1!.registration).toBe('N123AB');
+    expect(good1!.typeIcao).toBe('B738');
+    expect(bad!.registration).toBeNull();
+    expect(bad!.typeIcao).toBeNull();
+    expect(bad!.category).toBeNull();
+    expect(good2!.registration).toBe('N456CD');
+    expect(good2!.typeIcao).toBe('A320');
+  });
 });

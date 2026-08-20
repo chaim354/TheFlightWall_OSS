@@ -4,6 +4,14 @@
     "lib": ["ES2022"],
     "module": "ES2022",
     "moduleResolution": "bundler",
+    // "node" is here only because test/**/*.ts reads fixtures via node:fs
+    // and import.meta.url — nothing in src/ needs it. Pinned to ^20 in
+    // package.json: @types/node's v26 line assumes Symbol.dispose support
+    // that this project's ES2022 lib doesn't provide, which collides with
+    // @cloudflare/workers-types' URL global (their URLSearchParamsIterator
+    // types stop matching, so tsc fails on any URL use). Trade-off: Node
+    // globals are now visible to src/** at type-check time even though they
+    // do not exist at runtime in a Worker — src/ code must not reach for them.
     "types": ["@cloudflare/workers-types", "node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
