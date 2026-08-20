@@ -1,4 +1,11 @@
 // Host unit tests for ServerJson.h — compile with g++, no hardware, no ArduinoJson.
+//
+// Guarded so a `pio test` build doesn't collide with the other loose host
+// tests under test/ -- see the test_filter comment in platformio.ini. This
+// file is a standalone host test; it only runs via bare g++, which never
+// defines PIO_UNIT_TESTING, so the guard is a no-op for that workflow and
+// this file's behavior there is unchanged.
+#ifndef PIO_UNIT_TESTING
 #include "../utils/ServerJson.h"
 #include <cstdio>
 #include <cmath>
@@ -29,3 +36,4 @@ int main() {
     if (failures == 0) printf("test_serverjson: ALL PASS\n");
     return failures ? 1 : 0;
 }
+#endif // PIO_UNIT_TESTING

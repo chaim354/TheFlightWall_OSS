@@ -1,6 +1,13 @@
 // Host unit tests for ButtonState.h + BrightnessLadder.h — compile with g++, no hardware.
 // These are the two pieces of the button feature that are pure logic; the GPIO reads
 // and the toast rendering are not host-testable and are verified on the device.
+//
+// Guarded so a `pio test` build doesn't collide with the other loose host
+// tests under test/ -- see the test_filter comment in platformio.ini. This
+// file is a standalone host test; it only runs via bare g++, which never
+// defines PIO_UNIT_TESTING, so the guard is a no-op for that workflow and
+// this file's behavior there is unchanged.
+#ifndef PIO_UNIT_TESTING
 #include "../utils/ButtonState.h"
 #include "../utils/BrightnessLadder.h"
 #include <cstdio>
@@ -144,3 +151,4 @@ int main()
     printf("%d FAILURES\n", failures);
     return 1;
 }
+#endif // PIO_UNIT_TESTING
