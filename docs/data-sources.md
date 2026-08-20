@@ -79,15 +79,14 @@ reused for a later sector.
 
 ### Roughly what the paid options cost
 
-Enrichment is billed **per unique flight leg** (the cache dedupes repeats within
-its TTL, so this is unchanged from the previous airframe key at the default TTL —
-but if you raise the TTL past a turnaround, an aircraft that departs again is now
-a second lookup), so your cost scales with how many distinct legs you see per
-month. A busy location near a major airport can see tens of thousands.
+Enrichment is billed **per unique flight leg**: the cache dedupes repeats within
+its TTL, not across the month, so an aircraft that passes your antenna on three
+separate legs is three lookups. Your cost scales with how many distinct legs you
+see per month; a busy location near a major airport can see tens of thousands.
 
 | Source | ~3k lookups/mo | ~30k lookups/mo | Notes |
 |---|---|---|---|
-| adsbdb + hexdb | **$0** | **$0** | Free, fair-use. Respect it: longer cache, modest radius. |
+| adsbdb + hexdb | **$0** | **$0** | Free, fair-use. Respect it: modest radius, and keep Max flights low. |
 | **AeroAPI** | ~$100 | ~$150 | ~$0.005/query. Personal tier is free but capped at ~1,000 queries/mo ($5); beyond that jumps to the Standard tier's ~$100–200/mo minimum. |
 | AeroDataBox | ~$5–15 | ~$90–160 | Billed in "units" (≠ requests) via RapidAPI/API.market. Cheapest paid option at low volume. |
 | Aviationstack | ~$50 | ~$149 | Keyed by IATA flight number, not callsign/hex — a poor fit for this project. |
