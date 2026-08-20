@@ -14,8 +14,8 @@ export function haversineKm(aLat: number, aLon: number, bLat: number, bLon: numb
   const p1 = toRad(aLat);
   const p2 = toRad(bLat);
   const dp = p2 - p1;
-  // Taking the delta in degrees before converting keeps antimeridian
-  // crossings correct: 179 -> -179 is -358 deg, whose sine is that of +2 deg.
+  // Antimeridian-safe without special-casing: 179 -> -179 gives a -358 deg
+  // delta, and sin/cos are 360-periodic, so it evaluates identically to +2 deg.
   const dl = toRad(bLon - aLon);
   const h =
     Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
