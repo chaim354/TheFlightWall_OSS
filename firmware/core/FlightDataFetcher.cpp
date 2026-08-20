@@ -220,11 +220,13 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // it's specific to this feed row, not something a different flight sharing
         // that cache key should ever be served.
         //
-        // origin/dest: unconditional. Safe only because has_inline_enrichment is
-        // exactly origin||dest, which already skipped the lookup above — there is
-        // no network value to defer to. If that flag is ever narrowed to
-        // origin&&dest, these two guards need re-deriving, or a leg with only one
-        // side inline would confidently pair FR24's origin with adsbdb's destination.
+        // origin/dest: applied whenever the feed has them, with no check for an
+        // existing network value first (unlike the airline fill-gap below). Safe
+        // only because has_inline_enrichment is exactly origin||dest, which already
+        // skipped the lookup above — there is no network value to defer to. If that
+        // flag is ever narrowed to origin&&dest, these two guards need re-deriving,
+        // or a leg with only one side inline would confidently pair FR24's origin
+        // with adsbdb's destination.
         if (s.origin_iata.length())
             info.origin.code_iata = s.origin_iata;
         if (s.dest_iata.length())

@@ -208,7 +208,11 @@ void FlightRadar24Fetcher::parseFeedInto(JsonDocument &doc, double centerLat,
 
         StateVector s;
         s.icao24 = a[0].isNull() ? String("") : String(a[0].as<const char *>());
-        s.icao24.toLowerCase(); // OpenSky reports lowercase hex; keep cache keys aligned
+        // Normalize to lowercase: this feeds the adsbdb/hexdb aircraft-by-ICAO24 URL
+        // below, not a cache key — ICAO24 is only a defensive, currently-unreachable
+        // fallback there (every caller already filters empty callsigns before reaching
+        // enrichmentCacheKey()). Matches the lowercase hex convention OpenSky also uses.
+        s.icao24.toLowerCase();
         s.lat = a[1].isNull() ? NAN : a[1].as<double>();
         s.lon = a[2].isNull() ? NAN : a[2].as<double>();
         if (isnan(s.lat) || isnan(s.lon))

@@ -347,6 +347,10 @@ anyone who flashes this firmware without running infrastructure.
 
 ## Bugs to fix regardless
 
+**Status: all three fixed in plan 1 (commits `8b5075a`..`ccf1d40`).** Kept here for
+context since plans 2 and 3 are written from this file; the descriptions and line
+numbers below are as of this writing and have drifted from current source.
+
 1. **`adapters/AdsbdbFetcher.cpp:104` — multi-leg routes resolve to
    origin == destination.** The parse takes the first and *last* segment, so the
    rotation `KLAX-KDFW-KLAX` renders as **"LAX -> LAX"**. 27% of routes sampled

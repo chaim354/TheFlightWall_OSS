@@ -104,7 +104,7 @@
       <option value="opensky">OpenSky — official, needs key above (recommended)</option>
       <option value="fr24">Flightradar24 — unofficial, no key, routes included</option>
     </select>
-    <small class="help">Flightradar24 is an <b>unofficial scrape</b> of fr24.com for personal use only — it can break or rate-limit, and it carries route/airline/aircraft inline (no enrichment lookup needed). Best on the S3 (PSRAM). OpenSky stays the default.</small>
+    <small class="help">Flightradar24 is an <b>unofficial scrape</b> of fr24.com for personal use only — it can break or rate-limit, and rows with a route skip the separate enrichment lookup (rows without one, mostly GA/unscheduled traffic, still use it). Best on the S3 (PSRAM). OpenSky stays the default.</small>
 
     <label>Flight enrichment source (route · airline · aircraft)</label>
     <select id="enrichmentSource">

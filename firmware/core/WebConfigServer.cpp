@@ -193,10 +193,10 @@ String WebConfigServer::buildFlightsJson() const
             o["ident"] = f.ident.length() ? f.ident : f.ident_icao;
             // Same fallback chain buildFlightLines uses on the panel, and that the
             // aircraft line below already used here. Only the enrichment fetchers set
-            // airline_display_name_full, so under Flightradar24 — whose inline route data
-            // makes those lookups unnecessary and skipped — this was always the empty
-            // string and the card's airline column rendered blank, even though the wall
-            // knew the operator well enough to draw its logo.
+            // airline_display_name_full, so under Flightradar24 — which skips those
+            // lookups only for flights whose row already carried a route — this was
+            // often the empty string and the card's airline column rendered blank,
+            // even though the wall knew the operator well enough to draw its logo.
             o["airline"] = f.airline_display_name_full.length() ? f.airline_display_name_full
                            : (f.operator_iata.length() ? f.operator_iata
                               : (f.operator_icao.length() ? f.operator_icao : f.operator_code));

@@ -3,9 +3,11 @@
 Purpose: ICAO airline code -> human-readable display name, resolved entirely on device.
 
 Why this exists: the position feed identifies an operator by ICAO code only. Under
-OpenSky the name arrives from adsbdb enrichment, but Flightradar24 supplies route and
-aircraft inline and so skips that lookup entirely — leaving the panel and the web list
-rendering "DAL" where they used to say "Delta". Resolving locally fixes both surfaces
+OpenSky the name arrives from adsbdb enrichment, but Flightradar24 rows that carry a
+route skip that lookup entirely, and the rows that don't still often miss a name
+(GA/private and unscheduled traffic is what the free enrichment databases tend to
+miss too) — leaving the panel and the web list rendering "DAL" where they'd otherwise
+say "Delta". Resolving locally fixes both surfaces
 for every flight in the same cycle, with no network call, no enrichment budget spent,
 no blocking of the single-threaded loop() that also serves the web UI, and no exposure
 to a rate limit.

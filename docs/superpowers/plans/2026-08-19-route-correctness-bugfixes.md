@@ -76,7 +76,7 @@ so take the **first** leg: it is always a real leg, and never degenerate.
 - Create: `firmware/test/test_route.cpp`
 - Modify: `firmware/adapters/AdsbdbFetcher.cpp:105-108`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `firmware/test/test_route.cpp`:
 
@@ -135,7 +135,7 @@ int main() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd firmware && g++ -std=c++17 test/test_route.cpp -o /tmp/t_route
@@ -143,7 +143,7 @@ cd firmware && g++ -std=c++17 test/test_route.cpp -o /tmp/t_route
 
 Expected: FAIL to compile — `utils/RouteUtils.h: No such file or directory`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `firmware/utils/RouteUtils.h`:
 
@@ -222,7 +222,7 @@ inline bool parseFirstLeg(const char *route,
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 cd firmware && g++ -std=c++17 test/test_route.cpp -o /tmp/t_route && /tmp/t_route
@@ -230,7 +230,7 @@ cd firmware && g++ -std=c++17 test/test_route.cpp -o /tmp/t_route && /tmp/t_rout
 
 Expected: `test_route: ALL PASS`, exit 0.
 
-- [ ] **Step 5: Wire it into the adapter**
+- [x] **Step 5: Wire it into the adapter**
 
 In `firmware/adapters/AdsbdbFetcher.cpp`, add the include below the existing one at the top of the file:
 
@@ -265,7 +265,7 @@ with:
     String dest(destBuf);
 ```
 
-- [ ] **Step 6: Verify the firmware still builds**
+- [x] **Step 6: Verify the firmware still builds**
 
 ```bash
 cd firmware && pio run -e esp32dev
@@ -273,7 +273,7 @@ cd firmware && pio run -e esp32dev
 
 Expected: `SUCCESS`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add firmware/utils/RouteUtils.h firmware/test/test_route.cpp firmware/adapters/AdsbdbFetcher.cpp
@@ -302,7 +302,7 @@ naturally. ICAO24 remains the fallback for a state vector with no callsign.
 - Modify: `firmware/core/FlightDataFetcher.cpp:197-198`
 - Modify: `docs/data-sources.md:74`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `firmware/test/test_parsers.cpp`, add these lines immediately before the
 final `if (failures == 0)` line:
@@ -318,7 +318,7 @@ final `if (failures == 0)` line:
     CHECK(strcmp(enrichmentCacheKey(nullptr, nullptr), "") == 0);
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd firmware && g++ -std=c++17 test/test_parsers.cpp -o /tmp/t_parsers
@@ -326,7 +326,7 @@ cd firmware && g++ -std=c++17 test/test_parsers.cpp -o /tmp/t_parsers
 
 Expected: FAIL to compile — `'enrichmentCacheKey' was not declared in this scope`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `firmware/utils/CallsignUtils.h`, after `cacheActionFor`:
 
@@ -346,7 +346,7 @@ inline const char *enrichmentCacheKey(const char *callsign, const char *icao24)
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 cd firmware && g++ -std=c++17 test/test_parsers.cpp -o /tmp/t_parsers && /tmp/t_parsers
@@ -354,7 +354,7 @@ cd firmware && g++ -std=c++17 test/test_parsers.cpp -o /tmp/t_parsers && /tmp/t_
 
 Expected: exit 0, no `FAIL` lines.
 
-- [ ] **Step 5: Wire it into the orchestrator**
+- [x] **Step 5: Wire it into the orchestrator**
 
 In `firmware/core/FlightDataFetcher.cpp`, replace lines 197-198:
 
@@ -374,7 +374,7 @@ with:
 `CallsignUtils.h` is already included by `FlightDataFetcher.h`, so no new include
 is needed.
 
-- [ ] **Step 6: Correct the documentation that makes this worse**
+- [x] **Step 6: Correct the documentation that makes this worse**
 
 In `docs/data-sources.md`, replace line 74:
 
@@ -392,7 +392,7 @@ between legs, so a long TTL mainly costs you freshness on aircraft that loiter.
 regional jet to its first leg's route for the whole day.)
 ```
 
-- [ ] **Step 7: Verify the firmware still builds**
+- [x] **Step 7: Verify the firmware still builds**
 
 ```bash
 cd firmware && pio run -e esp32dev
@@ -400,7 +400,7 @@ cd firmware && pio run -e esp32dev
 
 Expected: `SUCCESS`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add firmware/utils/CallsignUtils.h firmware/test/test_parsers.cpp firmware/core/FlightDataFetcher.cpp docs/data-sources.md
@@ -435,7 +435,7 @@ Two changes are needed together:
 - Modify: `firmware/adapters/FlightRadar24Fetcher.cpp:236-237`
 - Modify: `firmware/core/FlightDataFetcher.cpp:200-218`
 
-- [ ] **Step 1: Narrow the flag to mean "the feed carried a route"**
+- [x] **Step 1: Narrow the flag to mean "the feed carried a route"**
 
 In `firmware/adapters/FlightRadar24Fetcher.cpp`, replace lines 236-237:
 
@@ -455,7 +455,7 @@ with:
         s.has_inline_enrichment = s.origin_iata.length() || s.dest_iata.length();
 ```
 
-- [ ] **Step 2: Make the consumer overlay inline fields instead of branching**
+- [x] **Step 2: Make the consumer overlay inline fields instead of branching**
 
 In `firmware/core/FlightDataFetcher.cpp`, replace lines 200-218 — the whole
 `if (s.has_inline_enrichment) { ... } else { ... }` block — with:
@@ -484,7 +484,7 @@ In `firmware/core/FlightDataFetcher.cpp`, replace lines 200-218 — the whole
             info.operator_icao = s.airline_icao;
 ```
 
-- [ ] **Step 3: Update the StateVector field comment to match**
+- [x] **Step 3: Update the StateVector field comment to match**
 
 In `firmware/models/StateVector.h`, replace line 31:
 
@@ -501,7 +501,7 @@ with:
     bool has_inline_enrichment = false;
 ```
 
-- [ ] **Step 4: Verify both environments build**
+- [x] **Step 4: Verify both environments build**
 
 ```bash
 cd firmware && pio run -e esp32dev && pio run -e esp32s3
@@ -509,7 +509,7 @@ cd firmware && pio run -e esp32dev && pio run -e esp32s3
 
 Expected: `SUCCESS` for both.
 
-- [ ] **Step 5: Run the full host test suite**
+- [x] **Step 5: Run the full host test suite**
 
 ```bash
 cd firmware && for t in parsers classify lru buttons clock route; do g++ -std=c++17 test/test_$t.cpp -o /tmp/t_$t && /tmp/t_$t && echo "PASS $t"; done
@@ -517,7 +517,7 @@ cd firmware && for t in parsers classify lru buttons clock route; do g++ -std=c+
 
 Expected: `PASS` for all six.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add firmware/adapters/FlightRadar24Fetcher.cpp firmware/core/FlightDataFetcher.cpp firmware/models/StateVector.h
@@ -542,7 +542,7 @@ suites explicitly, so a new suite that is not added there will silently never ru
 **Files:**
 - Modify: `HANDOFF.md:23` and `HANDOFF.md:222`
 
-- [ ] **Step 1: Update both occurrences**
+- [x] **Step 1: Update both occurrences**
 
 Replace, on line 23:
 
@@ -568,7 +568,7 @@ with:
 Host tests: `g++ -std=c++17 test/test_{parsers,classify,lru,buttons,clock,route}.cpp -o /tmp/t && /tmp/t`.
 ```
 
-- [ ] **Step 2: Verify the documented loop actually runs**
+- [x] **Step 2: Verify the documented loop actually runs**
 
 ```bash
 cd firmware && for t in parsers classify lru buttons clock route; do g++ -std=c++17 test/test_$t.cpp -o /tmp/t_$t && /tmp/t_$t && echo "PASS $t"; done
@@ -576,7 +576,7 @@ cd firmware && for t in parsers classify lru buttons clock route; do g++ -std=c+
 
 Expected: `PASS` for all six suites.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add HANDOFF.md
@@ -587,9 +587,11 @@ git commit -m "docs: add test_route to the host test loop"
 
 ## Done when
 
-- [ ] All six host suites pass.
-- [ ] `pio run -e esp32dev` and `pio run -e esp32s3` both SUCCESS.
-- [ ] `docs/data-sources.md` no longer advises raising the enrichment TTL without limit.
+- [x] All six host suites pass.
+- [x] `pio run -e esp32dev` and `pio run -e esp32s3` both SUCCESS.
+- [x] `docs/data-sources.md` no longer advises raising the enrichment TTL without limit.
+- [ ] Device smoke test: Area mode still renders routes with the FR24 source
+      selected (Task 3 touches that path directly) — not yet run.
 
 **Not verified by this plan:** none of this is exercised on real hardware. The
 changes are confined to pure parsing, a cache key, and field assignment, all

@@ -15,6 +15,7 @@ Most of what earlier handoffs called "never run on hardware" now IS device-verif
 |---|---|
 | S3 migration (PSRAM, pin map, 6-bit depth) | **DEVICE-VERIFIED.** PSRAM 8.35MB live, flights render, web UI loads. |
 | Enrichment, logo LRU sizing, TCS3472 read path, buttons, web UI | **DEVICE-VERIFIED.** |
+| Route-correctness fixes: hexdb first-leg parsing, leg-keyed enrichment cache, FR24 partial-inline overlay (`8b5075a`..`ccf1d40`) | **COMPILE + HOST-TEST ONLY.** Materially changes the enrichment path the row above verified; none of it has run on the device. Least exercised: the FR24 inline-overlay path (Task 3) — GA/private and route-less FR24 flights now depend on a per-flight enrichment lookup that previously never ran for them at all. |
 | 6-bit colour-depth fix (`4218dc0`) | **Device-verified but on ONE ping sample per condition** — see §3. The fault swings ~32× between identical back-to-back runs, so treat the 75%→0% result as strong-but-not-proven. |
 | Clock / timezone / new defaults (`eea030d`) | **COMPILE + HOST-TEST ONLY.** The board dropped off USB before it could be flashed. The ONLY unverified commit from this session. |
 | `WiFi.setSleep(false)` (`d010d8d`) | **A DISPROVEN NO-OP.** Modem sleep was already off (verified in core source). Harmless but the message frames it as a fix; revert or amend when convenient. |
