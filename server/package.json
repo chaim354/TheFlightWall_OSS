@@ -2,6 +2,9 @@
   "name": "flightwall-server",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -11,10 +14,10 @@
     "gen:airports": "node tools/gen-airports.js"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240909.0",
+    "@cloudflare/workers-types": "^5.20260820.1",
     "@types/node": "^20.19.43",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5",
-    "wrangler": "^3.78.0"
+    "wrangler": "^4.125.0"
   }
 }

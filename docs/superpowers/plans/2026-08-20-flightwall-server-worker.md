@@ -84,7 +84,7 @@ Two facts decide how the join works and what it costs. Both are answerable on Ae
 node --version
 ```
 
-Wrangler 4 requires Node 20+. This repo's environment had v18.20.8 at time of writing. If you are on 18, either upgrade or pin `wrangler@3` in the next step — **do not silently proceed**, note which you chose in the commit message.
+Wrangler 4 declares `engines: node >=22.0.0` — **22, not 20**, which an earlier draft of this plan got wrong. If your Node is older, upgrade rather than pinning `wrangler@3`: v3 is out of support and its dependency tree carried roughly twice the audit findings. Note that `wrangler@4` also requires `@cloudflare/workers-types@^5`; bumping one without the other fails peer resolution, and `--force`/`--legacy-peer-deps` produces exactly the "potentially broken" tree npm warns about. Update both together.
 
 - [ ] **Step 2: Scaffold**
 
@@ -103,11 +103,11 @@ Create `server/package.json`:
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240909.0",
+    "@cloudflare/workers-types": "^5.20260820.1",
     "@types/node": "^20.19.43",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5",
-    "wrangler": "^3.78.0"
+    "wrangler": "^4.125.0"
   }
 }
 ```
