@@ -94,11 +94,18 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         Serial.println("FlightWallServerFetcher: server reported ok:false");
         return false;
     }
-    outStale = doc["stale"] | false;
 
     JsonArray arr = doc["flights"].as<JsonArray>();
     if (arr.isNull())
         return false; // ok:true with no array is malformed, not an empty sky
+
+    // Assigned only now that every remaining early-return has already happened:
+    // an out-parameter set on a failure path outlives that failure and reaches
+    // the caller looking exactly like a valid result, misreporting the state of
+    // data the caller is about to discard. FlightDataFetcher::fetchServerMode
+    // relies on that not happening -- it treats outStale as meaningful only when
+    // this call returns true.
+    outStale = doc["stale"] | false;
 
     for (JsonObject f : arr)
     {
