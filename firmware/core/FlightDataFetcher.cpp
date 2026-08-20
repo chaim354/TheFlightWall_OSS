@@ -198,25 +198,27 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
             return;
 
         FlightInfo info;
-        if (s.has_inline_enrichment)
-        {
-            // The position source (e.g. FlightRadar24) already carried the route,
-            // aircraft type, and operator in the same feed — no per-flight network
-            // lookup, no enrichment-budget spend. IATA codes here. The feed identifies
-            // the operator by ICAO code only; applyLocalIdentity below turns that into a
-            // display name from the on-device table.
-            info.origin.code_iata = s.origin_iata;
-            info.destination.code_iata = s.dest_iata;
-            info.aircraft_code = s.aircraft_type;
-            if (s.airline_icao.length())
-                info.operator_icao = s.airline_icao;
-        }
-        else
-        {
-            // Best-effort: once the budget is spent this serves cache-only, so the card
-            // still renders (callsign + logo below) just without a route.
+        // Skip the per-flight network lookup ONLY when the feed carried the route;
+        // that is the expensive thing we are avoiding. Best-effort: once the budget
+        // is spent this serves cache-only, so the card still renders (callsign +
+        // logo below) just without a route.
+        if (!s.has_inline_enrichment)
             getEnriched(s.callsign, s.icao24, info, withinEnrichBudget());
-        }
+
+        // Overlay whatever the position source carried inline (e.g. FlightRadar24
+        // ships route, type and operator in the same feed). Applied AFTER the
+        // lookup on purpose: getEnriched() assigns `info` wholesale on a cache hit,
+        // so anything written before the call would be thrown away. The feed
+        // identifies the operator by ICAO code only; applyLocalIdentity below turns
+        // that into a display name from the on-device table.
+        if (s.origin_iata.length())
+            info.origin.code_iata = s.origin_iata;
+        if (s.dest_iata.length())
+            info.destination.code_iata = s.dest_iata;
+        if (s.aircraft_type.length())
+            info.aircraft_code = s.aircraft_type;
+        if (s.airline_icao.length())
+            info.operator_icao = s.airline_icao;
 
         // Local, free identity (logo) is applied whether or not the network lookup
         // succeeded — so airliners always show their logo/airline. In Area mode we

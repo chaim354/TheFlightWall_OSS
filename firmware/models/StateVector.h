@@ -20,13 +20,18 @@ struct StateVector
     double bearing_deg = NAN;
 
     // Inline enrichment. OpenSky leaves these empty (route/type/airline come from a
-    // separate adsbdb/hexdb lookup). Sources that carry route data in the position
-    // feed — e.g. FlightRadar24Fetcher — fill them, and Area mode uses them directly
-    // instead of opening a per-flight enrichment connection. IATA codes here; the
-    // enrichment consumer maps them to display names.
+    // separate adsbdb/hexdb lookup). Sources that carry this data in the position
+    // feed — e.g. FlightRadar24Fetcher — fill whichever of these fields it supplied,
+    // and Area mode overlays them onto the result regardless of whether a network
+    // lookup also ran. IATA codes here; the enrichment consumer maps them to display
+    // names. See has_inline_enrichment below for when a route in the feed skips that
+    // lookup entirely.
     String origin_iata;
     String dest_iata;
     String aircraft_type;         // ICAO type, e.g. "B738"
     String airline_icao;          // operator ICAO, e.g. "AAL"
+    // True only when the feed supplied a ROUTE. It gates skipping the per-flight
+    // enrichment lookup, and only a route justifies that. Type/airline that arrive
+    // inline are consumed regardless of this flag.
     bool has_inline_enrichment = false;
 };

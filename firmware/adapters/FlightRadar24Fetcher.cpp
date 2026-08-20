@@ -233,8 +233,12 @@ void FlightRadar24Fetcher::parseFeedInto(JsonDocument &doc, double centerLat,
         s.dest_iata = a[12].isNull() ? String("") : String(a[12].as<const char *>());
         s.aircraft_type = a[8].isNull() ? String("") : String(a[8].as<const char *>());
         s.airline_icao = a[18].isNull() ? String("") : String(a[18].as<const char *>());
-        s.has_inline_enrichment =
-            s.origin_iata.length() || s.dest_iata.length() || s.aircraft_type.length();
+        // ROUTE only. This flag decides whether to SKIP the per-flight enrichment
+        // lookup, and only the route justifies skipping it — a feed that supplied
+        // just the aircraft type used to suppress the route lookup forever, so the
+        // flight never got a route at all. Type and airline still ride along; they
+        // are applied as an overlay in fetchAreaMode regardless of this flag.
+        s.has_inline_enrichment = s.origin_iata.length() || s.dest_iata.length();
 
         s.bearing_deg = computeBearingDeg(centerLat, centerLon, s.lat, s.lon);
 
