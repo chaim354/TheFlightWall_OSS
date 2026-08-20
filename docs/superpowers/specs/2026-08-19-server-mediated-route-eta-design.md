@@ -50,8 +50,12 @@ Only a source that carries both codes can.
 1. **Positions: adsb.lol.** Keyless, no ToS problem, no rate limit observed
    (~150 requests in one session, zero throttling). Returns registration (`r`),
    ICAO type (`t`), and precomputed distance (`dst`) / bearing (`dir`) inline.
-2. **Routes: daily airport schedules for KJFK / KLGA / KEWR**, joined to the
-   ADS-B callsign by numeric suffix.
+2. **Routes: airport schedules from AeroDataBox for KJFK / KLGA / KEWR / KBOS**,
+   joined to the ADS-B callsign by (operator prefix, trailing digits).
+   **KBOS is not a local airport — it is included because the Boston corridor
+   overflies Long Island.** Measured: it lifts airline coverage from 93% to 100%
+   at a 10 km radius, and from 92% to 96% at 40 km. Six of eleven airline misses
+   in the sample were BOS-bound.
 3. **ETA: computed, not purchased.** Two-segment physics model, cross-checked
    against the scheduled arrival.
 4. **A server sits in the middle** and does all fetching, joining, filtering,
@@ -65,11 +69,20 @@ Only a source that carries both codes can.
                                           correct   blank   SILENTLY WRONG
 adsbdb + hexdb (today)                        32%      0%             52%
 adsb.lol alone                                38%     54%              8%
-adsb.lol + JFK/LGA/EWR schedules  (target)   ~86%    ~11%             ~3%
+adsb.lol + 4-board schedules  (target)    ~90-94%   ~5-9%             ~3%
 ```
 
-Target derived as 92% coverage x 97% join = 89% schedule match, at 97% schedule
-accuracy — all three terms **measured**, see "Validation" below.
+Target is **radius-dependent**, since board coverage falls off with distance:
+
+```
+  radius   coverage x join x accuracy  =  correct
+   10 km      100%     97%      97%        ~94%
+   40 km       96%     97%      97%        ~90%
+   80 km       94%     97%      97%        ~88%
+```
+
+All three terms **measured** — coverage above, join and accuracy under
+"Validation" below. Default radius is 10 km (`config/UserConfiguration.h:11`).
 
 Roughly a **17x reduction in wrong destinations.** The design goal is not
 maximum correctness — it is that the wall should **never state a confident
@@ -80,7 +93,7 @@ falsehood**. Blank beats wrong on a 64px panel.
 ```
   Cloudflare Worker                                    ESP32-S3
   ────────────────────                                 ────────────
-  cron  */6h ──> airport schedules (KJFK/KLGA/KEWR)
+  cron  */6h ──> AeroDataBox FIDS (KJFK/KLGA/KEWR/KBOS)
                    └─> KV: schedule table
 
   GET /v1/flights ─> adsb.lol positions               GET /v1/flights
@@ -139,19 +152,48 @@ GET /v1/flights?lat=&lon=&radius_km=&max=8&units=imperial
 - Absent fields mean "unknown" and MUST render as blank, never as a zero or a
   guess. `to` absent = no destination known = no ETA.
 
-### Schedule refresh (cron, every 6h)
+### Schedule refresh (cron, every 6h) — AeroDataBox
 
-Pull arrivals + departures for KJFK, KLGA, KEWR into KV, keyed by numeric
-suffix:
+Provider: **AeroDataBox**, FIDS ("departures and arrivals by airport ICAO
+code"). One call returns both directions; pass `withLeg=true` so departing
+flights carry their arrival time at destination. Relative time ranges are
+supported, so the cron can ask for "from 2h ago, next 12h" without computing
+absolute windows.
+
+Pull arrivals + departures for **KJFK, KLGA, KEWR, KBOS** into KV, keyed by
+(operator prefix, trailing digits):
 
 ```
 5075 -> { carrier:"DL", orig:"CVG", dest:"LGA",
           sched_dep, sched_arr, dest_lat, dest_lon }
 ```
 
-~3,200 rows/day. Decoupled from device requests, so device latency never
-includes a provider call. A failed refresh keeps the previous table and sets
-`stale` — routes keep resolving from the last good pull.
+~4,300 rows/day across the four airports (measured: KJFK ~670 arrivals/day,
+KLGA ~570, KEWR ~660, plus departures). Decoupled from device requests, so
+device latency never includes a provider call. A failed refresh keeps the
+previous table and sets `stale` — routes keep resolving from the last good pull.
+
+**Cost.** 4 airports x 4 refreshes/day = 16 calls/day ~ 480/month, plus a second
+call per airport if the 12h window cap requires it (~960/month worst case).
+AeroDataBox prices per call by tier: T1=1 unit, T2=2, T3=6. Flight-status is
+documented as T2; **the FIDS tier is unconfirmed.** Even at T3 that is
+2,880-5,760 units/month, inside the **$5/mo Pro tier (6,000 units)**. The free
+Basic tier (600 units) is enough to verify the tier and the response shape
+before subscribing, but not to run on.
+
+Note this cost is **flat in traffic volume** — it does not scale with how busy
+the sky is, which is what makes a JFK-adjacent wall cheap rather than expensive.
+
+**Two things to verify on the free tier before building:**
+
+1. **The FIDS tier** (1, 2, 3, or 4 units per call). Decides $5 vs $15.
+2. **Whether FIDS rows carry the ICAO callsign**, not just the IATA flight
+   number. AeroDataBox's flight-status endpoint accepts lookup *by callsign*, so
+   the data exists somewhere in their model. If FIDS exposes it, join on exact
+   callsign equality and **delete the entire composite-key and operator-mapping
+   design below** — no suffix parsing, no collision handling, and the marketing
+   carrier comes straight off the row. That is a strictly better design; the
+   composite key is the fallback for when it is not available.
 
 ### Route resolution
 
@@ -337,8 +379,13 @@ anyone who flashes this firmware without running infrastructure.
   ~$829/mo at a 5-minute cadence and ~$8,294/mo at the current 30s cadence.
   `flight-summary/light` is 1 credit and carries route + `painted_as` but **no
   ETA**; viable at ~$9/mo if route accuracy alone is ever worth paying for.
-- **AeroDataBox / AirLabs per-flight lookups**: ~$5-15/mo, workable, but the
-  airport-board approach is cheaper and covers the same traffic.
+- **Per-flight lookups on any provider** (AeroDataBox flight-status, AirLabs,
+  FR24 official): all workable, all priced per flight, so cost scales with how
+  busy the sky is. The airport-board approach is flat in traffic volume and
+  covers the same aircraft. **AeroDataBox chosen** over AirLabs because AirLabs'
+  free key caps 50 results per call — JFK alone runs ~50 arrivals/hour, so a 12h
+  window would need heavy pagination — and its paid tier jumps to $49/mo against
+  AeroDataBox's $5.
 - **Bundled airport coordinate table (~18 KB flash)**: unnecessary. adsb.lol and
   the schedule rows both carry destination coordinates.
 
@@ -348,7 +395,12 @@ anyone who flashes this firmware without running infrastructure.
 - adsbdb destination accuracy 32%, silently wrong 52% (n=25)
 - adsb.lol 38% correct / 49% blank / 8% silently wrong (n=37)
 - Aircraft type via ICAO24: 100% correct (n=25)
-- JFK/LGA/EWR covers 92% of local airline traffic (n=25)
+- Board coverage of **airline** traffic, by radius (n=101 pooled, 4 boards
+  incl. KBOS): 100% at 10-20 km, 98% at 30 km, 96% at 40 km, 94% at 80 km.
+  Without KBOS: 93% / 95% / 92% / 87%. GA is excluded — it is never in any
+  schedule and correctly renders route-blank.
+- All traffic including GA at 10 km: 87%. The gap is N-numbered aircraft, mostly
+  out of Farmingdale (KFRG).
 - Callsign to flight-number join: **93%** (n=409, within 250 nm)
 - Flight-number collisions: 7.1% on bare suffix, **0% on (operator, suffix)**
   (n=382 keys)
