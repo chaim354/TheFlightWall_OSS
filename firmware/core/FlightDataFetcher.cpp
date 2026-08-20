@@ -49,10 +49,13 @@ BaseFlightFetcher *FlightDataFetcher::activeFetcher()
     }
 }
 
-bool FlightDataFetcher::getEnriched(const String &key, const String &callsign,
-                                    const String &icao24, FlightInfo &out,
-                                    bool allowNetwork)
+bool FlightDataFetcher::getEnriched(const String &callsign, const String &icao24,
+                                    FlightInfo &out, bool allowNetwork)
 {
+    // Single canonical cache-key policy for both tracking modes (Area, Flights) —
+    // see enrichmentCacheKey() for the callsign-over-ICAO24 rationale.
+    const String key = enrichmentCacheKey(callsign.c_str(), icao24.c_str());
+
     const unsigned long now = millis();
     const unsigned long posTtl = (unsigned long)g_settings.enrichmentCacheSeconds * 1000UL;
     const unsigned long negTtl = 60UL * 1000UL; // retry failures after 60s, not the full TTL
@@ -194,9 +197,6 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         if (outFlights.size() >= g_settings.maxFlights)
             return;
 
-        // Key on the CALLSIGN, not the airframe: the route belongs to the leg, and
-        // an aircraft flies several legs a day. See enrichmentCacheKey().
-        const String key = enrichmentCacheKey(s.callsign.c_str(), s.icao24.c_str());
         FlightInfo info;
         if (s.has_inline_enrichment)
         {
@@ -215,7 +215,7 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         {
             // Best-effort: once the budget is spent this serves cache-only, so the card
             // still renders (callsign + logo below) just without a route.
-            getEnriched(key, s.callsign, s.icao24, info, withinEnrichBudget());
+            getEnriched(s.callsign, s.icao24, info, withinEnrichBudget());
         }
 
         // Local, free identity (logo) is applied whether or not the network lookup
@@ -304,7 +304,7 @@ size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights, 
         FlightInfo info;
         // Unlike Area mode, a miss here drops the card (see below), so an exhausted
         // budget means this ident simply waits for the next cycle.
-        bool ok = getEnriched(ident, ident, String(""), info, withinEnrichBudget());
+        bool ok = getEnriched(ident, String(""), info, withinEnrichBudget());
         if (!ok)
         {
             if (g_settings.enrichmentSource == EnrichmentSource::Off)

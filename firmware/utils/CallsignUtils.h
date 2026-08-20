@@ -44,7 +44,10 @@ inline CacheAction cacheActionFor(bool found, bool valid, unsigned long ageMs,
 // a regional jet flies several legs a day, so keying on ICAO24 served the first
 // leg's route until the TTL expired — and the TTL is user-configurable up to
 // hours. The callsign changes with the leg, so it invalidates naturally. ICAO24
-// stays as the fallback for the rare state vector with no callsign.
+// is a defensive fallback, not a live path: every current caller (see
+// FlightDataFetcher.cpp) already filters out empty callsigns before reaching
+// here, so this keeps the helper correct standalone rather than handling a case
+// that occurs today.
 //
 // Returns a pointer into one of the arguments; it does not copy.
 inline const char *enrichmentCacheKey(const char *callsign, const char *icao24)

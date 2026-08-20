@@ -59,10 +59,17 @@ private:
         return (millis() - _cycleStartMs) < kEnrichBudgetMs;
     }
 
-    // Per-leg enrichment cache (keyed by callsign, falling back to ICAO24 — see
-    // enrichmentCacheKey()). Static flight data (route/airline/aircraft) rarely
-    // changes during a pass, so caching it avoids re-querying the provider every
-    // fetch cycle.
+    // Per-leg enrichment cache (keyed by callsign, ICAO24 only as a defensive
+    // fallback — see enrichmentCacheKey()). Static flight data (route/airline/
+    // aircraft) rarely changes during a pass, so caching it avoids re-querying
+    // the provider every fetch cycle.
+    //
+    // The cached FlightInfo also carries airframe-scoped fields (aircraft_code,
+    // fetched by ICAO24 — see AdsbdbFetcher::fetchFlightInfo) alongside the
+    // leg-scoped route/airline, riding along on the leg key. Accepted trade-off:
+    // two airframes sharing a generic callsign within one TTL can cross-serve
+    // aircraft type, and the airframe half re-fetches on every callsign change —
+    // both preferable to serving a wrong route.
     struct CacheEntry
     {
         FlightInfo info;
@@ -74,11 +81,15 @@ private:
     BaseFlightFetcher *activeFetcher();
     // Position source per g_settings.positionSource (mirrors activeFetcher()).
     BaseStateVectorFetcher *activeStateFetcher();
+    // Cache key is derived internally from (callsign, icao24) via enrichmentCacheKey()
+    // — the single canonical policy shared by both tracking modes; callers pass their
+    // identity fields and do not compute a key themselves.
+    //
     // allowNetwork=false serves the cache only and never opens a connection — how the
     // enrichment budget is enforced. The cache is still consulted because a hit is free
     // and costs no time we are trying to protect.
-    bool getEnriched(const String &key, const String &callsign,
-                     const String &icao24, FlightInfo &out, bool allowNetwork);
+    bool getEnriched(const String &callsign, const String &icao24,
+                     FlightInfo &out, bool allowNetwork);
 
     size_t fetchAreaMode(std::vector<StateVector> &outStates,
                          std::vector<FlightInfo> &outFlights,
