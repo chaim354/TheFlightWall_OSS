@@ -40,4 +40,17 @@ struct FlightInfo
     bool is_cargo = false;          // operator_icao is a known freight operator
     double distance_km = NAN;       // distance from configured center (Area mode)
     double bearing_deg = NAN;       // bearing from configured center (Area mode)
+
+    // Time remaining to destination. NAN = unknown, and unknown renders blank.
+    //
+    // Computed, not scheduled: the server models the last 60nm at a nominal
+    // 200kt rather than at the aircraft's current groundspeed, because a naive
+    // distance/groundspeed runs optimistic by a near-constant ~10 minutes at
+    // any cruise range. It cannot know about vectoring, holds or taxi-in, so it
+    // is good to roughly +/-5 min enroute and vaguer near the end.
+    double eta_minutes = NAN;
+    // Pre-rounded display string from the server: "~25m", "~1h10", or "LANDING"
+    // inside 30nm. Rendered VERBATIM -- the rounding is the honesty policy, and
+    // re-deriving it on device would let the two drift apart.
+    String eta_text;
 };

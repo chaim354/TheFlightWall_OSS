@@ -30,6 +30,7 @@ struct StateVector
     String dest_iata;
     String aircraft_type;         // ICAO type, e.g. "B738"
     String airline_icao;          // operator ICAO, e.g. "AAL"
+    String registration;          // tail number, e.g. "N914XJ", when the feed carries it
     // True only when the feed supplied a ROUTE. It gates skipping the per-flight
     // enrichment lookup, and only a route justifies that. Type/airline that arrive
     // inline are consumed regardless of this flag.
