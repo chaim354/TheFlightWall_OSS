@@ -65,11 +65,11 @@ Only a source that carries both codes can.
                                           correct   blank   SILENTLY WRONG
 adsbdb + hexdb (today)                        32%      0%             52%
 adsb.lol alone                                38%     54%              8%
-adsb.lol + JFK/LGA/EWR schedules  (target)   ~83%    ~14%             ~3%
+adsb.lol + JFK/LGA/EWR schedules  (target)   ~86%    ~11%             ~3%
 ```
 
-Target derived as: 92% coverage x 93% join = 86% schedule match, at an assumed
-97% schedule accuracy.
+Target derived as 92% coverage x 97% join = 89% schedule match, at 97% schedule
+accuracy — all three terms **measured**, see "Validation" below.
 
 Roughly a **17x reduction in wrong destinations.** The design goal is not
 maximum correctness — it is that the wall should **never state a confident
@@ -193,9 +193,11 @@ be handled:
   specifically. These MUST be rejected (callsign must end in digits) rather than
   fuzzy-matched, and render blank.
 
-  An earlier small sample (n=37, mostly US domestic) put this at 3% and the join
-  rate at 97%. The 250 nm sample is more representative for a JFK-adjacent wall.
-  **Use 93%.**
+  Rate depends on which population you measure. Among aircraft *airborne* within
+  250 nm of JFK, 7% are unjoinable. Among actual *arrivals at JFK/LGA/EWR* —
+  the only flights a schedule join applies to — only 3% are (n=5,071).
+  **Use 97% for the join term**; the wider population's shortfall is already
+  captured by the 92% coverage term. Do not multiply both.
 
 The join also fixes the airline field: the marketing carrier comes from the
 schedule row (`DL` -> "Delta"), never from the callsign prefix.
@@ -353,14 +355,10 @@ anyone who flashes this firmware without running infrastructure.
 - Sky composition within 60 nm: 75% airline, 18% GA, 5% no callsign (n=221)
 
 **Assumed, and worth validating before building on it:**
-- Schedule data is 93-99% accurate for the live leg. **STILL UNTESTED.** A
-  validation attempt on 2026-08-19 was blocked: every schedule provider requires
-  an account, anonymous OpenSky serves only a 24h window (and returned just 21
-  KJFK arrivals, far too sparse), and the Port Authority site renders its board
-  client-side. The ~83% end-to-end figure depends entirely on this number.
-  **Resolve before building the server.** Needs either OpenSky credentials
-  (unlocks historical arrivals for a day-over-day route-stability test) or a
-  free-tier schedule key.
+- ~~Schedule data is 93-99% accurate~~ **VALIDATED 2026-08-19 — see below.**
+- Flight-number keys are unique within a day. **Partly false** — measured 1.2%
+  of keys at KLGA/KEWR flew from two different origins in the same day (0 at
+  KJFK). Scheduled-time disambiguation is therefore REQUIRED, not optional.
 
 All samples are one metro, one evening. Treat 38% vs 32% as "about the same";
 the 6x gap in the silently-wrong bucket is too large to be sampling noise.
@@ -380,6 +378,58 @@ land first.
 
 Before either: **validate the schedule-accuracy assumption** against one day of
 real JFK data. It is the single soft number the ~87% target rests on.
+
+## Validation: schedule stability (2026-08-19)
+
+The core assumption — *a published schedule tells you the leg a flight number is
+actually flying today* — was tested using authenticated OpenSky historical
+arrivals for KJFK / KLGA / KEWR: **5,401 arrival records across three days**
+(Tue 2026-08-18, Mon 2026-08-17, Tue 2026-08-11).
+
+Method: build `(operator prefix, trailing digits) -> origin airport` per airport
+per day, then ask how often the same key keeps the same origin across days.
+Same-weekday comparison (D-1 vs D-8) isolates day-of-week schedule variation.
+
+```
+                                    shared keys   same origin   differs
+high-confidence records only (departureAirportCandidatesCount == 1)
+  KJFK  Tue D-1 vs Tue D-8                 101      100   99%         1
+  KJFK  Tue D-1 vs Mon D-2                 103      103  100%         0
+  KLGA  Tue D-1 vs Tue D-8                  84       84  100%         0
+  KLGA  Tue D-1 vs Mon D-2                 104      103   99%         1
+  KEWR  Tue D-1 vs Tue D-8                  81       80   99%         1
+  KEWR  Tue D-1 vs Mon D-2                 101      100   99%         1
+
+all records (includes OpenSky's own origin-estimation error)
+  KJFK  Tue D-1 vs Tue D-8                 397      385   97%        12
+  KLGA  Tue D-1 vs Tue D-8                 388      366   94%        22
+  KEWR  Tue D-1 vs Tue D-8                 363      346   95%        17
+```
+
+**Result: 94-100% stable, and 99-100% on high-confidence records.** The assumed
+93-99% band holds. The spread between the two blocks is OpenSky's own
+`estDepartureAirport` noise, not schedule instability — one differing key
+resolved to `SC98`, which is not a real airline origin.
+
+Also measured on the same 5,401 records:
+
+- **97% of airline callsigns end in digits** and are joinable. This supersedes
+  the 93% figure taken from a 250 nm airborne sample: that population includes
+  overflights and international traffic bound elsewhere, which the 92% coverage
+  term already excludes. **For flights that actually touch JFK/LGA/EWR — the only
+  ones a schedule join applies to — the rate is 97%.**
+- **94% of arrivals are airline-format callsigns** (vs 75% of *airborne* aircraft
+  near JFK, which includes far more GA).
+- **Same-day key ambiguity: 0 keys at KJFK, 6 at KLGA, 6 at KEWR** (~1.2%) had
+  two different origins in one day — shuttle rotations reusing a number. These
+  MUST be disambiguated by scheduled time.
+
+Revised end-to-end target: 92% coverage x 97% join = **89% schedule match**, at
+97% schedule accuracy -> **~86% correct / ~11% blank / ~3% wrong.**
+
+Reproduce with `flights/arrival?airport=&begin=&end=` against an authenticated
+OpenSky client; anonymous access is capped at a 24h window and returns ~21 KJFK
+records, far too sparse to use.
 
 ## Out of scope
 
