@@ -109,13 +109,14 @@ bool AdsbdbFetcher::fetchRouteHexdb(const String &callsign, FlightInfo &out)
     char originBuf[8], destBuf[8];
     if (!parseFirstLeg(route.c_str(), originBuf, sizeof(originBuf), destBuf, sizeof(destBuf)))
         return false;
-    String origin(originBuf);
-    String dest(destBuf);
-    if (origin.length() && out.origin.code_icao.length() == 0)
-        out.origin.code_icao = origin;
-    if (dest.length() && out.destination.code_icao.length() == 0)
-        out.destination.code_icao = dest;
-    return origin.length() || dest.length();
+    // parseFirstLeg guarantees both segments are non-empty on success, so unlike
+    // the old indexOf/substring version there is no "false but one side is set"
+    // case left to guard against here.
+    if (out.origin.code_icao.length() == 0)
+        out.origin.code_icao = originBuf;
+    if (out.destination.code_icao.length() == 0)
+        out.destination.code_icao = destBuf;
+    return true;
 }
 
 bool AdsbdbFetcher::fetchAircraftHexdb(const String &icao24, FlightInfo &out)
