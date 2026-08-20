@@ -65,8 +65,11 @@ Only a source that carries both codes can.
                                           correct   blank   SILENTLY WRONG
 adsbdb + hexdb (today)                        32%      0%             52%
 adsb.lol alone                                38%     54%              8%
-adsb.lol + JFK/LGA/EWR schedules  (target)   ~87%    ~10%             ~3%
+adsb.lol + JFK/LGA/EWR schedules  (target)   ~83%    ~14%             ~3%
 ```
+
+Target derived as: 92% coverage x 93% join = 86% schedule match, at an assumed
+97% schedule accuracy.
 
 Roughly a **17x reduction in wrong destinations.** The design goal is not
 maximum correctness — it is that the wall should **never state a confident
@@ -153,21 +156,46 @@ includes a provider call. A failed refresh keeps the previous table and sets
 ### Route resolution
 
 ```
-suffix = trailing digits of the ADS-B callsign        EDV5075 -> 5075
-hit    = schedule.lookup(suffix, now)                 -> DL5075: CVG->LGA
+key = (operator prefix, TRAILING digits of the callsign)   EDV5075 -> (EDV, 5075)
+hit = schedule.lookup(key, now)                            -> DL5075: CVG->LGA
 ```
 
-Measured **97% join rate** (36/37). Two failure modes found, both must be handled:
+**The key MUST be composite. A bare numeric suffix is not safe.** Measured on 409
+airline callsigns within 250 nm of JFK:
+
+```
+bare numeric suffix          : 27 collision groups  (7.1% of keys)
+  e.g. DAL846/JBU846, AAL1075/JBU1075, AAL300/SWA300, FDX1347/UAL1347
+(operator prefix, suffix)    :  0 collisions across 382 keys
+```
+
+Two airlines using the same flight number is entirely normal, so suffix-alone
+silently picks whichever row it finds first. Adding the operator prefix resolved
+26 of 27 groups; requiring the suffix to be a **trailing** digit run (not the
+first digit run anywhere in the string) resolved the last one.
+
+The operator prefix also constrains which carrier a row may belong to. Mainline
+prefixes map 1:1 to their own IATA code (`DAL`->`DL`, `JBU`->`B6`, `SWA`->`WN`).
+Regional prefixes map to a small set (`EDV`->{DL}, `RPA`->{AA,DL,UA}). Require
+the schedule row's carrier to be in that set; disambiguate any residual tie by
+scheduled time, then by geometry.
+
+Measured **93% join rate** (382/409) at scale. Two failure modes found, both must
+be handled:
 
 - **IATA codes containing digits.** JetBlue is `B6`, so `JBU1532` -> `B61532`.
   Match must be `flight_number.endsWith(suffix)`, NOT equality on parsed digits.
   A naive parse scored all six JetBlue flights as failures.
-- **Alphanumeric callsigns.** `BAW2LJ` -> `BA1228` has no numeric suffix.
-  Unjoinable, ~3%. Falls through to blank.
+- **Alphanumeric callsigns.** `BAW2LJ` -> `BA1228`, and likewise `AFR53X`,
+  `EIN12G`, `VIR74W`, `QTR1X`, `LOT3PK`. The callsign bears no relation to the
+  flight number, so no join is possible from ADS-B alone. **7% of airline
+  callsigns**, concentrated in international carriers — which matters at JFK
+  specifically. These MUST be rejected (callsign must end in digits) rather than
+  fuzzy-matched, and render blank.
 
-When a number appears more than once in a day, disambiguate by scheduled time.
-Zero collisions were observed in a snapshot of 37 airborne flights, but this is
-untested across a full day.
+  An earlier small sample (n=37, mostly US domestic) put this at 3% and the join
+  rate at 97%. The 250 nm sample is more representative for a JFK-adjacent wall.
+  **Use 93%.**
 
 The join also fixes the airline field: the marketing carrier comes from the
 schedule row (`DL` -> "Delta"), never from the callsign prefix.
@@ -319,14 +347,20 @@ anyone who flashes this firmware without running infrastructure.
 - adsb.lol 38% correct / 49% blank / 8% silently wrong (n=37)
 - Aircraft type via ICAO24: 100% correct (n=25)
 - JFK/LGA/EWR covers 92% of local airline traffic (n=25)
-- Callsign to flight-number join: 97% (n=37)
+- Callsign to flight-number join: **93%** (n=409, within 250 nm)
+- Flight-number collisions: 7.1% on bare suffix, **0% on (operator, suffix)**
+  (n=382 keys)
 - Sky composition within 60 nm: 75% airline, 18% GA, 5% no callsign (n=221)
 
 **Assumed, and worth validating before building on it:**
-- Schedule data is 93-99% accurate for the live leg. **Untested — no schedule
-  source was queried.** The ~87% end-to-end figure depends entirely on this.
-- Flight-number collisions across a full day are rare enough that scheduled-time
-  disambiguation suffices. Zero collisions in a snapshot; not tested over 24h.
+- Schedule data is 93-99% accurate for the live leg. **STILL UNTESTED.** A
+  validation attempt on 2026-08-19 was blocked: every schedule provider requires
+  an account, anonymous OpenSky serves only a 24h window (and returned just 21
+  KJFK arrivals, far too sparse), and the Port Authority site renders its board
+  client-side. The ~83% end-to-end figure depends entirely on this number.
+  **Resolve before building the server.** Needs either OpenSky credentials
+  (unlocks historical arrivals for a day-over-day route-stability test) or a
+  free-tier schedule key.
 
 All samples are one metro, one evening. Treat 38% vs 32% as "about the same";
 the 6x gap in the silently-wrong bucket is too large to be sampling noise.
