@@ -238,9 +238,42 @@ if rows:
 
 Verify by picking a row whose flight number starts `DL5` or `AA4` (regional ranges) and checking whether its callsign prefix differs from the marketing carrier. A row where `DL5075` reports callsign `DAL5075` means the field is derived, not operational, and **does not** solve the problem.
 
+**Answered — and the paragraph above is corrected here, not silently, because
+part of it was wrong.** Real key, real call, recorded in full in
+`server/fixtures/README.md`:
+
+The field is `callSign`, and it IS the operating callsign: a real row carries
+`number: "DL 5460"` with `callSign: "EDV5460"` while `airline.icao` is `DAL`
+— Endeavor Air operating a Delta Connection flight. Same pattern on
+`"DL 4659"` → `"SKW4659"` (SkyWest). So far, exactly as hoped.
+
+But **"becomes dead code you keep but never exercise" is wrong.** Coverage is
+partial and time-dependent, not all-or-nothing: measured against the captured
+fixture, only 73% of `status: "Expected"` rows carry a callSign, versus 15%
+of `status: "Unknown"` rows, and only 27% across a wider 12-hour-forward
+capture. **Both join paths are live in production.** The exact-callsign path
+handles the majority of near-term, `Expected`-status flights; the
+number+carrier-candidate+geometry fallback carries everything else, which on
+a wide fetch window is most of the table. Do not delete either path in Task
+4 — both are exercised, not one live and one vestigial.
+
 - [ ] **Step 6: Save the fixture**
 
 Save the response to `server/fixtures/fids-kjfk.json`. Redact nothing — it is public schedule data. Record in `server/fixtures/README.md`: the date captured, the endpoint, the credit cost per call, and the callsign-field verdict.
+
+**Unknown #1 answered — Tier 2, 2 units/call.** Measured directly: one FIDS
+call moved `x-ratelimit-api-units-remaining` 596 → 594 (and
+`x-ratelimit-requests-remaining`, a separate unweighted counter, 2398 →
+2397). Full writeup in `server/fixtures/README.md`.
+
+**Cost discussion this resolves:** the design spec (Task 1's intro,
+`../specs/2026-08-19-server-mediated-route-eta-design.md` line ~204) hedged
+"$5 vs $15" pending which tier FIDS billed at — T1-T3 stays inside the $5/mo
+Pro tier's 6,000 units, T4 would not have. It is now known to be T2: four
+boards × four refreshes/day × 2 units × 30 days ≈ 960 units/month, comfortably
+inside the $5 tier with roughly 6x headroom. **This is the $5 tier, not a
+hedge between $5 and $15.** Task 10 Step 5 measures the real burn against this
+figure once deployed.
 
 - [ ] **Step 7: Commit**
 
@@ -2271,7 +2304,11 @@ Check, and record the numbers in the commit message:
 
 - [ ] **Step 5: Measure the credit burn**
 
-Check your AeroDataBox balance against the figure recorded in Task 1. Four boards × 4 refreshes/day should be well inside the $5 tier. If it is not, reduce the cron frequency before Plan 3 depends on it.
+Check your AeroDataBox balance against the figure recorded in Task 1: FIDS
+measured at Tier 2 (2 units/call), so four boards × four refreshes/day × 30
+days ≈ 960 units/month against the $5 Pro tier's 6,000-unit budget — roughly
+6x headroom, not an open question. If actual burn lands meaningfully above
+this estimate, reduce the cron frequency before Plan 3 depends on it.
 
 - [ ] **Step 6: Commit**
 
