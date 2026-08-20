@@ -752,6 +752,34 @@ describe('matchSchedule', () => {
     expect(matchSchedule('RPA4426', pos.lat, pos.lon, rows)).toBeNull();
   });
 
+  it('returns null when a known operator narrows to zero, rather than falling back to an unnarrowed collision', () => {
+    // Regression case: the real flight is EDV5075 (Delta, operated by
+    // Endeavor). Its DL row is missing from this fetch -- a data gap, not a
+    // table gap. The only row sharing this bare number is an unrelated
+    // WN5075 (Southwest, MDW -> LGA) collision that happens to be landing
+    // right where the aircraft is. EDV's table entry is ['DL'], so this WN
+    // row narrows to zero and must be rejected outright -- an earlier
+    // version fell back to the unnarrowed set here and geometry accepted
+    // the WN row, because corridor excess cannot tell two NYC-bound routes
+    // apart when every board this Worker watches is NYC-area.
+    const rows = [
+      row({
+        carrierIata: 'WN', number: '5075', origIata: 'MDW',
+        origLat: 41.7868, origLon: -87.7522,
+      }),
+    ];
+    expect(matchSchedule('EDV5075', pos.lat, pos.lon, rows)).toBeNull();
+  });
+
+  it('still falls through to geometry when the operator is entirely absent from the table', () => {
+    // ZZZ has no entry in CARRIER_CANDIDATES at all, so candidateCarriers
+    // returns null ("do not constrain") and the single row sharing this
+    // number must be accepted on geometry alone. This is the fallback an
+    // incomplete table is supposed to degrade into -- it must still work.
+    const rows = [row({ carrierIata: 'XY', number: '2100' })];
+    expect(matchSchedule('ZZZ2100', pos.lat, pos.lon, rows)?.carrierIata).toBe('XY');
+  });
+
   it('rejects a row missing coordinates rather than trusting it unchecked', () => {
     const rows = [row({ origLat: null, origLon: null })];
     expect(matchSchedule('EDV5075', pos.lat, pos.lon, rows)).toBeNull();
@@ -859,7 +887,7 @@ export interface Flight {
 Create `server/src/join.ts`:
 
 ```ts
-import { corridorExcessKm, KM_PER_NM } from './geo';
+import { corridorExcessKm } from './geo';
 import type { ScheduleRow } from './types';
 
 /**
@@ -908,9 +936,14 @@ export function callsignKey(callsign: string): CallsignKey | null {
  * observed flying as AA three times and DL twice in one sample — so they list
  * every partner and let geometry break the tie.
  *
- * null means "unknown operator, do not constrain" — geometry alone decides.
- * Adding an entry can only narrow candidates, never widen them, so an incomplete
- * table degrades to more blanks, never to a wrong route.
+ * null means "unknown operator, do not constrain" — geometry alone decides,
+ * carrying whatever residual risk that already implies (see matchSchedule).
+ *
+ * A known operator is different: it can only ever narrow candidates, never
+ * widen them, and matchSchedule returns null rather than widening back to the
+ * unconstrained set when narrowing excludes everything. So an incomplete
+ * table — missing an operator, or listing fewer carriers than it actually
+ * flies for — degrades to more blanks, never to a wrong route.
  */
 const CARRIER_CANDIDATES: Readonly<Record<string, readonly string[]>> = {
   // Mainline: operator is the carrier.
@@ -969,11 +1002,20 @@ export function matchSchedule(
 
   const allowed = candidateCarriers(key.operator);
   if (allowed) {
-    const narrowed = candidates.filter((r) => allowed.includes(r.carrierIata));
-    // If the table excluded everything, the table is wrong for this flight, not
-    // the schedule. Fall back to geometry over the unnarrowed set rather than
-    // returning nothing.
-    if (narrowed.length > 0) candidates = narrowed;
+    // A known operator is positive information, not a hint: we know every
+    // carrier it can fly for, and none of the rows sharing this number
+    // belong to one of them. That means the true row is simply missing from
+    // this fetch -- a same-number collision with an unrelated carrier is not
+    // a substitute for it, and geometry cannot be trusted to catch the
+    // substitution: every board this Worker watches is NYC-area, so a wrong
+    // NYC-bound row often sits just as close to the corridor as the right
+    // one. (This is how EDV5075, its real DL row missing from the fetch,
+    // used to lock onto an unrelated WN5075 MDW-LGA row -- corridor excess
+    // was measured against geometrically *impossible* routes like SFO-LAX
+    // seen over New York, never against two equally plausible NYC-bound
+    // ones.) No candidate survives narrowing -> no route, full stop.
+    candidates = candidates.filter((r) => allowed.includes(r.carrierIata));
+    if (candidates.length === 0) return null;
   }
 
   const scored = candidates
@@ -1000,6 +1042,22 @@ function excessFor(r: ScheduleRow, lat: number, lon: number): number | null {
   return corridorExcessKm(lat, lon, r.origLat, r.origLon, r.destLat, r.destLon);
 }
 ```
+
+**Found during implementation:** the first version of the narrowing step let a
+known operator fall back to the unnarrowed candidate set when its carrier
+list excluded every row, on the theory that "the table is wrong for this
+flight, not the schedule." That was wrong, and it shipped a real defect:
+EDV5075 (Delta, operated by Endeavor), with its true DL row missing from the
+fetch, locked onto an unrelated WN5075 (Southwest, MDW-LGA) bare-number
+collision row instead, because corridor excess passed it. The 300 km
+corridor check was measured against geometrically *impossible* routes
+(SFO-LAX seen over New York) — it was never going to discriminate between
+two plausible NYC-bound ones, and every board this Worker watches is
+NYC-area. Fixed below: a known operator that narrows to zero returns null.
+Only a genuinely unknown operator (absent from `CARRIER_CANDIDATES`) falls
+through to unconstrained geometry. Both the code and the test file above
+already reflect the fix; see the `join.ts` commit history for the correction
+commit.
 
 - [ ] **Step 5: Run tests until green**
 

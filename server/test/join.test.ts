@@ -105,6 +105,34 @@ describe('matchSchedule', () => {
     expect(matchSchedule('RPA4426', pos.lat, pos.lon, rows)).toBeNull();
   });
 
+  it('returns null when a known operator narrows to zero, rather than falling back to an unnarrowed collision', () => {
+    // Regression case: the real flight is EDV5075 (Delta, operated by
+    // Endeavor). Its DL row is missing from this fetch -- a data gap, not a
+    // table gap. The only row sharing this bare number is an unrelated
+    // WN5075 (Southwest, MDW -> LGA) collision that happens to be landing
+    // right where the aircraft is. EDV's table entry is ['DL'], so this WN
+    // row narrows to zero and must be rejected outright -- an earlier
+    // version fell back to the unnarrowed set here and geometry accepted
+    // the WN row, because corridor excess cannot tell two NYC-bound routes
+    // apart when every board this Worker watches is NYC-area.
+    const rows = [
+      row({
+        carrierIata: 'WN', number: '5075', origIata: 'MDW',
+        origLat: 41.7868, origLon: -87.7522,
+      }),
+    ];
+    expect(matchSchedule('EDV5075', pos.lat, pos.lon, rows)).toBeNull();
+  });
+
+  it('still falls through to geometry when the operator is entirely absent from the table', () => {
+    // ZZZ has no entry in CARRIER_CANDIDATES at all, so candidateCarriers
+    // returns null ("do not constrain") and the single row sharing this
+    // number must be accepted on geometry alone. This is the fallback an
+    // incomplete table is supposed to degrade into -- it must still work.
+    const rows = [row({ carrierIata: 'XY', number: '2100' })];
+    expect(matchSchedule('ZZZ2100', pos.lat, pos.lon, rows)?.carrierIata).toBe('XY');
+  });
+
   it('rejects a row missing coordinates rather than trusting it unchecked', () => {
     const rows = [row({ origLat: null, origLon: null })];
     expect(matchSchedule('EDV5075', pos.lat, pos.lon, rows)).toBeNull();

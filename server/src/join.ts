@@ -1,4 +1,4 @@
-import { corridorExcessKm, KM_PER_NM } from './geo';
+import { corridorExcessKm } from './geo';
 import type { ScheduleRow } from './types';
 
 /**
@@ -47,9 +47,14 @@ export function callsignKey(callsign: string): CallsignKey | null {
  * observed flying as AA three times and DL twice in one sample — so they list
  * every partner and let geometry break the tie.
  *
- * null means "unknown operator, do not constrain" — geometry alone decides.
- * Adding an entry can only narrow candidates, never widen them, so an incomplete
- * table degrades to more blanks, never to a wrong route.
+ * null means "unknown operator, do not constrain" — geometry alone decides,
+ * carrying whatever residual risk that already implies (see matchSchedule).
+ *
+ * A known operator is different: it can only ever narrow candidates, never
+ * widen them, and matchSchedule returns null rather than widening back to the
+ * unconstrained set when narrowing excludes everything. So an incomplete
+ * table — missing an operator, or listing fewer carriers than it actually
+ * flies for — degrades to more blanks, never to a wrong route.
  */
 const CARRIER_CANDIDATES: Readonly<Record<string, readonly string[]>> = {
   // Mainline: operator is the carrier.
@@ -108,11 +113,20 @@ export function matchSchedule(
 
   const allowed = candidateCarriers(key.operator);
   if (allowed) {
-    const narrowed = candidates.filter((r) => allowed.includes(r.carrierIata));
-    // If the table excluded everything, the table is wrong for this flight, not
-    // the schedule. Fall back to geometry over the unnarrowed set rather than
-    // returning nothing.
-    if (narrowed.length > 0) candidates = narrowed;
+    // A known operator is positive information, not a hint: we know every
+    // carrier it can fly for, and none of the rows sharing this number
+    // belong to one of them. That means the true row is simply missing from
+    // this fetch -- a same-number collision with an unrelated carrier is not
+    // a substitute for it, and geometry cannot be trusted to catch the
+    // substitution: every board this Worker watches is NYC-area, so a wrong
+    // NYC-bound row often sits just as close to the corridor as the right
+    // one. (This is how EDV5075, its real DL row missing from the fetch,
+    // used to lock onto an unrelated WN5075 MDW-LGA row -- corridor excess
+    // was measured against geometrically *impossible* routes like SFO-LAX
+    // seen over New York, never against two equally plausible NYC-bound
+    // ones.) No candidate survives narrowing -> no route, full stop.
+    candidates = candidates.filter((r) => allowed.includes(r.carrierIata));
+    if (candidates.length === 0) return null;
   }
 
   const scored = candidates
