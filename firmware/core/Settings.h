@@ -72,6 +72,7 @@ struct DisplayLayout
     bool showSpeed = true;         // "451kt"
     bool showHeading = true;       // "HDG 094"
     bool showVerticalRate = true;  // "+1200fpm"
+    bool showEta = true;           // "~1h05" / "LANDING"
     bool flightNumberOverVr = true;  // show the flight number in the vertical-rate slot
     // What to show when there are zero flights:
     //   "dots", "clock", "funfact", "clockfact" (default — alternates the two)

@@ -294,6 +294,16 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
             outLines.push_back(origin + ">" + dest);
     }
 
+    // Rendered VERBATIM. eta_text is the server's pre-rounded string -- 5 min
+    // under an hour, 10 over, "LANDING" inside 30nm -- and that rounding is
+    // the honesty policy: the model cannot know about vectoring, holds or
+    // taxi-in. Re-deriving a string from eta_minutes here would give a second
+    // implementation that could disagree with the server's for the same
+    // flight. Empty for every OpenSky/adsb.lol flight and any server flight
+    // with no destination, so this adds nothing for them.
+    if (L.showEta && f.eta_text.length())
+        outLines.push_back(f.eta_text);
+
     if (L.showAircraft)
     {
         String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
@@ -648,6 +658,32 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
         }
         return r;
     };
+    // ETA takes the trailing slot on row 2 ahead of the flight-number/Vr
+    // choice below, INSTEAD of appending as a third item -- Trk plus a
+    // typical 7-8 char ADS-B callsign already uses 18-19 of botCols'
+    // 21 columns at 128px, so adding "ETA:~1h05" (9 chars) alongside both
+    // would overflow by a wide margin in the ordinary case, not just a
+    // pathological one. Worst realistic case with the mutually-exclusive
+    // choice below, botCols=21 at 128px:
+    //   unit=true:  "Trk:230deg"(10) + " " + "ETA:LANDING"(11) = 22 -- over by 1,
+    //               falls through to the unit=false rebuild below
+    //   unit=false: "Trk:230"(7)     + " " + "ETA:LANDING"(11) = 19 -- fits
+    // "LANDING" is eta_text's longest realistic value (formatEta() also
+    // emits "~Nm" <=4 chars and "~HhMM" <=6 chars for any plausible flight
+    // time); eta_text has no unit suffix to drop, so unit only affects Trk's
+    // "deg" here, same as it always did. eta_text is empty for every
+    // OpenSky/adsb.lol flight and any server flight with no destination, so
+    // this preempts the flight number only for server-sourced flights that
+    // resolved a route -- exactly the flights for which "when does it land"
+    // is the more useful of the two.
+    //
+    // This mutual-exclusion trick works for THREE candidates (ETA, flight
+    // number, Vr) sharing one slot; the arithmetic above is hand-verified
+    // for exactly that shape. A fourth candidate wanting this row is the
+    // moment to stop extending this if/else-if chain and instead fill the
+    // row from an ordered (label, value, priority) list against the column
+    // budget -- the same "reconsider the structure, not another conditional"
+    // point FlightDataFetcher.cpp's fetchFlights() notes for its own dispatch.
     auto buildRow2 = [&](bool unit)
     {
         String r;
@@ -657,7 +693,11 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
             if (t.length())
                 r = "Trk:" + t;
         }
-        if (L.flightNumberOverVr)
+        if (L.showEta && f.eta_text.length())
+        {
+            r += (r.length() ? " " : "") + String("ETA:") + f.eta_text;
+        }
+        else if (L.flightNumberOverVr)
         {
             String flt = f.ident.length() ? f.ident : f.ident_icao;
             if (flt.length())
@@ -678,6 +718,19 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     String row2 = buildRow2(true);
     if ((int)row2.length() > botCols)
         row2 = buildRow2(false);
+
+    // Last-resort clamp, not the normal path: every OTHER value composed above
+    // is a formatted number with an inherently bounded width (a heading is
+    // always <=3 digits, etc.), so the unit-drop fallback alone has always been
+    // enough. eta_text is the first piece of this row that is an arbitrary
+    // STRING from the wire with no length cap between the server and here --
+    // fine for any real eta_text (worst realistic case computed above still
+    // fits after the fallback), but a malformed value must not be able to push
+    // text off the edge of the panel. truncateToColumns() is already a no-op
+    // when the row fits (same unconditional-call style as the topCols lines
+    // above), so this changes nothing in the normal case.
+    row1 = truncateToColumns(row1, botCols);
+    row2 = truncateToColumns(row2, botCols);
 
     int16_t by = (row1.length() && row2.length()) ? 40 : 44;
     if (row1.length())

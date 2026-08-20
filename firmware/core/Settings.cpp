@@ -241,6 +241,7 @@ String Settings::toJson() const
     lay["showSpeed"] = layout.showSpeed;
     lay["showHeading"] = layout.showHeading;
     lay["showVerticalRate"] = layout.showVerticalRate;
+    lay["showEta"] = layout.showEta;
     lay["flightNumberOverVr"] = layout.flightNumberOverVr;
     lay["noFlightsMode"] = layout.noFlightsMode;
 
@@ -398,6 +399,7 @@ bool Settings::fromJson(const String &in)
         layout.showSpeed = lay["showSpeed"] | layout.showSpeed;
         layout.showHeading = lay["showHeading"] | layout.showHeading;
         layout.showVerticalRate = lay["showVerticalRate"] | layout.showVerticalRate;
+        layout.showEta = lay["showEta"] | layout.showEta;
         layout.flightNumberOverVr = lay["flightNumberOverVr"] | layout.flightNumberOverVr;
         if (lay.containsKey("noFlightsMode"))
             layout.noFlightsMode = lay["noFlightsMode"].as<String>();
