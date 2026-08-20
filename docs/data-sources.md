@@ -69,19 +69,21 @@ the position source doesn't already supply enrichment (i.e. with OpenSky).
 | **FlightAware AeroAPI** | API key | Paid | Authoritative route/airline/aircraft. Can be the primary source, or a **backup** that only fires when adsbdb misses a flight (so you pay only for the gaps). |
 | **Off** | — | Free | Callsign only, no route/airline/type. |
 
-Results are **cached per aircraft** (`enrichmentCacheSeconds`, default 600 s / 10 min),
-so a loitering plane isn't re-queried every cycle. Route/airline/type don't change
-mid-flight, so you can raise this moderately to cut request volume — but not
-without limit. The cache is keyed by callsign, and an aircraft changes callsign
-between legs, so a long TTL mainly costs you freshness on aircraft that loiter.
-(Before 2026-08 the cache was keyed by the airframe, and a long TTL would pin a
-regional jet to its first leg's route for the whole day.)
+Results are **cached per flight leg** (`enrichmentCacheSeconds`, default 600 s / 10
+min), so a loitering plane isn't re-queried every cycle. Route/airline/type don't
+change mid-flight, so you can raise this moderately to cut request volume — but
+not without limit. The cache is keyed by callsign, and an aircraft changes
+callsign between legs, so a long TTL mainly costs you freshness on aircraft that
+loiter. (Before 2026-08 the cache was keyed by the airframe, and a long TTL
+would pin a regional jet to its first leg's route for the whole day.)
 
 ### Roughly what the paid options cost
 
-Enrichment is billed **per unique aircraft** (the cache dedupes repeats within its
-TTL), so your cost scales with how many distinct aircraft you see per month. A busy
-location near a major airport can see tens of thousands.
+Enrichment is billed **per unique flight leg** (the cache dedupes repeats within
+its TTL by callsign, not by airframe — the same aircraft flying three legs past
+your antenna is three lookups), so your cost scales with how many distinct legs
+you see per month. A busy location near a major airport can see tens of
+thousands.
 
 | Source | ~3k lookups/mo | ~30k lookups/mo | Notes |
 |---|---|---|---|

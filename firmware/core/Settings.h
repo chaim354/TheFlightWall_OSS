@@ -109,7 +109,7 @@ struct Settings
 
     // ---- Flight enrichment (route/airline/aircraft) ----
     EnrichmentSource enrichmentSource = EnrichmentSource::Adsbdb;
-    uint32_t enrichmentCacheSeconds = 600; // cache per-aircraft lookups (cuts requests)
+    uint32_t enrichmentCacheSeconds = 600; // cache per-leg lookups (cuts requests)
     // When the free source (adsbdb) is primary and misses a flight, fall back to
     // AeroAPI (only if a key is configured). Keeps AeroAPI as a backup, not the default.
     bool enrichmentFallbackToAeroApi = true;
