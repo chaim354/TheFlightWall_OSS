@@ -12,6 +12,6 @@ BOARDS = "KJFK,KLGA,KEWR,KBOS"
 
 # AERODATABOX_KEY is a secret: wrangler secret put AERODATABOX_KEY
 
-# [[kv_namespaces]]
-# binding = "SCHEDULE"
-# id = "<fill in after: wrangler kv namespace create SCHEDULE>"
+[[kv_namespaces]]
+binding = "SCHEDULE"
+id = "b646c72cb2224f39b179753d618369c7"   # flightwall-schedule
