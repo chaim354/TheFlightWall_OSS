@@ -33,6 +33,36 @@ export interface StoredSchedule {
   index: ScheduleIndex;
 }
 
+/**
+ * Storage abstraction the schedule table is read/written through, so
+ * saveSchedule/loadSchedule (and everything upstream of them, including
+ * handleFlights) don't care whether the backing store is Workers KV or a
+ * file on disk. Two implementations: `kvStorage` below wraps the existing
+ * KV binding unchanged (the Worker keeps its exact current behaviour);
+ * `fileStorage`, in ./fileStorage.ts, backs the Node/Kamal entry point with
+ * a JSON file. That file is kept separate from this one specifically so it
+ * can import `node:fs` -- this module must stay free of Node built-ins,
+ * because index.ts (the Worker entry) imports it, and Wrangler bundles the
+ * Worker straight from this source with no Node-compat shim configured.
+ */
+export interface ScheduleStorage {
+  read(): Promise<StoredSchedule | null>;
+  write(s: StoredSchedule): Promise<void>;
+}
+
+/** Wraps a Workers KV binding. Same key, same JSON shape as before Task 1 --
+ * this is a pure refactor, not a behaviour change, for the Worker path. */
+export function kvStorage(kv: KVNamespace): ScheduleStorage {
+  return {
+    async read(): Promise<StoredSchedule | null> {
+      return await kv.get<StoredSchedule>(KV_KEY, 'json');
+    },
+    async write(s: StoredSchedule): Promise<void> {
+      await kv.put(KV_KEY, JSON.stringify(s));
+    },
+  };
+}
+
 export function indexRows(rows: readonly ScheduleRow[]): ScheduleIndex {
   const idx: ScheduleIndex = { byNumber: {}, byCallsign: {} };
   for (const r of rows) {
@@ -50,13 +80,13 @@ export function lookupByCallsign(idx: ScheduleIndex, callsign: string): Schedule
   return idx.byCallsign[callsign.trim().toUpperCase()] ?? [];
 }
 
-export async function saveSchedule(kv: KVNamespace, rows: readonly ScheduleRow[], nowMs: number): Promise<void> {
+export async function saveSchedule(storage: ScheduleStorage, rows: readonly ScheduleRow[], nowMs: number): Promise<void> {
   const payload: StoredSchedule = { builtAtMs: nowMs, index: indexRows(rows) };
-  await kv.put(KV_KEY, JSON.stringify(payload));
+  await storage.write(payload);
 }
 
-export async function loadSchedule(kv: KVNamespace): Promise<StoredSchedule | null> {
-  return await kv.get<StoredSchedule>(KV_KEY, 'json');
+export async function loadSchedule(storage: ScheduleStorage): Promise<StoredSchedule | null> {
+  return await storage.read();
 }
 
 export function isStale(s: StoredSchedule | null, nowMs: number): boolean {

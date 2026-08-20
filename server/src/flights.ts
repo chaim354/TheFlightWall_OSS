@@ -1,12 +1,18 @@
 import { fetchAircraft } from './adsblol';
 import { enrich } from './enrich';
 import { callsignKey } from './join';
-import { loadSchedule, isStale, lookupRows, lookupByCallsign } from './schedule/store';
+import { loadSchedule, isStale, lookupRows, lookupByCallsign, type ScheduleStorage } from './schedule/store';
 import { KM_PER_NM } from './geo';
 import type { Flight, ScheduleRow } from './types';
 
+/**
+ * Shared by both entry points. SCHEDULE is the storage abstraction (Task 1),
+ * not a Workers KVNamespace directly -- index.ts adapts its real KV binding
+ * with kvStorage(), server.ts adapts a JSON file with fileStorage(), and
+ * this function never knows the difference.
+ */
 export interface Env {
-  SCHEDULE: KVNamespace;
+  SCHEDULE: ScheduleStorage;
   BOARDS: string;
   AERODATABOX_KEY: string;
 }

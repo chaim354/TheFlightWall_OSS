@@ -1,6 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { indexRows, lookupRows, lookupByCallsign, STALE_AFTER_MS } from '../src/schedule/store';
+import { indexRows, lookupRows, lookupByCallsign, STALE_AFTER_MS, kvStorage, saveSchedule, loadSchedule, KV_KEY } from '../src/schedule/store';
 import type { ScheduleRow } from '../src/types';
+
+// Minimal in-memory stand-in for the Workers KVNamespace binding, matching
+// the one in test/flights.test.ts -- only get/put, only the 'json' get
+// overload, no Miniflare and no real network.
+class FakeKV {
+  private store = new Map<string, string>();
+
+  async get(key: string, type?: string): Promise<unknown> {
+    const raw = this.store.get(key);
+    if (raw === undefined) return null;
+    return type === 'json' ? JSON.parse(raw) : raw;
+  }
+
+  async put(key: string, value: string): Promise<void> {
+    this.store.set(key, value);
+  }
+}
 
 // NOTE: this file covers only the KV-indexing half of Task 7
 // (indexRows/lookupRows/lookupByCallsign/STALE_AFTER_MS). The FIDS-parsing
@@ -47,5 +64,29 @@ describe('indexRows / lookupRows', () => {
   it('declares a staleness window longer than the refresh interval', () => {
     // Cron runs every 6h; the table must not read as stale between runs.
     expect(STALE_AFTER_MS).toBeGreaterThan(6 * 60 * 60 * 1000);
+  });
+});
+
+describe('kvStorage (Task 1: the Worker-side ScheduleStorage adapter)', () => {
+  const rows: ScheduleRow[] = [
+    { callsign: null, carrierIata: 'DL', number: '5075', origIata: 'CVG', destIata: 'LGA',
+      origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null },
+  ];
+
+  it('round-trips a saveSchedule/loadSchedule pair through the same JSON shape KV stored before Task 1', async () => {
+    const kv = new FakeKV();
+    const storage = kvStorage(kv as unknown as KVNamespace);
+    await saveSchedule(storage, rows, 1_700_000_000_000);
+    const loaded = await loadSchedule(storage);
+    expect(loaded?.builtAtMs).toBe(1_700_000_000_000);
+    expect(lookupRows(loaded!.index, '5075')).toHaveLength(1);
+    // Same key as always -- a reader written against raw KV (or an
+    // in-flight KV dashboard inspection) still finds the table.
+    expect(await kv.get(KV_KEY, 'json')).not.toBeNull();
+  });
+
+  it('returns null, matching a real KV miss, when nothing has been written yet', async () => {
+    const storage = kvStorage(new FakeKV() as unknown as KVNamespace);
+    expect(await loadSchedule(storage)).toBeNull();
   });
 });

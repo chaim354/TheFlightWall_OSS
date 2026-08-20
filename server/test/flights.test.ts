@@ -6,7 +6,7 @@ vi.mock('../src/adsblol', () => ({
 
 import { handleFlights, MAX_FLIGHTS_CEILING, type Env } from '../src/flights';
 import { fetchAircraft } from '../src/adsblol';
-import { KV_KEY, indexRows, STALE_AFTER_MS } from '../src/schedule/store';
+import { KV_KEY, indexRows, STALE_AFTER_MS, kvStorage } from '../src/schedule/store';
 import type { Aircraft, ScheduleRow } from '../src/types';
 
 // A minimal in-memory stand-in for the Workers KVNamespace binding. Only
@@ -29,8 +29,12 @@ class FakeKV {
   }
 }
 
+// FakeKV's get/put match the KVNamespace shape kvStorage expects, so
+// wrapping it here exercises the real Task 1 adapter -- these 25 tests are
+// also kvStorage's regression coverage, proving it behaves identically to
+// the raw-KV-in-Env code this replaced.
 function mkEnv(kv: FakeKV): Env {
-  return { SCHEDULE: kv as unknown as Env['SCHEDULE'], BOARDS: 'KJFK,KLGA,KEWR,KBOS', AERODATABOX_KEY: 'unused-in-these-tests' };
+  return { SCHEDULE: kvStorage(kv as unknown as KVNamespace), BOARDS: 'KJFK,KLGA,KEWR,KBOS', AERODATABOX_KEY: 'unused-in-these-tests' };
 }
 
 async function seedSchedule(kv: FakeKV, rows: ScheduleRow[], builtAtMs: number): Promise<void> {
@@ -337,10 +341,10 @@ describe('handleFlights: schedule staleness', () => {
     const throwingKv = {
       get: vi.fn().mockRejectedValue(new Error('KV unavailable')),
       put: vi.fn(),
-    } as unknown as Env['SCHEDULE'];
+    } as unknown as KVNamespace;
     const res = await handleFlights(
       mkUrl({ lat: LAT, lon: LON }),
-      { SCHEDULE: throwingKv, BOARDS: 'KJFK', AERODATABOX_KEY: 'x' },
+      { SCHEDULE: kvStorage(throwingKv), BOARDS: 'KJFK', AERODATABOX_KEY: 'x' },
       Date.now(),
     );
     expect(res.status).toBe(200);
