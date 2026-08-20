@@ -451,6 +451,7 @@ Row shape (every field optional in practice):
 #include "adapters/AdsbLolFetcher.h"
 #include "core/Settings.h"
 #include "utils/GeoUtils.h"
+#include "utils/ServerJson.h"
 #include <esp_heap_caps.h>
 
 static constexpr const char *kHost = "https://api.adsb.lol";
@@ -464,6 +465,25 @@ static constexpr double kNmToKm = 1.852;
 
 // Same safety cap as the other parsers: bounds the output vector, not the parse.
 static constexpr size_t kMaxFlights = 40;
+
+// Optional numeric field -> value-or-NAN, mirroring FlightWallServerFetcher's
+// optNum(). ArduinoJson's `a["field"] | NAN` idiom TYPE-CHECKS before
+// converting (is<float>() must hold, or the default wins) -- but `.isNull() ?
+// NAN : .as<double>()`, used elsewhere in this file until now, does NOT: it
+// only null-checks. A present-but-wrong-typed value (a JSON `true`, an array,
+// an object -- adsb.lol is a third-party feed we don't control) silently
+// coerces under .as<double>(): true becomes 1.0, an array/object becomes 0.0.
+// 0.0 in an altitude field renders as sea level -- the exact "silently renders
+// as fact" failure the "ground" string sentinel below exists to prevent, just
+// arriving through a different, less obvious door. Routing every numeric read
+// through this makes a wrong-typed value degrade to unknown, matching the
+// discipline the "ground" handling already applies to alt_baro's string case.
+static double optNum(JsonObject o, const char *key)
+{
+    JsonVariant v = o[key];
+    const bool present = !v.isNull() && v.is<float>();
+    return optionalNumber(present, present ? v.as<double>() : NAN);
+}
 
 #if defined(BOARD_HAS_PSRAM)
 namespace
@@ -555,8 +575,8 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
             break;
 
         StateVector s;
-        s.lat = a["lat"] | NAN;
-        s.lon = a["lon"] | NAN;
+        s.lat = optNum(a, "lat");
+        s.lon = optNum(a, "lon");
         if (isnan(s.lat) || isnan(s.lon))
             continue;
 
@@ -566,7 +586,9 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
         s.callsign.trim();
 
         // alt_baro is the STRING "ground" for surface aircraft, not a number.
-        // Reading it as a number yields 0, which renders as sea level.
+        // Reading it as a number yields 0, which renders as sea level. This is
+        // a documented SENTINEL, not a type error, so it is handled separately
+        // from -- and before -- the type-safe optNum() read below.
         JsonVariant alt = a["alt_baro"];
         if (alt.is<const char *>())
         {
@@ -576,18 +598,21 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
         else
         {
             s.on_ground = false;
-            double ft = alt.isNull() ? NAN : alt.as<double>();
-            if (isnan(ft) && !a["alt_geom"].isNull())
-                ft = a["alt_geom"].as<double>();
+            double ft = optNum(a, "alt_baro");
+            if (isnan(ft))
+                ft = optNum(a, "alt_geom");
             s.baro_altitude = isnan(ft) ? NAN : ft * kFeetToMeters;
         }
         s.geo_altitude = s.baro_altitude;
 
-        s.velocity = a["gs"].isNull() ? NAN : a["gs"].as<double>() * kKnotsToMetersPerSec;
-        s.heading = a["track"] | NAN;
+        double gsKt = optNum(a, "gs");
+        s.velocity = isnan(gsKt) ? NAN : gsKt * kKnotsToMetersPerSec;
+        s.heading = optNum(a, "track");
 
-        JsonVariant vr = a["baro_rate"].isNull() ? a["geom_rate"] : a["baro_rate"];
-        s.vertical_rate = vr.isNull() ? NAN : vr.as<double>() * kFpmToMetersPerSec;
+        double rateFpm = optNum(a, "baro_rate");
+        if (isnan(rateFpm))
+            rateFpm = optNum(a, "geom_rate");
+        s.vertical_rate = isnan(rateFpm) ? NAN : rateFpm * kFpmToMetersPerSec;
 
         // Inline, and the reason this source removes the aircraft lookup: type
         // is keyed by ICAO24 (the airframe), the one enrichment field that was
@@ -599,15 +624,26 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
         // rotorcraft); OpenSky uses an integer (8 = rotorcraft) and
         // StateVector::category is the OpenSky integer. Translate, or the
         // helicopter check is silently dead for this source.
+        //
+        // Only category-SET A is mapped here. Live sampling also shows
+        // category-set B and beyond on the wire (e.g. "B4", ultralight/
+        // hang-glider under the ADS-B emitter-category scheme) -- those are
+        // real, valid categories, just not ones OpenSky's integer scheme (or
+        // the helicopter check) has a slot for. The cat[0]=='A' guard below
+        // already leaves s.category at its 0 default for anything outside set
+        // A, which is the correct outcome: deliberately ignored, not mismapped
+        // onto a set-A meaning that doesn't apply to it.
         const char *cat = a["category"] | "";
         if (cat[0] == 'A' && cat[1] >= '0' && cat[1] <= '7')
             s.category = (cat[1] - '0') + 1; // A0->1 .. A7->8, matching OpenSky
 
         // Precomputed by the source, in nm/degrees from the query point.
-        s.distance_km = a["dst"].isNull() ? haversineKm(centerLat, centerLon, s.lat, s.lon)
-                                          : a["dst"].as<double>() * kNmToKm;
-        s.bearing_deg = a["dir"].isNull() ? computeBearingDeg(centerLat, centerLon, s.lat, s.lon)
-                                          : a["dir"].as<double>();
+        double dstNm = optNum(a, "dst");
+        s.distance_km = isnan(dstNm) ? haversineKm(centerLat, centerLon, s.lat, s.lon)
+                                     : dstNm * kNmToKm;
+        double dirDeg = optNum(a, "dir");
+        s.bearing_deg = isnan(dirDeg) ? computeBearingDeg(centerLat, centerLon, s.lat, s.lon)
+                                      : dirDeg;
 
         // NOT set: this source carries no route, so enrichment must still run.
         // has_inline_enrichment means "the feed carried a ROUTE".
@@ -634,7 +670,7 @@ print('A7 rows:', [(a.get('flight','').strip(), a.get('t')) for a in ac if a.get
 "
 ```
 
-The existing rotorcraft check is `s.category == 8` (`FlightDataFetcher.cpp`, `is_helicopter`). Confirm `A7` maps to `8` under the formula. If the observed categories do not fit `A0..A7`, adjust and say so in your report.
+The existing rotorcraft check is `s.category == 8` (`FlightDataFetcher.cpp`, `is_helicopter`). Confirm `A7` maps to `8` under the formula. Live sampling also turned up category-set B on the wire (e.g. `B4`, ultralight/hang-glider) alongside `A0..A7` -- the `cat[0] == 'A'` guard already leaves `category` at 0 for those, which is correct (deliberately ignored, not mismapped), not a bug to adjust for.
 
 - [ ] **Step 4: Build and commit**
 
