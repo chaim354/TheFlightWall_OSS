@@ -151,6 +151,21 @@ GET /v1/flights?lat=&lon=&radius_km=&max=8&units=imperial
   provider failure. Rendered normally; surfaced in the web UI only.
 - Absent fields mean "unknown" and MUST render as blank, never as a zero or a
   guess. `to` absent = no destination known = no ETA.
+- **No emitter category, therefore no helicopter badge for server-sourced
+  flights.** In Area mode, `is_helicopter` comes from `StateVector::category`
+  (adsb.lol's string category, e.g. `"A7"`, translated to OpenSky's integer
+  `8` = rotorcraft). The server path bypasses `StateVector` entirely — it
+  returns `FlightInfo` directly — and this contract has no category field at
+  all, so a server-sourced rotorcraft renders with `is_helicopter=false` and
+  never shows the badge. This is not missing data: the Worker's internal
+  `Aircraft.category` (`server/src/types.ts`) already carries the value read
+  from adsb.lol, it is simply never copied onto the outgoing `Flight` in
+  `enrich()` (`server/src/enrich.ts`). The fix is a passthrough field on the
+  contract (e.g. `"heli": true`), not a new upstream source. **Not
+  implemented** — found while wiring Task 6 of
+  [the firmware plan](../plans/2026-08-20-firmware-server-source.md); recorded
+  here and in [the Worker plan](../plans/2026-08-20-flightwall-server-worker.md)
+  so it isn't lost.
 
 ### Schedule refresh (cron, every 6h) — AeroDataBox
 

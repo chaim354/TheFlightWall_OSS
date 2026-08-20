@@ -899,6 +899,17 @@ export interface Flight {
 }
 ```
 
+**Contract gap, found while wiring Plan 3's Task 6 (server dispatch), not fixed
+here:** `Flight` carries no emitter category, so a server-sourced rotorcraft
+can never set the firmware's `is_helicopter` — Area mode gets that from
+`StateVector::category`, which this path bypasses entirely. `Aircraft.category`
+above already holds the value adsb.lol sends (parsed in Task 6's
+`adsblol.ts`); `enrich()` (Task 8) just never copies it onto the `Flight` it
+returns. Whoever extends this contract: the fix is a passthrough field here
+(e.g. `heli: boolean`), translating `Aircraft.category === 'A7'` the same way
+the firmware's `AdsbLolFetcher` already does — not a new provider call. See
+the design spec's Contract section for the full writeup.
+
 - [ ] **Step 4: Write the join**
 
 Create `server/src/join.ts`:
