@@ -21,7 +21,7 @@ Most of what earlier handoffs called "never run on hardware" now IS device-verif
 | `WiFi.setSleep(false)` (`d010d8d`) | **A DISPROVEN NO-OP.** Modem sleep was already off (verified in core source). Harmless but the message frames it as a fix; revert or amend when convenient. |
 
 Both envs (`esp32dev`, `esp32s3`) build clean. Host tests all pass:
-`cd firmware && for t in parsers classify lru buttons clock route; do g++ -std=c++17 test/test_$t.cpp -o /tmp/t_$t && /tmp/t_$t; done`
+`cd firmware && for t in parsers classify lru buttons clock route serverjson; do g++ -std=c++17 test/test_$t.cpp -o /tmp/t_$t && /tmp/t_$t; done`
 
 `main` is stale; everything lives on `flightwall-mini-parity`.
 
@@ -220,4 +220,4 @@ curl -s http://<device-ip>/api/settings -o ~/flightwall-settings-backup.json
 # after uploadfs, POST it back, then re-pick the timezone from the dropdown (now UTC0)
 ```
 
-Host tests: `cd firmware && for t in parsers classify lru buttons clock route; do g++ -std=c++17 test/test_$t.cpp -o /tmp/t_$t && /tmp/t_$t; done`.
+Host tests: `cd firmware && for t in parsers classify lru buttons clock route serverjson; do g++ -std=c++17 test/test_$t.cpp -o /tmp/t_$t && /tmp/t_$t; done`.
