@@ -28,6 +28,15 @@ int main() {
     CHECK(cacheActionFor(true,  false, 30000,  600000, 60000) == CacheAction::SkipNegative); // fresh negative
     CHECK(cacheActionFor(true,  false, 90000,  600000, 60000) == CacheAction::Fetch);        // expired negative -> retry
 
+    // Enrichment cache key: the callsign identifies the LEG and so must win over
+    // the airframe. ICAO24 is only a fallback when there is no callsign.
+    CHECK(strcmp(enrichmentCacheKey("EDV5075", "a1b2c3"), "EDV5075") == 0);
+    CHECK(strcmp(enrichmentCacheKey("", "a1b2c3"), "a1b2c3") == 0);
+    CHECK(strcmp(enrichmentCacheKey(nullptr, "a1b2c3"), "a1b2c3") == 0);
+    CHECK(strcmp(enrichmentCacheKey("EDV5075", ""), "EDV5075") == 0);
+    CHECK(strcmp(enrichmentCacheKey("", ""), "") == 0);
+    CHECK(strcmp(enrichmentCacheKey(nullptr, nullptr), "") == 0);
+
     if (failures == 0) { printf("ALL PASS\n"); return 0; }
     printf("%d FAILURES\n", failures);
     return 1;

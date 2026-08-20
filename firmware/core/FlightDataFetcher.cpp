@@ -194,8 +194,9 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         if (outFlights.size() >= g_settings.maxFlights)
             return;
 
-        // Cache key prefers the stable ICAO24, falling back to callsign.
-        const String key = s.icao24.length() ? s.icao24 : s.callsign;
+        // Key on the CALLSIGN, not the airframe: the route belongs to the leg, and
+        // an aircraft flies several legs a day. See enrichmentCacheKey().
+        const String key = enrichmentCacheKey(s.callsign.c_str(), s.icao24.c_str());
         FlightInfo info;
         if (s.has_inline_enrichment)
         {

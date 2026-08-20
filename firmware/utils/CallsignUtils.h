@@ -39,3 +39,17 @@ inline CacheAction cacheActionFor(bool found, bool valid, unsigned long ageMs,
         return ageMs < positiveTtlMs ? CacheAction::UseValid : CacheAction::Fetch;
     return ageMs < negativeTtlMs ? CacheAction::SkipNegative : CacheAction::Fetch;
 }
+
+// Enrichment cache key. The ROUTE belongs to the flight LEG, not to the airframe:
+// a regional jet flies several legs a day, so keying on ICAO24 served the first
+// leg's route until the TTL expired — and the TTL is user-configurable up to
+// hours. The callsign changes with the leg, so it invalidates naturally. ICAO24
+// stays as the fallback for the rare state vector with no callsign.
+//
+// Returns a pointer into one of the arguments; it does not copy.
+inline const char *enrichmentCacheKey(const char *callsign, const char *icao24)
+{
+    if (callsign && callsign[0] != '\0')
+        return callsign;
+    return (icao24 && icao24[0] != '\0') ? icao24 : "";
+}
