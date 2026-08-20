@@ -10,3 +10,6 @@ firmware/data/*.gz
 # Local screenshots in the repo root (not for publishing). Root-anchored so the
 # tracked build photos under images/ are unaffected.
 /Screenshot*.png
+
+# Worker dependencies (server/ has its own .gitignore for the rest)
+server/node_modules

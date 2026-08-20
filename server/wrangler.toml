@@ -1,0 +1,17 @@
+name = "flightwall-server"
+main = "src/index.ts"
+compatibility_date = "2026-08-20"
+
+# Schedule refresh. Route data is stable day-to-day (measured 94-100%), so this
+# is about picking up the next day's board, not about freshness within a pass.
+[triggers]
+crons = ["0 */6 * * *"]
+
+[vars]
+BOARDS = "KJFK,KLGA,KEWR,KBOS"
+
+# AERODATABOX_KEY is a secret: wrangler secret put AERODATABOX_KEY
+
+# [[kv_namespaces]]
+# binding = "SCHEDULE"
+# id = "<fill in after: wrangler kv namespace create SCHEDULE>"
