@@ -28,10 +28,15 @@ int main() {
     CHECK(strcmp(o, "KJFK") == 0);
     CHECK(strcmp(d, "KLAX") == 0);
 
-    // Full isspace() set is trimmed, not just plain spaces -- matches
-    // Arduino String::trim() (the code path this replaces). A narrower
-    // predicate previously let a trailing CRLF survive into the output.
-    CHECK(parseFirstLeg("EGLL-KJFK\r\n", o, sizeof(o), d, sizeof(d)));
+    // Full isspace() set is trimmed, not just plain spaces -- matches Arduino
+    // String::trim() (the code path this replaces). \v and \f are the two
+    // characters an explicit four-character predicate (space/tab/\r/\n --
+    // the exact wrong fix this was caught against) would miss, so they're
+    // exercised here alongside \r\n: \v leads the origin, \f\r\n trail the
+    // dest. That wrong predicate would still return true for this input
+    // (both segments still fit the buffer with the stray characters baked
+    // in) -- only the strcmp checks below, not the boolean result, catch it.
+    CHECK(parseFirstLeg("\v EGLL-KJFK\f\r\n", o, sizeof(o), d, sizeof(d)));
     CHECK(strcmp(o, "EGLL") == 0);
     CHECK(strcmp(d, "KJFK") == 0);
 
