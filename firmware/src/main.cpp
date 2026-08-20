@@ -33,8 +33,10 @@ Run loop:
 #include "esp_task_wdt.h"
 #include "adapters/OpenSkyFetcher.h"
 #include "adapters/FlightRadar24Fetcher.h"
+#include "adapters/AdsbLolFetcher.h"
 #include "adapters/AeroAPIFetcher.h"
 #include "adapters/AdsbdbFetcher.h"
+#include "adapters/FlightWallServerFetcher.h"
 #include "core/FlightDataFetcher.h"
 #include "core/WebConfigServer.h"
 #include "core/SerialConsole.h"
@@ -47,8 +49,14 @@ Run loop:
 static HttpJson g_http;
 static OpenSkyFetcher g_openSky;
 static FlightRadar24Fetcher g_fr24;
+// Keyless fallback source -- also what the server path itself falls back to
+// when the FlightWall server is unreachable (see FlightDataFetcher).
+static AdsbLolFetcher g_adsbLol;
 static AeroAPIFetcher g_aeroApi;
 static AdsbdbFetcher g_adsbdb;
+// One HTTP call, display-ready flights -- skips Area-mode enrichment entirely
+// when g_settings.positionSource == PositionSource::FlightWallServer.
+static FlightWallServerFetcher g_server;
 static FlightDataFetcher *g_fetcher = nullptr;
 static Hub75Display g_display;
 static WebConfigServer g_web;
@@ -451,7 +459,7 @@ void setup()
 
     g_adsbdb.setHttp(&g_http);
     g_aeroApi.setHttp(&g_http);
-    g_fetcher = new FlightDataFetcher(&g_openSky, &g_fr24, &g_aeroApi, &g_adsbdb);
+    g_fetcher = new FlightDataFetcher(&g_openSky, &g_fr24, &g_aeroApi, &g_adsbdb, &g_adsbLol, &g_server);
 
     // Liveness backstop. loopTask runs on core 1, whose idle task arduino does NOT
     // watch, and loopTask isn't auto-subscribed — so today a hung loop() is silent.

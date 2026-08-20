@@ -4,6 +4,7 @@
 #include <vector>
 #include "interfaces/BaseStateVectorFetcher.h"
 #include "interfaces/BaseFlightFetcher.h"
+#include "adapters/FlightWallServerFetcher.h"
 #include "models/StateVector.h"
 #include "models/FlightInfo.h"
 #include "utils/CallsignUtils.h"
@@ -15,7 +16,9 @@ public:
     FlightDataFetcher(BaseStateVectorFetcher *openSkyState,
                       BaseStateVectorFetcher *fr24State,
                       BaseFlightFetcher *aeroApi,
-                      BaseFlightFetcher *adsbdb);
+                      BaseFlightFetcher *adsbdb,
+                      BaseStateVectorFetcher *adsbLolState,
+                      FlightWallServerFetcher *server);
 
     // Fetches according to the current tracking mode in g_settings, applies
     // filters, caps to maxFlights, and enriches with friendly names + metrics.
@@ -24,6 +27,10 @@ public:
     size_t fetchFlights(std::vector<StateVector> &outStates,
                         std::vector<FlightInfo> &outFlights,
                         bool &ok);
+
+    // Whether the last fetch's schedule data was flagged stale by the server.
+    // Surfaced in the web UI only — a stale schedule still renders normally.
+    bool lastFetchStale() const { return _lastStale; }
 
 private:
     // Wall-clock a single fetch cycle may spend on NETWORK enrichment before it stops
@@ -48,9 +55,19 @@ private:
     BaseStateVectorFetcher *_fr24State;
     BaseFlightFetcher *_aeroApi;
     BaseFlightFetcher *_adsbdb;
+    // Keyless fallback source. Doubles as the server path's OWN fallback when the
+    // FlightWall server is unreachable (see fetchServerMode) — that reuse is why
+    // it is looked up directly rather than only through activeStateFetcher().
+    BaseStateVectorFetcher *_adsbLolState;
+    FlightWallServerFetcher *_server;
 
     // Start of the current fetch cycle, for kEnrichBudgetMs. Set in fetchFlights().
     unsigned long _cycleStartMs = 0;
+
+    // Reset to false at the top of every fetchFlights() call and only ever set true
+    // by a successful, stale-flagged server response — so switching away from
+    // FlightWallServer can't leave a previous cycle's stale flag stuck on.
+    bool _lastStale = false;
 
     // Unsigned subtraction, deliberately: it stays correct across the ~49.7-day millis()
     // wrap, where a naive `millis() >= deadline` would not.
@@ -94,8 +111,39 @@ private:
     size_t fetchAreaMode(std::vector<StateVector> &outStates,
                          std::vector<FlightInfo> &outFlights,
                          bool &ok);
+    // Pure extraction of fetchAreaMode's former body: identical behaviour, source
+    // now a parameter instead of an internal activeStateFetcher() call. The only
+    // reason this exists is so fetchServerMode's fallback can force adsb.lol for
+    // one cycle without mutating g_settings.positionSource. fetchAreaMode itself
+    // is now just `return fetchAreaModeWith(activeStateFetcher(), ...);`.
+    size_t fetchAreaModeWith(BaseStateVectorFetcher *src,
+                             std::vector<StateVector> &outStates,
+                             std::vector<FlightInfo> &outFlights,
+                             bool &ok);
     size_t fetchFlightsMode(std::vector<FlightInfo> &outFlights, bool &ok);
+    // One HTTP call to the FlightWall server; fills outFlights directly and skips
+    // Area-mode enrichment entirely. outStates is unused on the happy path but is
+    // threaded through because the failure path falls back into fetchAreaModeWith,
+    // which needs somewhere to put adsb.lol's state vectors.
+    size_t fetchServerMode(std::vector<StateVector> &outStates,
+                           std::vector<FlightInfo> &outFlights,
+                           bool &ok);
 
     void applyLocalIdentity(const String &callsign, FlightInfo &info);
     bool passesAirlineAllowList(const FlightInfo &info);
+
+    // Single source of truth for is_cargo/is_private plus the hideCargo and
+    // airline-allow-list filters — the POSITIVE-signal design documented at its
+    // definition. `callsign` is the raw broadcast-style identifier tested for
+    // registration shape: s.callsign in Area mode, or the server's `cs` field
+    // (already living in info.ident by the time this runs) for the server path.
+    // Returns false when the flight should be dropped.
+    bool classifyAndFilter(FlightInfo &info, const String &callsign);
+
+    // Vector-wide entry point for a source that hands back a complete FlightInfo
+    // list with no per-candidate early-return point (the FlightWall server).
+    // Implemented purely in terms of classifyAndFilter so consider() (Area mode)
+    // and this (server mode) can never drift apart into different decisions for
+    // the same input.
+    void applyLocalClassification(std::vector<FlightInfo> &flights);
 };

@@ -9,6 +9,12 @@ Supports two tracking modes (driven by g_settings.mode):
 
 Filters (altitude band, on-ground, airline allow-list) and the maxFlights cap are
 applied before the (relatively expensive) name enrichment where possible.
+
+Area mode has a second split, orthogonal to the position-source choice above: the
+FlightWall server (PositionSource::FlightWallServer) short-circuits the whole
+state-vector/enrichment pipeline with fetchServerMode, which fills FlightInfo
+directly from one HTTP call. If the server is unreachable that cycle falls back
+to the ordinary state-vector path forced onto adsb.lol -- see fetchServerMode.
 */
 #include "core/FlightDataFetcher.h"
 #include "utils/AirlineNames.h"
@@ -26,14 +32,27 @@ static constexpr double kMetersPerSecToFpm = 196.850;
 FlightDataFetcher::FlightDataFetcher(BaseStateVectorFetcher *openSkyState,
                                      BaseStateVectorFetcher *fr24State,
                                      BaseFlightFetcher *aeroApi,
-                                     BaseFlightFetcher *adsbdb)
-    : _openSkyState(openSkyState), _fr24State(fr24State), _aeroApi(aeroApi), _adsbdb(adsbdb) {}
+                                     BaseFlightFetcher *adsbdb,
+                                     BaseStateVectorFetcher *adsbLolState,
+                                     FlightWallServerFetcher *server)
+    : _openSkyState(openSkyState), _fr24State(fr24State), _aeroApi(aeroApi), _adsbdb(adsbdb),
+      _adsbLolState(adsbLolState), _server(server) {}
 
 BaseStateVectorFetcher *FlightDataFetcher::activeStateFetcher()
 {
-    return (g_settings.positionSource == PositionSource::FlightRadar24 && _fr24State)
-               ? _fr24State
-               : _openSkyState;
+    switch (g_settings.positionSource)
+    {
+    case PositionSource::FlightRadar24:
+        if (_fr24State) return _fr24State;
+        break;
+    case PositionSource::AdsbLol:
+    case PositionSource::FlightWallServer: // server path runs earlier; this is its fallback
+        if (_adsbLolState) return _adsbLolState;
+        break;
+    default:
+        break;
+    }
+    return _openSkyState;
 }
 
 BaseFlightFetcher *FlightDataFetcher::activeFetcher()
@@ -133,6 +152,46 @@ bool FlightDataFetcher::passesAirlineAllowList(const FlightInfo &info)
                                    info.operator_code);
 }
 
+// Single source of truth for is_cargo/is_private plus the hideCargo and airline
+// allow-list filters. Shared verbatim by Area mode's consider() (per-candidate,
+// via `callsign` = s.callsign) and by applyLocalClassification (the FlightWall
+// server path, via `callsign` = info.ident) so the two can never classify the
+// same flight differently.
+bool FlightDataFetcher::classifyAndFilter(FlightInfo &info, const String &callsign)
+{
+    // POSITIVE-signal classification. is_private requires BOTH no operator AND a
+    // registration-shaped callsign — an airliner always has operator_icao from
+    // its prefix, so it can never be is_private (this was the prior bug).
+    info.is_cargo = isCargoOperator(info.operator_icao.c_str());
+    info.is_private = (info.operator_icao.length() == 0) && isTailNumber(callsign.c_str());
+
+    if (g_settings.filters.hideCargo && info.is_cargo)
+        return false; // optional cargo hide
+
+    if (!passesAirlineAllowList(info))
+        return false;
+
+    return true;
+}
+
+// Vector-wide entry point for a source that hands back a complete FlightInfo list
+// with no per-candidate early-return point (the FlightWall server). Implemented
+// purely in terms of classifyAndFilter so consider() and this can never drift
+// apart into different decisions for the same input.
+//
+// NOTE: unlike consider(), this cannot set is_helicopter -- that comes from the
+// ADS-B emitter category on the raw StateVector (see fetchAreaModeWith), and the
+// server's contract carries no equivalent field. It is left at its FlightInfo
+// default (false, i.e. "unknown"), so the helicopter badge simply does not show
+// for server-sourced rotorcraft rather than risking a wrong positive/negative.
+void FlightDataFetcher::applyLocalClassification(std::vector<FlightInfo> &flights)
+{
+    flights.erase(std::remove_if(flights.begin(), flights.end(),
+                                 [this](FlightInfo &info)
+                                 { return !classifyAndFilter(info, info.ident); }),
+                 flights.end());
+}
+
 size_t FlightDataFetcher::fetchFlights(std::vector<StateVector> &outStates,
                                        std::vector<FlightInfo> &outFlights,
                                        bool &ok)
@@ -142,16 +201,76 @@ size_t FlightDataFetcher::fetchFlights(std::vector<StateVector> &outStates,
     ok = false;
     _cycleStartMs = millis(); // starts the enrichment budget (see kEnrichBudgetMs)
 
+    // Reset every cycle so a source switch away from FlightWallServer -- or a
+    // cycle that falls back to adsb.lol below -- can't leave a previous cycle's
+    // stale flag stuck on.
+    _lastStale = false;
+
+    if (g_settings.mode == TrackingMode::Area &&
+        g_settings.positionSource == PositionSource::FlightWallServer)
+        return fetchServerMode(outStates, outFlights, ok);
+
     if (g_settings.mode == TrackingMode::Flights)
         return fetchFlightsMode(outFlights, ok);
     return fetchAreaMode(outStates, outFlights, ok);
+}
+
+size_t FlightDataFetcher::fetchServerMode(std::vector<StateVector> &outStates,
+                                          std::vector<FlightInfo> &outFlights, bool &ok)
+{
+    // One call, and everything below the wire is already done: joined to the
+    // schedule, implausible routes rejected, ETA computed, units converted,
+    // sorted nearest-first and capped. No enrichment, no per-flight connection.
+    if (_server && _server->fetchFlights(g_settings.serverUrl,
+                                         g_settings.centerLat, g_settings.centerLon,
+                                         g_settings.radiusKm, g_settings.maxFlights,
+                                         outFlights, _lastStale))
+    {
+        // The server's contract resolves a readable name (`al`) but carries no
+        // ICAO operator code, so operator_icao is empty on every flight here.
+        // is_cargo and the airline allow-list both key off operator_icao, so
+        // without this step they would silently never match anything the server
+        // returns. Derive it locally from the callsign first, exactly as every
+        // other skip-enrichment path does (see applyLocalIdentity) -- info.ident
+        // is already the server's raw `cs` field, the same kind of value
+        // s.callsign carries in Area mode.
+        for (FlightInfo &info : outFlights)
+            applyLocalIdentity(info.ident, info);
+
+        // The server cannot know about the device-side airline allow-list or the
+        // cargo/private classification, so those still run here.
+        applyLocalClassification(outFlights);
+        ok = true;
+        return outFlights.size();
+    }
+
+    // Server unreachable. Fall back to the keyless direct path for THIS cycle
+    // rather than failing: a wall that degrades to callsign-plus-metrics beats
+    // one frozen on its last list. The configured source is left unchanged, so
+    // the next cycle tries the server again with no user action.
+    Serial.println("FlightDataFetcher: server unavailable; falling back to adsb.lol");
+    // Defensive, not a fix for an observed leak: every failure path inside
+    // FlightWallServerFetcher::fetchFlights returns before it ever pushes a
+    // row, so outFlights is already empty here. Cheap insurance against that
+    // invariant changing later without this call site being revisited.
+    outFlights.clear();
+    return fetchAreaModeWith(_adsbLolState ? _adsbLolState : _openSkyState,
+                             outStates, outFlights, ok);
 }
 
 size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
                                         std::vector<FlightInfo> &outFlights,
                                         bool &ok)
 {
-    if (!activeStateFetcher()->fetchStateVectors(
+    return fetchAreaModeWith(activeStateFetcher(), outStates, outFlights, ok);
+}
+
+size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
+                                            std::vector<StateVector> &outStates,
+                                            std::vector<FlightInfo> &outFlights,
+                                            bool &ok)
+{
+    if (!src->fetchStateVectors(
             g_settings.centerLat,
             g_settings.centerLon,
             g_settings.radiusKm,
@@ -269,16 +388,10 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
         // and aircraft type fill in when the network provides them.
         applyLocalIdentity(s.callsign, info);
 
-        // POSITIVE-signal classification. is_private requires BOTH no operator AND a
-        // registration-shaped callsign — an airliner always has operator_icao from
-        // its prefix, so it can never be is_private (this was the prior bug).
-        info.is_cargo = isCargoOperator(info.operator_icao.c_str());
-        info.is_private = (info.operator_icao.length() == 0) && isTailNumber(s.callsign.c_str());
-
-        if (g_settings.filters.hideCargo && info.is_cargo)
-            return; // optional cargo hide
-
-        if (!passesAirlineAllowList(info))
+        // POSITIVE-signal classification plus the hideCargo/allow-list filters —
+        // see classifyAndFilter for the shared rule (also used by the FlightWall
+        // server path via applyLocalClassification).
+        if (!classifyAndFilter(info, s.callsign))
             return;
 
         // Metrics from the live ADS-B state vector.
