@@ -1853,7 +1853,25 @@ describe('enrich', () => {
   });
 
   it('falls back to the bare carrier code when the name is unknown', () => {
-    const rows = [{ ...sched[0]!, carrierIata: 'ZZ' }];
+    // DEVIATION FROM THE PLAN: the plan's version of this test spreads
+    // sched[0] (callsign: null) and only overrides carrierIata to 'ZZ'. With
+    // the aircraft's default callsign EDV5075, that row is unreachable: EDV
+    // is a known operator narrowed to carrier candidates ['DL'] in join.ts,
+    // 'ZZ' isn't in that list, so matchSchedule's "known operator narrows to
+    // zero -> null, never fall back to an unnarrowed collision" rule (the
+    // fix from Task 4, join.test.ts "returns null when a known operator
+    // narrows to zero...") rejects the row before enrich() ever calls
+    // airlineName('ZZ'). Verified empirically: matchSchedule('EDV5075', ...,
+    // [{callsign: null, carrierIata: 'ZZ', number: '5075', ...}]) returns
+    // null, so the plan's literal fixture makes f.al null, not 'ZZ', and the
+    // test as written would fail -- not because enrich.ts is wrong (blank on
+    // no-match is exactly the intended behavior), but because the fixture
+    // can never reach the airlineName-fallback line it means to exercise.
+    // Fixed here by giving the row a matching operating callsign, which
+    // takes join.ts's exact-match path -- the one path that skips carrier
+    // narrowing entirely, same as a provider-supplied callsign would in
+    // production.
+    const rows = [{ ...sched[0]!, carrierIata: 'ZZ', callsign: 'EDV5075' }];
     expect(enrich(ac(), rows, { units: 'imperial' })!.al).toBe('ZZ');
   });
 
@@ -1955,6 +1973,24 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
   };
 }
 ```
+
+**Found during implementation:** the Step 1 fixture for 'falls back to the
+bare carrier code when the name is unknown' originally read
+`const rows = [{ ...sched[0]!, carrierIata: 'ZZ' }]` and expected it to match
+the default aircraft callsign `EDV5075`. That row is a dead end: `EDV` is a
+known operator, narrowed by Task 4's `CARRIER_CANDIDATES` to `['DL']`, `'ZZ'`
+is not in that list, and `matchSchedule`'s "known operator narrows to zero →
+null, never fall back to an unnarrowed collision" rule (Task 4's own fix; see
+join.test.ts's "returns null when a known operator narrows to zero...")
+rejects the row before `enrich()` ever reaches the
+`airlineName(row.carrierIata) ?? row.carrierIata` fallback the test means to
+exercise. Task 4's narrowing fix is what makes this fixture unreachable — one
+task's correctness fix retroactively invalidating another task's test data,
+not a bug in either module. Fixed above by giving the row a matching
+operating callsign (`callsign: 'EDV5075'`), which takes join.ts's exact-match
+path instead — the one path that skips carrier narrowing entirely, same as a
+provider-supplied callsign would in production. `enrich.ts` itself needed no
+change; the fixture was the only thing wrong.
 
 - [ ] **Step 4: Run tests until green, then commit**
 
