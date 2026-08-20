@@ -7,6 +7,7 @@ when a NETWORK lookup actually produced route or aircraft data (the caller adds
 local callsign-prefix identity separately, so prefix-only is NOT "enriched").
 */
 #include "adapters/AdsbdbFetcher.h"
+#include "utils/RouteUtils.h"
 
 static const char *kAdsbdbBase = "https://api.adsbdb.com/v0";
 
@@ -103,13 +104,13 @@ bool AdsbdbFetcher::fetchRouteHexdb(const String &callsign, FlightInfo &out)
         return false;
 
     String route = doc["route"] | "";
-    int dash = route.indexOf('-');
-    if (dash < 0)
+    // hexdb returns a whole rotation ("KLAX-KDFW-KLAX"); take the first leg. Taking
+    // first-and-last rendered every round trip as "LAX -> LAX". See RouteUtils.h.
+    char originBuf[8], destBuf[8];
+    if (!parseFirstLeg(route.c_str(), originBuf, sizeof(originBuf), destBuf, sizeof(destBuf)))
         return false;
-    String origin = route.substring(0, dash);
-    String dest = route.substring(route.lastIndexOf('-') + 1); // last leg if multi-stop
-    origin.trim();
-    dest.trim();
+    String origin(originBuf);
+    String dest(destBuf);
     if (origin.length() && out.origin.code_icao.length() == 0)
         out.origin.code_icao = origin;
     if (dest.length() && out.destination.code_icao.length() == 0)
