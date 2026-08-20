@@ -100,11 +100,19 @@
     <input id="openSkyClientSecret" type="password" />
 
     <label>Position source (Area mode)</label>
-    <select id="positionSource">
+    <select id="positionSource" onchange="toggleServerUrl()">
       <option value="opensky">OpenSky — official, needs key above (recommended)</option>
       <option value="fr24">Flightradar24 — unofficial, no key, routes included</option>
+      <option value="adsblol">adsb.lol — free, no key, aircraft type + registration, no route</option>
+      <option value="server">FlightWall server — routes + ETA from a server you run, falls back to adsb.lol</option>
     </select>
-    <small class="help">Flightradar24 is an <b>unofficial scrape</b> of fr24.com for personal use only — it can break or rate-limit, and rows with a route skip the separate enrichment lookup (rows without one, mostly GA/unscheduled traffic, still use it). Best on the S3 (PSRAM). OpenSky stays the default.</small>
+    <small class="help">Flightradar24 is an <b>unofficial scrape</b> of fr24.com for personal use only — it can break or rate-limit, and rows with a route skip the separate enrichment lookup (rows without one, mostly GA/unscheduled traffic, still use it). Best on the S3 (PSRAM). adsb.lol is a free, keyless, community-run ADS-B aggregator — no account, no ToS problem, and it carries aircraft type and registration inline, but <b>no route</b> (enrichment below still runs for that). The FlightWall server is infrastructure you deploy yourself: one HTTP call per cycle returns routes, airline names and ETA already computed, and it falls back to adsb.lol for that cycle if it can't be reached. OpenSky stays the default.</small>
+
+    <div id="serverUrlBox" class="hide">
+      <label>FlightWall server URL</label>
+      <input id="serverUrl" type="text" placeholder="https://flightwall.example.workers.dev" />
+      <small class="help">Base URL of your deployed FlightWall server, no trailing slash. Only used when the position source above is "FlightWall server".</small>
+    </div>
 
     <label>Flight enrichment source (route · airline · aircraft)</label>
     <select id="enrichmentSource">
@@ -180,6 +188,7 @@
     <div class="checks">
       <span class="check"><input type="checkbox" id="showAirlineFlight"><label>Airline + flight</label></span>
       <span class="check"><input type="checkbox" id="showRoute"><label>Route</label></span>
+      <span class="check"><input type="checkbox" id="showEta"><label>ETA</label></span>
       <span class="check"><input type="checkbox" id="showAircraft"><label>Aircraft type</label></span>
       <span class="check"><input type="checkbox" id="showAltitude"><label>Altitude</label></span>
       <span class="check"><input type="checkbox" id="showSpeed"><label>Speed</label></span>
@@ -187,7 +196,7 @@
       <span class="check"><input type="checkbox" id="showVerticalRate"><label>Vertical rate</label></span>
       <span class="check"><input type="checkbox" id="flightNumberOverVr"><label>Flight # (instead of vertical rate)</label></span>
     </div>
-    <small class="help">Only as many lines as physically fit on the panel are drawn.</small>
+    <small class="help">Only as many lines as physically fit on the panel are drawn. ETA needs the FlightWall server position source above (or a server flight with a resolved destination) — it renders blank otherwise, same as an unfilled route.</small>
 
     <div class="sec">Clock</div>
     <label>Time zone</label>
@@ -298,6 +307,13 @@
 
 <script>
 const $ = id => document.getElementById(id);
+// HTML-escape before interpolating into innerHTML. Needed for anything that
+// isn't a fixed firmware string: flight fields ultimately come off the wire
+// (ADS-B callsigns are constrained, but airline name / eta text / a
+// misconfigured or MITM'd FlightWall server's response are not) and the
+// serverUrl field is the one setting that lets this device fetch from a
+// host the user chooses rather than a fixed, built-in one.
+function esc(s){ const d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
 function rgbToHex(r,g,b){return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
@@ -307,7 +323,7 @@ function setPanel(x,y,chain){
   // Big "Mini" panels (>=96 wide, >=48 tall) render two full-width metric rows —
   // auto-enable those layout fields so they fill in.
   if (x*chain >= 96 && y >= 48){
-    ['showAltitude','showSpeed','showHeading','showVerticalRate'].forEach(id => { if($(id)) $(id).checked = true; });
+    ['showAltitude','showSpeed','showHeading','showVerticalRate','showEta'].forEach(id => { if($(id)) $(id).checked = true; });
   }
   toast(`Panel set to ${x*chain}×${y} — metric fields enabled. Save + Restart to apply`);
 }
@@ -318,6 +334,10 @@ function toggleMode(){
   $('areaBox').classList.toggle('hide', flights);
 }
 
+function toggleServerUrl(){
+  $('serverUrlBox').classList.toggle('hide', $('positionSource').value !== 'server');
+}
+
 async function loadSettings(){
   const s = await (await fetch('/api/settings')).json();
   $('wifiSsid').value = s.network.wifiSsid || '';
@@ -326,6 +346,7 @@ async function loadSettings(){
   $('openSkyClientSecret').value = s.api.openSkyClientSecret || '';
   $('aeroApiKey').value = s.api.aeroApiKey || '';
   $('positionSource').value = s.api.positionSource || 'opensky';
+  $('serverUrl').value = s.api.serverUrl || '';
   $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
   $('enrichmentFallbackToAeroApi').checked = s.api.enrichmentFallbackToAeroApi !== false;
 
@@ -342,7 +363,7 @@ async function loadSettings(){
   $('cycleSeconds').value = s.display.cycleSeconds;
   $('fetchIntervalSeconds').value = s.display.fetchIntervalSeconds;
 
-  for (const k of ['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'])
+  for (const k of ['showAirlineFlight','showRoute','showEta','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'])
     $(k).checked = !!s.layout[k];
   $('noFlightsMode').value = s.layout.noFlightsMode || 'dots';
 
@@ -378,6 +399,7 @@ async function loadSettings(){
   $('panelLatchBlanking').value = s.hardware.panelLatchBlanking || 1;
 
   toggleMode();
+  toggleServerUrl();
 }
 
 function collect(){
@@ -385,7 +407,7 @@ function collect(){
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
     network:{ wifiSsid:$('wifiSsid').value, wifiPassword:$('wifiPassword').value },
-    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, positionSource:$('positionSource').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),
@@ -398,7 +420,7 @@ function collect(){
       maxFlights:+$('maxFlights').value, cycleSeconds:+$('cycleSeconds').value,
       fetchIntervalSeconds:+$('fetchIntervalSeconds').value
     },
-    layout:Object.assign(Object.fromEntries(['showAirlineFlight','showRoute','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'].map(k=>[k,$(k).checked])), {noFlightsMode:$('noFlightsMode').value}),
+    layout:Object.assign(Object.fromEntries(['showAirlineFlight','showRoute','showEta','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'].map(k=>[k,$(k).checked])), {noFlightsMode:$('noFlightsMode').value}),
     filters:{
       minAltitudeFt:+$('minAltitudeFt').value, maxAltitudeFt:+$('maxAltitudeFt').value,
       excludeOnGround:$('excludeOnGround').checked,
@@ -475,7 +497,11 @@ async function loadStatus(){
       `<span class="pill">IP ${s.ip||'-'}</span>`+
       `<span class="pill">${s.mode} mode</span>`+
       `<span class="pill">${s.flightCount} flights</span>`+
-      `<span class="pill">heap ${Math.round(s.freeHeap/1024)}k</span>`;
+      `<span class="pill">heap ${Math.round(s.freeHeap/1024)}k</span>`+
+      // Only shown when true -- the FlightWall server itself is degraded
+      // (schedule or position data served from cache after a provider
+      // failure). Flights keep rendering normally either way.
+      (s.serverStale ? `<span class="pill off">server: stale</span>` : '');
     // Board-specific pins, reported by the device (the ESP32 and S3 maps differ).
     if('i2cSda' in s){ const p=$('i2cPins'); if(p) p.textContent = `SDA ${s.i2cSda} / SCL ${s.i2cScl}`; }
     if('adc1Min' in s){ const a=$('adc1Range'); if(a) a.textContent = `${s.adc1Min}-${s.adc1Max}`; }
@@ -492,8 +518,11 @@ async function loadStatus(){
       const m=[]; if('distanceKm'in x)m.push(x.distanceKm.toFixed(1)+'km');
       if('altitudeFt'in x)m.push(x.altitudeFt+'ft'); if('speedKt'in x)m.push(x.speedKt+'kt');
       if('headingDeg'in x)m.push('HDG'+x.headingDeg); if('verticalRateFpm'in x)m.push(x.verticalRateFpm+'fpm');
-      return `<div class="flight"><b>${x.ident||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${x.airline||''}</span><br>
-        <span>${x.origin||'?'} → ${x.destination||'?'} · ${x.aircraft||''}</span>
+      // Server-sourced only (empty/omitted for OpenSky/adsb.lol and any server
+      // flight with no destination) -- verbatim, same rule as the panel.
+      if('etaText'in x)m.push('ETA '+esc(x.etaText));
+      return `<div class="flight"><b>${esc(x.ident)||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${esc(x.airline)}</span><br>
+        <span>${esc(x.origin)||'?'} → ${esc(x.destination)||'?'} · ${esc(x.aircraft)}</span>
         ${m.length?'<br><span>'+m.join(' · ')+'</span>':''}</div>`;
     }).join('') || '<small class="help">No flights currently displayed.</small>';
   }catch(e){}

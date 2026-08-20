@@ -2,7 +2,7 @@
 
 TheFlightWall is an LED wall that shows live information about flights passing your window.
 
-> **About this fork.** This project was **inspired by the original [TheFlightWall](https://github.com/AxisNimble/TheFlightWall_OSS)** (the commercial build sold at [theflightwall.com](https://theflightwall.com)), but it has since diverged almost entirely. The firmware has been essentially rewritten and now shares **almost none of the original code or components**: it drives a **HUB75 RGB matrix** (the original was a WS2812B panel wall), is configured entirely from a built-in **web page**, and uses a new data pipeline (OpenSky + adsbdb/hexdb, with optional AeroAPI or Flightradar24). Full credit for the original concept and build goes to its creators.
+> **About this fork.** This project was **inspired by the original [TheFlightWall](https://github.com/AxisNimble/TheFlightWall_OSS)** (the commercial build sold at [theflightwall.com](https://theflightwall.com)), but it has since diverged almost entirely. The firmware has been essentially rewritten and now shares **almost none of the original code or components**: it drives a **HUB75 RGB matrix** (the original was a WS2812B panel wall), is configured entirely from a built-in **web page**, and uses a new data pipeline (OpenSky + adsbdb/hexdb by default, with optional AeroAPI, Flightradar24, keyless adsb.lol, or a self-hosted FlightWall server that resolves routes and ETA server-side). Full credit for the original concept and build goes to its creators.
 
 This build is at feature parity with the FlightWall Mini: two tracking modes, live flight metrics, filters, and a day/night brightness schedule — all controlled from the web UI, no app required. See [Configuration & Control](#configuration--control-web-ui).
 
@@ -20,6 +20,8 @@ This build is at feature parity with the FlightWall Mini: two tracking modes, li
 - **[adsbdb.com](https://www.adsbdb.com/) + [hexdb.io](https://hexdb.io/)** — free route / airline / aircraft enrichment, no key. *Default.*
 - **[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/)** — optional paid enrichment for authoritative routes.
 - **Flightradar24** — optional, keyless, **unofficial** position+route source (personal use only).
+- **[adsb.lol](https://adsb.lol/)** — optional, keyless, community ADS-B aggregator. No route of its own.
+- **FlightWall server** — optional, a server you deploy yourself; one call per cycle returns routes, airline names and ETA already resolved, falling back to adsb.lol if unreachable.
 
 See [Data API Keys](#data-api-keys) and [`docs/data-sources.md`](docs/data-sources.md) for how each source is used, costs, and trade-offs.
 
@@ -68,7 +70,9 @@ The data for this project consists of two parts:
 1. **Flight positions & callsigns** — public [ADS-B](https://en.wikipedia.org/wiki/Automatic_Dependent_Surveillance%E2%80%93Broadcast) data. Selectable in the web UI:
    - **[OpenSky](https://opensky-network.org)** — *default, free, needs an OAuth client id/secret.*
    - **Flightradar24** — *opt-in, no key.* An **unofficial** scrape of fr24.com's internal `feed.js` — the same JSON the live map uses. When a flight's row includes a route, that one call already has route/airline/aircraft too, so the per-flight enrichment lookup is skipped for it; when it doesn't (mainly non-scheduled/GA traffic), the normal enrichment lookup below still runs. Trade-offs: it **violates Flightradar24's Terms of Service** (personal/educational use only — see business@fr24.com for commercial), the endpoint is undocumented and can break or rate-limit, and it parses the whole area in one shot — so it's intended for the **ESP32-S3 (PSRAM)** and a modest radius. OpenSky remains the default; this is never on unless you select it.
-2. **Flight enrichment** — airline, route (origin/destination), and aircraft type. Always used under OpenSky; under Flightradar24 it still runs for any flight whose row didn't already include a route. Selectable in the web UI:
+   - **[adsb.lol](https://adsb.lol/)** — *opt-in, no key, no account.* A keyless community ADS-B aggregator (ODbL-licensed) — no ToS problem, unlike Flightradar24. Carries aircraft type and registration inline, plus a precomputed distance/bearing, so it replaces the per-flight aircraft lookup too. **Carries no route** — the enrichment lookup below still runs, same as under OpenSky.
+   - **FlightWall server** — *opt-in, needs a server URL.* Not a raw ADS-B feed — a small server *you deploy yourself* that fetches adsb.lol, joins it to airport schedules, and returns routes, resolved airline names, and ETA already computed, all in one HTTP call. Enrichment below does not run under this source; the server already did it. Falls back to adsb.lol (no route, no ETA) for the cycle if it can't be reached, and retries automatically — it never freezes or blanks the wall. See [`docs/superpowers/plans/2026-08-20-flightwall-server-worker.md`](docs/superpowers/plans/2026-08-20-flightwall-server-worker.md) to build and deploy one.
+2. **Flight enrichment** — airline, route (origin/destination), and aircraft type. Always used under OpenSky and adsb.lol; under Flightradar24 it still runs for any flight whose row didn't already include a route; **skipped entirely under the FlightWall server**, which already resolved all three server-side. Selectable in the web UI:
    - **[adsbdb.com](https://www.adsbdb.com/)** — *default, free, no API key.* Callsign → route + airline, ICAO24 → aircraft type.
    - **[FlightAware AeroAPI](https://flightaware.com/aeroapi)** — paid; optional. Can be the primary source, or just a **backup** that only fires when adsbdb misses a flight (so you pay only for the gaps).
    - **Off** — show callsign only.
@@ -128,15 +132,15 @@ Then type commands (`help` lists them all):
 wifi MyNetwork MyPassword
 restart
 ```
-Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <adsbdb|aeroapi|off>`, `mode <area|flights>`, `loc <lat> <lon> <radiusKm>`, `light` / `light watch` (live sensor reading for calibration), `get`, `set <json>`, `erase`. Changes are saved to the device immediately. (The position source — OpenSky vs Flightradar24 — is set from the web UI.)
+Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <adsbdb|aeroapi|off>`, `mode <area|flights>`, `loc <lat> <lon> <radiusKm>`, `light` / `light watch` (live sensor reading for calibration), `get`, `set <json>`, `erase`. Changes are saved to the device immediately. (The position source — OpenSky / Flightradar24 / adsb.lol / FlightWall server, plus the server URL — is normally set from the web UI; there's no *dedicated* shortcut command for it like `opensky`/`aeroapi`/`enrich` above, but `set {"api":{"positionSource":"server","serverUrl":"https://..."}}` reaches the same setting.)
 
 ### What you can configure from the web page
 - **WiFi** — scan + select your network (changes apply after a restart).
-- **API keys & sources** — OpenSky client id/secret and the FlightAware AeroAPI key; dropdowns to pick the **position source** (OpenSky / Flightradar24) and **enrichment source** (adsbdb / AeroAPI / off).
+- **API keys & sources** — OpenSky client id/secret and the FlightAware AeroAPI key; dropdowns to pick the **position source** (OpenSky / Flightradar24 / adsb.lol / FlightWall server, with a URL field for the last one) and **enrichment source** (adsbdb / AeroAPI / off).
 - **Tracking mode**:
   - **Area** — show everything within a radius of a center point (your home/window). An **Auto-detect** button fills the center from IP geolocation (free, no key, approximate — review before saving), with an optional "auto-detect on every boot" toggle.
   - **Flights** — track a specific list of flights by flight number, callsign, or tail.
-- **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, which **fields** appear on each card (airline+flight, route, aircraft, **altitude, speed, heading, vertical rate**), and the **no-flights screen** (clock / aviation fun facts).
+- **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, which **fields** appear on each card (airline+flight, route, **ETA**, aircraft, altitude, speed, heading, vertical rate), and the **no-flights screen** (clock / aviation fun facts). ETA only ever renders for FlightWall-server flights with a resolved destination — blank otherwise, same as an unfilled route.
 - **Filters** — altitude band, hide aircraft on the ground, and an airline allow-list.
 - **Brightness schedule** — separate day/night brightness with configurable night hours, using a **POSIX timezone string** (e.g. `EST5EDT,M3.2.0,M11.1.0`) so daylight-saving transitions are handled automatically.
 - **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (34/35/36/39/33 — ADC2 can't be used with WiFi on), or an I²C **BH1750** lux sensor or **TCS3472** RGBC sensor on SDA=21/SCL=22. Threshold + hysteresis are tunable, and the web UI shows the live reading for calibration.
@@ -168,7 +172,7 @@ The wall renders a **Mini-style flight card**: an airline logo tile on the left,
 Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64. **For a 128×64 panel use `--size 32`** (the big-panel layout draws a 32×32 logo); the renderer auto-fits whatever size you provide. The bundled brand badges are 16×16 and get upscaled when needed.
 
 ### Layouts by panel size
-The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft,Spd:258mph` / `Trk:263deg,Vr:-18ft/s`, with IATA airport codes); **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.
+The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft Spd:258mph` / `Trk:263deg <flight #>`, with IATA airport codes) — the second row shows the flight number or vertical rate depending on the toggle above, except that a resolved ETA (FlightWall server only) takes that slot instead, e.g. `Trk:263deg ETA:~1h05`; **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.
 
 # Credits
 

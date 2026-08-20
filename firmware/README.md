@@ -5,10 +5,10 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 ### What it does
 - **Configures itself over the web** — a built-in `WebServer` + single-page UI (served from LittleFS) replaces the mobile app. WiFi, API keys, location, filters, layout, and schedule are all runtime settings persisted on the device.
 - **Two tracking modes**:
-  - *Area* — OpenSky `states/all` filtered by location/radius; live metrics come from the ADS-B state vector.
+  - *Area* — a selectable position source (OpenSky `states/all`, Flightradar24, or keyless adsb.lol) filtered by location/radius; live metrics come from the ADS-B state vector. A self-hosted **FlightWall server** is the fourth option and works differently: it returns a display-ready flight list directly — metrics, route, airline name and ETA already resolved, no `StateVector` involved — in one call, and falls back to adsb.lol (state-vector metrics, no route/ETA) if unreachable. See `docs/data-sources.md`.
   - *Flights* — a user list of idents/callsigns/tails looked up directly via AeroAPI; metrics from `last_position`.
 - **Enrich flights** (airline / route / aircraft type) from a selectable source: **adsbdb.com** (free, no key — default), **AeroAPI** (paid; usable as primary or as a backup that only fires when adsbdb misses), or off. adsbdb provides the airline name and route, with a hexdb.io fallback; the aircraft field shows the ICAO type code. Results are cached per flight leg to minimize requests.
-- **Render** a Mini-style flight card — airline logo tile on the left, then a configurable set of fields (flight #, route, aircraft, altitude, speed, heading, vertical rate) on the right — on a **HUB75 RGB LED matrix**, cycling up to N flights. Logos load from `data/logos/<ICAO>.rgb565`; airlines without a tile get a brand-style code badge.
+- **Render** a Mini-style flight card — airline logo tile on the left, then a configurable set of fields (flight #, route, ETA, aircraft, altitude, speed, heading, vertical rate) on the right — on a **HUB75 RGB LED matrix**, cycling up to N flights. ETA only ever appears for FlightWall-server flights with a resolved destination. Logos load from `data/logos/<ICAO>.rgb565`; airlines without a tile get a brand-style code badge.
 - **Live web preview** — each frame is composed into an in-RAM `GFXcanvas16` and blitted to the panel; the same buffer is served at `/api/framebuffer` so the web UI mirrors the wall pixel-for-pixel.
 - **Brightness scheduling** — day/night brightness using NTP time.
 - **WiFi provisioning** — falls back to a `FlightWall-Setup` access point with a captive portal when no credentials are saved.
@@ -19,6 +19,8 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - **core/WebConfigServer**: HTTP server + REST API (`/api/settings`, `/api/status`, `/api/flights`, `/api/wifiscan`, `/api/restart`) and captive-portal DNS for setup mode.
 - **core/FlightDataFetcher**: Orchestrates both tracking modes; applies filters + the maxFlights cap; merges metrics; enriches names.
 - **adapters/OpenSkyFetcher**: Queries OpenSky states/all with OAuth; parses and filters by geo. Reads credentials from runtime settings.
+- **adapters/AdsbLolFetcher**: Keyless position source backed by adsb.lol; fills aircraft type, registration, and a precomputed distance/bearing inline, so it replaces the per-flight aircraft lookup as well as the state feed. No route — enrichment still runs on top of it.
+- **adapters/FlightWallServerFetcher**: One GET to a self-hosted FlightWall server; fills a display-ready `FlightInfo` list directly (route, airline name, ETA already computed), skipping Area-mode enrichment entirely. Falls back to `AdsbLolFetcher` for the cycle if the server is unreachable.
 - **adapters/AeroAPIFetcher**: Retrieves flight details + last-position metrics by ident via AeroAPI.
 - **adapters/AdsbdbFetcher**: Free enrichment via adsbdb.com (airline name + route by callsign, ICAO aircraft type by ICAO24), with a hexdb.io fallback.
 - **adapters/Hub75Display**: Composes each frame into a `GFXcanvas16`, blits to the HUB75 panel, and draws the Mini-style logo + layout card; cycles flights; runtime brightness/color/geometry; exposes the framebuffer for the web preview.

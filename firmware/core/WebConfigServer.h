@@ -36,6 +36,11 @@ public:
     // it on demand in handleGetFlights(), rather than re-serializing every fetch.
     void setFlights(const std::vector<FlightInfo> *flights) { _flights = flights; }
     void setLastFetchInfo(int flightCount, const String &note);
+    // FlightDataFetcher::lastFetchStale() from the most recent cycle: the
+    // FlightWall server served schedule or position data from cache after a
+    // provider failure. Flights still render normally either way -- this is
+    // surfaced only so the web UI can show it, not to change any behavior.
+    void setServerStale(bool stale) { _serverStale = stale; }
 
     // Latest ambient light reading, surfaced in /api/status for calibration.
     void setLightStatus(int level, bool dark)
@@ -56,6 +61,7 @@ private:
     const std::vector<FlightInfo> *_flights = nullptr;
     int _lastFlightCount = 0;
     String _lastNote;
+    bool _serverStale = false;
     int _lightLevel = -1;
     bool _lightDark = false;
 

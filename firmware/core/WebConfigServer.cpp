@@ -157,6 +157,10 @@ void WebConfigServer::handleGetStatus()
     doc["mode"] = (g_settings.mode == TrackingMode::Flights) ? "flights" : "area";
     doc["flightCount"] = _lastFlightCount;
     doc["note"] = _lastNote;
+    // FlightWall-server-only: schedule or position data was served from cache
+    // after a provider failure on the last cycle. Always false off the server
+    // source. Flights render normally either way -- informational only.
+    doc["serverStale"] = _serverStale;
     doc["freeHeap"] = (uint32_t)ESP.getFreeHeap();
     doc["lightLevel"] = _lightLevel;
     doc["lightDark"] = _lightDark;
@@ -229,6 +233,16 @@ String WebConfigServer::buildFlightsJson() const
                 if (!isnan(f.vertical_rate_fpm))
                     o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
             }
+            // eta_text/eta_minutes come only from the FlightWall server (empty/NAN
+            // for every OpenSky/adsb.lol flight and any server flight with no
+            // destination), so these are independent of has_metrics above -- the
+            // live list is the fastest way to see whether ETA is arriving at all
+            // without staring at the panel. etaText is the server's pre-rounded
+            // display string; etaMin is the unrounded minutes for debugging.
+            if (f.eta_text.length())
+                o["etaText"] = f.eta_text;
+            if (!isnan(f.eta_minutes))
+                o["etaMin"] = (long)f.eta_minutes;
         }
     }
     String out;

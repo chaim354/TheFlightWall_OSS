@@ -14,7 +14,10 @@ layers are separate, and why the "accurate routes" problem is harder than the
 "where is it" problem.
 
 Out of the box the wall costs **$0**: OpenSky for positions, adsbdb/hexdb for
-enrichment. You only ever *need* OpenSky credentials.
+enrichment. You only ever *need* OpenSky credentials — and if you'd rather not
+register anywhere at all, switching the position source to **adsb.lol** below
+needs no account and no key. It carries no route of its own, but enrichment
+below still runs on top of it exactly as it does on top of OpenSky.
 
 ---
 
@@ -26,6 +29,8 @@ Selectable in the web UI under **API keys → Position source**.
 |---|---|---|---|
 | **OpenSky** *(default)* | OAuth client id/secret (free) | Free | Official, stable, well-documented public API. Streams one aircraft at a time, so its RAM use is flat regardless of how busy your sky is. Recommended. |
 | **Flightradar24** *(opt-in)* | None | Free | **Unofficial** — see the warning below. When the feed row includes a route, it returns position and route/airline/aircraft together, so the per-flight lookup is skipped for that flight. Diversions can benefit from FR24's live tracking, but non-scheduled/GA traffic is usually the opposite case — FR24 lacks a route for those too (see the takeaway below). |
+| **adsb.lol** | None | Free | Keyless community ADS-B aggregator (ODbL-licensed, no ToS problem). Carries aircraft type and registration inline, plus a precomputed distance/bearing, so it replaces the per-flight aircraft lookup too. **Carries no route or airline** — enrichment below still runs for those, same as OpenSky. The out-of-the-box source: works with nothing configured, no account anywhere. |
+| **FlightWall server** | A server URL (below) | Free to self-host | Not a raw ADS-B feed — a server *you deploy* (see [`docs/superpowers/plans/2026-08-20-flightwall-server-worker.md`](superpowers/plans/2026-08-20-flightwall-server-worker.md)) that fetches adsb.lol itself, joins it to airport schedules, and returns routes, resolved airline names, and ETA already computed. One HTTP call per cycle instead of up to `1 + 2×maxFlights`. Needs **Server URL** set below it in the web UI. Enrichment below does not run under this source — the server already did it. If the server can't be reached, that cycle falls back to adsb.lol direct (no route, no ETA) rather than freezing or blanking; it retries the server on the next cycle with no action needed. |
 
 ### ⚠️ About the Flightradar24 source
 
@@ -127,7 +132,12 @@ loc <lat> <lon> <radiusKm>     # center + radius (Area mode)
 status                         # show current config
 ```
 
-The position source (OpenSky vs Flightradar24) is set from the web UI.
+The position source (OpenSky, Flightradar24, adsb.lol, or FlightWall server —
+plus the server URL, when that's the one selected) is set from the web UI.
+There's no *dedicated* serial shortcut for it the way `opensky`/`aeroapi`/
+`enrich` are above — but the generic `set <json>` command (see the top-level
+README's serial section) reaches the same settings, e.g.
+`set {"api":{"positionSource":"server","serverUrl":"https://..."}}`.
 
 **Compile-time seed** (optional): copy `firmware/config/Secrets.h.example` to
 `firmware/config/Secrets.h` (gitignored) to bake WiFi/API credentials in at flash time
