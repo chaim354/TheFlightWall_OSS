@@ -198,12 +198,27 @@ the sky is, which is what makes a JFK-adjacent wall cheap rather than expensive.
 ### Route resolution
 
 ```
-key = (operator prefix, TRAILING digits of the callsign)   EDV5075 -> (EDV, 5075)
-hit = schedule.lookup(key, now)                            -> DL5075: CVG->LGA
+CORRECTED 2026-08-20 -- see below. The original text keyed the schedule lookup
+on (operator prefix, trailing digits). That works as a UNIQUENESS key over
+airborne callsigns, which is what was measured, but it cannot ADDRESS a
+schedule row:
+
+  ADS-B broadcasts the OPERATOR         EDV5075   (Endeavor Air)
+  a schedule row carries the CARRIER    DL5075    (Delta)
+
+Measured on the same n=37 sample, those agree for only 51% of flights. For the
+other 49% -- every regional-operated flight -- (EDV, 5075) is simply not in the
+schedule. The join is therefore:
+
+  1. PREFERRED, when the provider ships an operating callsign on the row:
+     exact string match. No tables, no ambiguity.
+  2. FALLBACK: match the NUMBER alone, then narrow by which carriers this
+     operator actually flies for, then break ties geometrically. Surviving
+     ambiguity yields NO route, never a guess.
 ```
 
-**The key MUST be composite. A bare numeric suffix is not safe.** Measured on 409
-airline callsigns within 250 nm of JFK:
+**Within the airborne population, a bare numeric suffix is not a safe key.**
+Measured on 409 airline callsigns within 250 nm of JFK:
 
 ```
 bare numeric suffix          : 27 collision groups  (7.1% of keys)
@@ -216,11 +231,14 @@ silently picks whichever row it finds first. Adding the operator prefix resolved
 26 of 27 groups; requiring the suffix to be a **trailing** digit run (not the
 first digit run anywhere in the string) resolved the last one.
 
-The operator prefix also constrains which carrier a row may belong to. Mainline
-prefixes map 1:1 to their own IATA code (`DAL`->`DL`, `JBU`->`B6`, `SWA`->`WN`).
-Regional prefixes map to a small set (`EDV`->{DL}, `RPA`->{AA,DL,UA}). Require
-the schedule row's carrier to be in that set; disambiguate any residual tie by
-scheduled time, then by geometry.
+The operator prefix constrains which carrier a row may belong to, and that --
+not addressing -- is its real job in the join. Mainline prefixes map 1:1 to their
+own IATA code (`DAL`->`DL`, `JBU`->`B6`, `SWA`->`WN`). Regional prefixes map to a
+small set (`EDV`->{DL}, `RPA`->{AA,DL,UA}). Require the schedule row's carrier to
+be in that set; disambiguate any residual tie by geometry, then scheduled time.
+
+An incomplete operator table can only widen the candidate set, never point at a
+wrong row, so it degrades to more blanks rather than to a wrong destination.
 
 Measured **93% join rate** (382/409) at scale. Two failure modes found, both must
 be handled:
