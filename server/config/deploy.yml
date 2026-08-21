@@ -17,6 +17,11 @@ image: chaim354/flightwall-server
 servers:
   - 15.204.216.249
 
+# The box rejects root logins ("Please login as the user \"ubuntu\"") -- verified
+# by trying. Kamal defaults to root, so this is required, not cosmetic.
+ssh:
+  user: ubuntu
+
 registry:
   # Docker Hub by default if omitted; set to your own registry's host
   # (e.g. registry.example.com, or ghcr.io for GitHub Container Registry)
