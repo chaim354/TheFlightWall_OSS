@@ -31,7 +31,10 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
   let etaText: string | null = null;
   if (row && row.destLat !== null && row.destLon !== null) {
     const nm = haversineKm(a.lat, a.lon, row.destLat, row.destLon) / KM_PER_NM;
-    etaMin = etaMinutes(nm, a.groundspeedKt ?? Number.NaN);
+    // a.altFt is always feet (source units), independent of opts.units -- the
+    // metric conversion below only affects the *displayed* alt field, not
+    // this value, so the descent floor never needs converting.
+    etaMin = etaMinutes(nm, a.groundspeedKt ?? Number.NaN, a.altFt);
     etaText = formatEta(nm, etaMin);
   }
 

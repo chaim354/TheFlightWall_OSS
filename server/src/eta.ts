@@ -15,6 +15,13 @@
 //
 // That is a 10% error on a transatlantic and a 50% error at 60 nm out, which is
 // exactly the range a viewer is watching.
+//
+// All of the above is horizontal only. It has no opinion on altitude, which
+// is fine right up until an aircraft is horizontally close to its destination
+// while still at cruise -- a hold, a go-around, or a route that overflies its
+// own destination on the way to a later leg. Horizontal distance is not
+// time-to-go when a full descent still remains, so etaMinutes also takes a
+// descent-time floor from altitude; see NOMINAL_DESCENT_FPM below.
 
 /** Distance-to-go, in nm, below which we stop trusting current groundspeed. */
 export const TERMINAL_NM = 60;
@@ -36,22 +43,85 @@ export const TERMINAL_MIN = (TERMINAL_NM / TERMINAL_KT) * 60;
 export const LANDING_NM = 30;
 
 /**
+ * Nominal descent rate, ft/min, used only as a floor -- see etaMinutes.
+ *
+ * Real jets fly 1,500-2,500 fpm during a descent: faster up high, slower near
+ * the ground. This does not model that profile; it only needs one number to
+ * answer "how long does shedding this much altitude take, at minimum".
+ * Deliberately picked from the slow half of that range: a lower rate gives a
+ * LARGER floor, i.e. a LONGER reported ETA. Overstating time remaining is a
+ * rounding error to a viewer; telling them a cruising aircraft is landing is
+ * a false statement of fact. When the two disagree, the floor should err
+ * cautious, never eager.
+ */
+export const NOMINAL_DESCENT_FPM = 1800;
+
+/**
  * Minutes remaining, or null if not estimable.
  *
  * Above TERMINAL_NM the aircraft's own groundspeed does the work — it is
  * genuinely accurate there. Below it groundspeed is already decaying, so the
  * nominal profile takes over and the current value is ignored. The halves meet
  * continuously at TERMINAL_MIN.
+ *
+ * `altitudeFt`, when supplied, adds a descent-time floor on top of that
+ * horizontal figure: time remaining can never be less than the time needed to
+ * lose the altitude at NOMINAL_DESCENT_FPM. This only ever pushes the answer
+ * up, never down, and only binds when the aircraft is both high and
+ * horizontally close -- an aircraft at cruise a stone's throw from its
+ * destination coordinates, which is a real situation (holds, go-arounds,
+ * overflights) and not evidence of an imminent landing. Altitude is optional
+ * and, when missing or not a positive number, contributes no floor at all --
+ * an unknown value must not invent a constraint.
  */
-export function etaMinutes(distanceNm: number, groundspeedKt: number): number | null {
+export function etaMinutes(
+  distanceNm: number,
+  groundspeedKt: number,
+  altitudeFt?: number | null,
+): number | null {
   if (!Number.isFinite(distanceNm) || distanceNm < 0) return null;
-  if (distanceNm <= TERMINAL_NM) return (distanceNm / TERMINAL_KT) * 60;
-  if (!Number.isFinite(groundspeedKt) || groundspeedKt <= 0) return null;
-  return ((distanceNm - TERMINAL_NM) / groundspeedKt) * 60 + TERMINAL_MIN;
+
+  let horizontal: number;
+  if (distanceNm <= TERMINAL_NM) {
+    horizontal = (distanceNm / TERMINAL_KT) * 60;
+  } else {
+    if (!Number.isFinite(groundspeedKt) || groundspeedKt <= 0) return null;
+    horizontal = ((distanceNm - TERMINAL_NM) / groundspeedKt) * 60 + TERMINAL_MIN;
+  }
+
+  if (altitudeFt == null || !Number.isFinite(altitudeFt) || altitudeFt <= 0) return horizontal;
+  const descentFloorMin = altitudeFt / NOMINAL_DESCENT_FPM;
+  return Math.max(horizontal, descentFloorMin);
 }
 
 /**
+ * Minutes remaining, at or below which LANDING may replace a numeric ETA.
+ *
+ * Derived, not hardcoded, the same way TERMINAL_MIN is: it is exactly the
+ * horizontal-only ETA at LANDING_NM under the nominal terminal speed
+ * (30nm / 200kt * 60 = 9min). That means an ordinary descent is completely
+ * unaffected -- inside LANDING_NM, horizontal-only time is always at or under
+ * this by construction, so nothing that used to say LANDING on geometry alone
+ * stops saying it. It only starts to matter once etaMinutes' descent floor
+ * pushes the estimate above it, which happens exactly when the aircraft is
+ * too high to plausibly be seconds from touchdown -- the case this fix
+ * exists for.
+ */
+export const LANDING_MAX_MIN = (LANDING_NM / TERMINAL_KT) * 60;
+
+/**
  * Display string, or null to show nothing.
+ *
+ * LANDING requires BOTH being within LANDING_NM AND a genuinely small ETA
+ * (<= LANDING_MAX_MIN). Proximity alone used to be sufficient, which is
+ * exactly how a cruise-altitude aircraft horizontally near its destination
+ * got reported as landing -- see etaMinutes' altitude floor, which is what
+ * makes etaMin large in that case.
+ *
+ * A null etaMin means we could not estimate at all -- an absence of
+ * information, not evidence of imminent arrival -- so it no longer defaults
+ * to LANDING either; it shows nothing, the same as any other non-estimable
+ * case.
  *
  * Rounded because the model does not support finer precision: it cannot know
  * about vectoring, holds, runway changes or taxi-in, so it lands within ~5 min
@@ -59,8 +129,10 @@ export function etaMinutes(distanceNm: number, groundspeedKt: number): number | 
  * implies a scheduled time.
  */
 export function formatEta(distanceNm: number, etaMin: number | null): string | null {
-  if (Number.isFinite(distanceNm) && distanceNm <= LANDING_NM) return 'LANDING';
   if (etaMin === null || !Number.isFinite(etaMin)) return null;
+  if (Number.isFinite(distanceNm) && distanceNm <= LANDING_NM && etaMin <= LANDING_MAX_MIN) {
+    return 'LANDING';
+  }
 
   if (etaMin < 60) {
     // Nearest 5, but never round down to a bare zero — outside LANDING_NM,

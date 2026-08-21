@@ -137,8 +137,38 @@ describe('enrich: edge cases', () => {
     expect(f.eta_text).toMatch(/^~|^LANDING$/);
   });
 
-  it('reports LANDING with a zero-minute ETA when the aircraft is already at the destination', () => {
+  it('applies the descent floor even at zero horizontal distance -- overhead the destination at cruise altitude is not landing', () => {
+    // This test used to assert eta_min=0 / eta_text='LANDING' here, which
+    // was itself an instance of the WJA2101 bug class at its most extreme:
+    // distance 0 hid the fact that ac()'s default altFt is 18000, i.e. this
+    // aircraft is directly over LGA at cruise altitude (a hold, overflight,
+    // or missed approach), not touching down. Horizontal distance alone
+    // said 0 minutes; it now correctly reflects the descent still owed:
+    // 18000ft / 1800fpm (NOMINAL_DESCENT_FPM) = 10 minutes.
     const f = enrich(ac({ lat: LGA.lat, lon: LGA.lon }), sched, { units: 'imperial' })!;
+    expect(f.eta_min).toBe(10);
+    expect(f.eta_text).toBe('~10m');
+  });
+
+  it('still reports LANDING at zero distance when the aircraft is actually low', () => {
+    // The genuine case the old test above meant to cover: an aircraft
+    // actually near the ground at its destination's coordinates, where the
+    // descent floor (50ft / 1800fpm, about 0.03min) is negligible.
+    const f = enrich(ac({ lat: LGA.lat, lon: LGA.lon, altFt: 50 }), sched, { units: 'imperial' })!;
+    expect(f.eta_min).toBe(0);
+    expect(f.eta_text).toBe('LANDING');
+  });
+
+  it('reports LANDING for a genuinely on-ground aircraft at its destination', () => {
+    // adsblol.ts parses a surface aircraft's alt_baro (the literal string
+    // "ground") to altFt: null, not 0 -- so this is the real shape an
+    // on-ground aircraft arrives in, not a stand-in. A null altitude must
+    // not block LANDING at zero distance: no floor applies, exactly as if
+    // altitude had never been supplied.
+    const f = enrich(
+      ac({ lat: LGA.lat, lon: LGA.lon, altFt: null, groundspeedKt: 0, onGround: true }),
+      sched, { units: 'imperial' },
+    )!;
     expect(f.eta_min).toBe(0);
     expect(f.eta_text).toBe('LANDING');
   });
@@ -160,5 +190,46 @@ describe('enrich: edge cases', () => {
     const metric = enrich(ac(), sched, { units: 'metric' })!;
     expect(imperial.vs).toBe(-1200);
     expect(metric.vs).toBe(-366); // -1200fpm / 3.28084 ft-per-m, sign preserved
+  });
+});
+
+// Named regression test for a real production bug: an aircraft at cruise
+// altitude, horizontally close to its own destination, was reported as
+// "LANDING" because the ETA model only ever looked at horizontal distance.
+describe('enrich: WJA2101 regression', () => {
+  it('does not report LANDING for a cruise-altitude aircraft 8.6nm from its destination', () => {
+    // Observed live: "cs":"WJA2101","from":"ATL","to":"JFK","alt":38000,
+    // "eta_text":"LANDING" -- while the aircraft was ~8.6nm from JFK at
+    // FL380 (38,000ft), still owing a full descent. Horizontal distance
+    // alone put it at ~2.6 minutes out; at a nominal 1800fpm
+    // (NOMINAL_DESCENT_FPM) descending from 38,000ft takes ~21 minutes.
+    const JFK = { lat: 40.6394, lon: -73.7793 };
+    const ATL = { lat: 33.6367, lon: -84.4281 };
+    // 40.782636552971134 is precisely 8.6nm due north of JFK (same
+    // longitude), verified against src/geo.ts's own haversineKm.
+    const acLat = 40.782636552971134;
+    const rows: ScheduleRow[] = [{
+      callsign: 'WJA2101', carrierIata: 'WS', number: '2101',
+      origIata: 'ATL', destIata: 'JFK',
+      origLat: ATL.lat, origLon: ATL.lon, destLat: JFK.lat, destLon: JFK.lon,
+      schedArrEpoch: null,
+    }];
+    const f = enrich(
+      // distanceNm/bearingDeg are the board's own precomputed "distance from
+      // query center" (a separate concept from distance-to-destination) --
+      // set null here with no centerLat/centerLon so dst falls back to 0
+      // rather than asserting something this test isn't about.
+      ac({
+        callsign: 'WJA2101', lat: acLat, lon: JFK.lon, altFt: 38000, groundspeedKt: 320,
+        distanceNm: null, bearingDeg: null,
+      }),
+      rows,
+      { units: 'imperial' },
+    )!;
+    expect(f.to).toBe('JFK');
+    expect(f.alt).toBe(38000);
+    expect(f.eta_min).toBe(21);        // round(38000 / 1800)
+    expect(f.eta_text).not.toBe('LANDING');
+    expect(f.eta_text).toBe('~20m');
   });
 });
