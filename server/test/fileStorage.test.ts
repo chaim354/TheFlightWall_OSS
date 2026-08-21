@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -59,6 +59,21 @@ describe('fileStorage: missing file', () => {
     const storage = fileStorage(join(dir, 'nope', 'schedule.json'));
     await expect(storage.read()).resolves.toBeNull();
   });
+
+  it('does not log anything for the expected first-boot case of no file yet', async () => {
+    // A missing file is the common, unremarkable state on first boot --
+    // logging it every 6h refresh (or every request, before the first
+    // refresh) would just be noise. Contrast with the corrupt-file case
+    // below, which DOES log: this is the "expected" half of that contrast.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const storage = fileStorage(join(dir, 'never-written.json'));
+      await storage.read();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });
 
 describe('fileStorage: corrupt file', () => {
@@ -74,6 +89,26 @@ describe('fileStorage: corrupt file', () => {
     writeFileSync(path, '');
     const storage = fileStorage(path);
     await expect(storage.read()).resolves.toBeNull();
+  });
+
+  it('logs the failure for a genuinely corrupt file, unlike the silent missing-file case', async () => {
+    // Regression guard for a gap found in self-review: the original catch
+    // swallowed every read failure identically with no log line at all --
+    // indistinguishable from "no table yet" even when the real cause was a
+    // permissions error or corrupt data an operator would want to know
+    // about (same failure class as the bare `catch {}` flights.ts's
+    // position-fetch log was written to avoid).
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const path = join(dir, 'schedule.json');
+      writeFileSync(path, 'not json at all');
+      const storage = fileStorage(path);
+      await storage.read();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.join(' ')).toMatch(/schedule file read failed/);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('a corrupt file does not stop a subsequent write from succeeding', async () => {

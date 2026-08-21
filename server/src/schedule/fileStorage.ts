@@ -26,7 +26,17 @@ export function fileStorage(path: string): ScheduleStorage {
       try {
         const raw = await readFile(path, 'utf8');
         return JSON.parse(raw) as StoredSchedule;
-      } catch {
+      } catch (err) {
+        // ENOENT (no table written yet) is the expected, common case on
+        // first boot -- not worth a log line. Anything else -- permission
+        // denied, a disk error, corrupt JSON -- degrades to the same null
+        // per spec, but gets logged first: swallowing it silently would
+        // read as "no schedule yet" forever with no clue why, the same
+        // undiagnosable-in-production gap flights.ts's position-fetch
+        // error log exists to avoid (see the comment there).
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          console.error('schedule file read failed:', err instanceof Error ? err.message : String(err));
+        }
         return null;
       }
     },
