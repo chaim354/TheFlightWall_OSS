@@ -19,7 +19,7 @@ class FakeStorage implements ScheduleStorage {
 
 const row = (number: string): ScheduleRow => ({
   callsign: null, carrierIata: 'DL', number, origIata: 'CVG', destIata: 'LGA',
-  origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null,
+  origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null, revArrEpoch: null,
 });
 
 beforeEach(() => {

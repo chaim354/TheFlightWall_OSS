@@ -305,7 +305,7 @@ describe('handleFlights: schedule staleness', () => {
       callsign: null, carrierIata: 'DL', number: '5075',
       origIata: 'CVG', destIata: 'LGA',
       origLat: 39.0488, origLon: -84.6678, destLat: 40.7769, destLon: -73.8740,
-      schedArrEpoch: null,
+      schedArrEpoch: null, revArrEpoch: null,
     }];
     await seedSchedule(kv, oldSchedule, now - STALE_AFTER_MS - 1000);
     const res = await handleFlights(mkUrl({ lat: LAT, lon: LON }), mkEnv(kv), now);
@@ -326,7 +326,7 @@ describe('handleFlights: schedule staleness', () => {
       callsign: null, carrierIata: 'DL', number: '5075',
       origIata: 'CVG', destIata: 'LGA',
       origLat: 39.0488, origLon: -84.6678, destLat: 40.7769, destLon: -73.8740,
-      schedArrEpoch: null,
+      schedArrEpoch: null, revArrEpoch: null,
     }], now);
     const res = await handleFlights(mkUrl({ lat: LAT, lon: LON }), mkEnv(kv), now);
     const body = (await res.json()) as { stale: boolean };
@@ -352,5 +352,36 @@ describe('handleFlights: schedule staleness', () => {
     expect(body.ok).toBe(true);
     expect(body.stale).toBe(true);
     expect(body.flights).toHaveLength(1); // the aircraft still renders, just with no route
+  });
+});
+
+describe('handleFlights: schedule-time ETA end to end', () => {
+  // enrich.test.ts covers the priority chain itself in isolation; this
+  // covers the one line that actually wires handleFlights' own `nowMs`
+  // parameter into enrich() (src/flights.ts's `enrich(a, rows, opts,
+  // nowMs)` call) -- a real regression risk on its own (e.g. the wrong
+  // variable, or the argument silently dropped) that no purely
+  // enrich()-level test can catch, since those tests supply their own
+  // nowMs directly.
+  it('serves a schedule-derived ETA, sourced from the request\'s own clock, through the real HTTP path', async () => {
+    vi.mocked(fetchAircraft).mockResolvedValue([ac({ hex: 'a1', callsign: 'EDV5075', distanceNm: 10 })]);
+    const kv = new FakeKV();
+    const now = Date.now();
+    const schedArrEpoch = Math.floor(now / 1000) + 45 * 60; // 45 minutes from `now`
+    await seedSchedule(kv, [{
+      callsign: null, carrierIata: 'DL', number: '5075',
+      origIata: 'CVG', destIata: 'LGA',
+      origLat: 39.0488, origLon: -84.6678, destLat: 40.7769, destLon: -73.8740,
+      schedArrEpoch, revArrEpoch: null,
+    }], now);
+    const res = await handleFlights(mkUrl({ lat: LAT, lon: LON }), mkEnv(kv), now);
+    const body = (await res.json()) as {
+      flights: { to: string | null; eta_min: number | null; eta_text: string | null; eta_src: string | null }[];
+    };
+    expect(body.flights).toHaveLength(1);
+    expect(body.flights[0]!.to).toBe('LGA');
+    expect(body.flights[0]!.eta_src).toBe('scheduled');
+    expect(body.flights[0]!.eta_min).toBe(45);
+    expect(body.flights[0]!.eta_text).toBe('~45m');
   });
 });

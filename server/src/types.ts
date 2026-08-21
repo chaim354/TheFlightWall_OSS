@@ -39,6 +39,17 @@ export interface ScheduleRow {
   destLon: number | null;
   /** Scheduled arrival, epoch seconds, for time disambiguation. */
   schedArrEpoch: number | null;
+  /**
+   * The operator's revised/delay-aware arrival estimate, epoch seconds, when
+   * the provider supplies one -- AeroDataBox's `revisedTime`. This is a
+   * DIFFERENT value from `schedArrEpoch`: scheduled is the published
+   * timetable entry and never moves; revised is updated as the flight
+   * actually progresses, so it already reflects a known delay or an early
+   * run. Present far less often than schedArrEpoch (verified against
+   * fixtures/fids-kjfk.json: 259/261 rows carry a scheduled time, 102/261
+   * carry a revised one) -- most rows simply have no update to report yet.
+   */
+  revArrEpoch: number | null;
 }
 
 /** A display-ready flight, in the units the device renders. */
@@ -58,5 +69,14 @@ export interface Flight {
   brg: number;
   eta_min: number | null;
   eta_text: string | null;
-  eta_src: 'physics' | null;
+  /**
+   * Which source produced eta_min/eta_text: 'revised' or 'scheduled' means a
+   * real arrival time from the operator (via the schedule table); 'physics'
+   * means a model estimate from current position/speed/altitude, used when
+   * no usable schedule time exists. A schedule-derived source is a fact
+   * about a plan (and, for 'revised', a delay-aware one); 'physics' is a
+   * guess about the future -- consumers should weight the two differently,
+   * which is the whole reason this is three states and not a boolean.
+   */
+  eta_src: 'revised' | 'scheduled' | 'physics' | null;
 }

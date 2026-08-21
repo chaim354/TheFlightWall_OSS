@@ -20,7 +20,7 @@ const schedule = (builtAtMs: number): StoredSchedule => ({
   builtAtMs,
   index: {
     byNumber: { '5075': [{ callsign: null, carrierIata: 'DL', number: '5075', origIata: 'CVG', destIata: 'LGA',
-      origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null }] },
+      origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null, revArrEpoch: null }] },
     byCallsign: {},
   },
 });

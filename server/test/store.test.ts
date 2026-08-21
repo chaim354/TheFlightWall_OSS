@@ -33,11 +33,11 @@ class FakeKV {
 describe('indexRows / lookupRows', () => {
   const rows: ScheduleRow[] = [
     { callsign: null, carrierIata: 'DL', number: '5075', origIata: 'CVG', destIata: 'LGA',
-      origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null },
+      origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null, revArrEpoch: null },
     { callsign: null, carrierIata: 'AA', number: '5075', origIata: 'DFW', destIata: 'JFK',
-      origLat: 32.9, origLon: -97.0, destLat: 40.64, destLon: -73.78, schedArrEpoch: null },
+      origLat: 32.9, origLon: -97.0, destLat: 40.64, destLon: -73.78, schedArrEpoch: null, revArrEpoch: null },
     { callsign: null, carrierIata: 'UA', number: '1630', origIata: 'ORD', destIata: 'EWR',
-      origLat: 41.98, origLon: -87.9, destLat: 40.69, destLon: -74.17, schedArrEpoch: null },
+      origLat: 41.98, origLon: -87.9, destLat: 40.69, destLon: -74.17, schedArrEpoch: null, revArrEpoch: null },
   ];
 
   it('groups rows by flight number', () => {
@@ -70,7 +70,7 @@ describe('indexRows / lookupRows', () => {
 describe('kvStorage (Task 1: the Worker-side ScheduleStorage adapter)', () => {
   const rows: ScheduleRow[] = [
     { callsign: null, carrierIata: 'DL', number: '5075', origIata: 'CVG', destIata: 'LGA',
-      origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null },
+      origLat: 39.0, origLon: -84.7, destLat: 40.78, destLon: -73.87, schedArrEpoch: null, revArrEpoch: null },
   ];
 
   it('round-trips a saveSchedule/loadSchedule pair through the same JSON shape KV stored before Task 1', async () => {

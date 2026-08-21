@@ -10,6 +10,7 @@ const row = (over: Partial<ScheduleRow>): ScheduleRow => ({
   origLat: 39.0488, origLon: -84.6678,
   destLat: 40.7769, destLon: -73.8740,
   schedArrEpoch: null,
+  revArrEpoch: null,
   ...over,
 });
 

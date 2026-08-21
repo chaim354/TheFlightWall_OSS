@@ -1,5 +1,15 @@
 // Pure ETA model. No I/O.
 //
+// THIS IS NOW THE FALLBACK, not the primary source. enrich.ts prefers a real
+// arrival time from the schedule table (AeroDataBox's revised or scheduled
+// time) whenever one is available -- an operator's own estimate already
+// accounts for climb, cruise, descent, routing, taxi and any actual delay,
+// which is strictly more than a position/speed/altitude snapshot can ever
+// infer. This model still runs, unchanged, whenever no schedule-based time
+// exists: no schedule match, or a match with neither time usable. Everything
+// below describes that fallback model on its own terms; see enrich.ts for
+// how it fits into the larger priority chain.
+//
 // A naive distance/groundspeed is optimistic by a roughly CONSTANT ~10 minutes
 // at any range above the terminal area, because the aircraft always owes the
 // same deceleration whether it is 200 nm out or 800. Measured against the naive

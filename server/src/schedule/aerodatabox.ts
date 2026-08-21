@@ -30,6 +30,24 @@ import type { ScheduleRow } from '../types';
  * `schedArrEpoch` is always `row.arrival.scheduledTime.utc` regardless of
  * which array the row came from.
  *
+ * `revArrEpoch` (from `row.arrival.revisedTime.utc`) is captured the same
+ * way, for the same reason: "the leg's arrival" and "the leg's revised
+ * arrival" are both properties of the `arrival` sub-object regardless of
+ * which top-level array carried the row. VERIFIED, not assumed -- a
+ * departures-array row in the fixture (JU 501, JFK->Belgrade) carries its
+ * `arrival` sub-object WITH an `airport` key (Belgrade, the far end, exactly
+ * as the direction rule above predicts) and both a `scheduledTime` and a
+ * `revisedTime` on that same far-end arrival -- i.e. "when this flight
+ * lands," not "when it left JFK." See the direction tests in
+ * test/fids.test.ts, which assert this for both directions synthetically.
+ *
+ * Also verified: whether a revised time can appear without a scheduled one.
+ * It does not, anywhere in the 261-row fixture (102 rows carry both; 0 carry
+ * revisedTime alone) -- but this code does not lean on that as a guarantee.
+ * `revArrEpoch` is parsed independently of `schedArrEpoch`'s presence, so a
+ * future payload where the two diverge still degrades correctly rather than
+ * silently dropping a revised time because a scheduled one was missing.
+ *
  * Never throws: a malformed payload, a malformed row, or a row with a
  * wrong-typed field degrades to skipping that row (or that field), never to
  * throwing -- same discipline as adsblol.ts's `str()` guard, and for the same
@@ -93,9 +111,11 @@ function collect(
 
     // The row's own `arrival` sub-object is always the scheduled arrival --
     // at this board for an arrivals-array row, at the far end for a
-    // departures-array row -- so no direction branch is needed here.
+    // departures-array row -- so no direction branch is needed here. Same
+    // for the revised time: it lives on the same sub-object, one key over.
     const arrivalSide = m?.arrival as Record<string, unknown> | undefined;
-    const arrivalTime = arrivalSide?.scheduledTime as Record<string, unknown> | undefined;
+    const arrivalScheduled = arrivalSide?.scheduledTime as Record<string, unknown> | undefined;
+    const arrivalRevised = arrivalSide?.revisedTime as Record<string, unknown> | undefined;
 
     out.push({
       callsign: str(m?.callSign) || null,
@@ -107,7 +127,8 @@ function collect(
       destIata: isArrival ? self.iata : farIata,
       destLat: isArrival ? self.lat : farCoord?.lat ?? null,
       destLon: isArrival ? self.lon : farCoord?.lon ?? null,
-      schedArrEpoch: epoch(arrivalTime?.utc),
+      schedArrEpoch: epoch(arrivalScheduled?.utc),
+      revArrEpoch: epoch(arrivalRevised?.utc),
     });
   }
 }

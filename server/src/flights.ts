@@ -98,7 +98,7 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
       }
     }
 
-    const f = enrich(a, rows, { units, centerLat: lat, centerLon: lon });
+    const f = enrich(a, rows, { units, centerLat: lat, centerLon: lon }, nowMs);
     if (f) flights.push(f);
   }
 

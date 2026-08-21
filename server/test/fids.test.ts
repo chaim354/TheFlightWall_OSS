@@ -211,7 +211,10 @@ describe('puts the board airport on the correct end for each direction', () => {
               airport: { icao: 'KCVG', iata: 'CVG' },
               scheduledTime: { utc: '2026-08-20 10:00Z' },
             },
-            arrival: { scheduledTime: { utc: '2026-08-20 12:00Z' } },
+            arrival: {
+              scheduledTime: { utc: '2026-08-20 12:00Z' },
+              revisedTime: { utc: '2026-08-20 12:34Z' },
+            },
           },
         ],
       },
@@ -225,6 +228,10 @@ describe('puts the board airport on the correct end for each direction', () => {
     expect(arr[0]!.destLat).toBeCloseTo(40.6394, 3); // JFK, from the generated table
     expect(arr[0]!.destLon).toBeCloseTo(-73.7793, 3);
     expect(arr[0]!.schedArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:00Z') / 1000));
+    // revArrEpoch is the SAME arrival sub-object's revisedTime, at the same
+    // (board) end as schedArrEpoch -- both describe this flight landing at
+    // JFK, not its departure from CVG.
+    expect(arr[0]!.revArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:34Z') / 1000));
   });
 
   it('departure row: the board is the origin, far end is the destination', () => {
@@ -238,6 +245,7 @@ describe('puts the board airport on the correct end for each direction', () => {
             arrival: {
               airport: { icao: 'KCVG', iata: 'CVG' },
               scheduledTime: { utc: '2026-08-20 12:00Z' },
+              revisedTime: { utc: '2026-08-20 12:34Z' },
             },
           },
         ],
@@ -252,5 +260,91 @@ describe('puts the board airport on the correct end for each direction', () => {
     // Same JSON shape, opposite direction: schedArrEpoch is still the
     // arrival time -- at the far end this time, not at the board.
     expect(dep[0]!.schedArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:00Z') / 1000));
+    // PROBED SPECIFICALLY (not assumed): does arrival.revisedTime mean the
+    // same thing on a departures-array row as it does on an arrivals-array
+    // row above -- "when this flight lands", here at CVG, the far end --
+    // rather than something departure-related? Yes: it lives on the same
+    // `arrival` sub-object as destIata/destLat/destLon above, which this
+    // same test already establishes is the far end (CVG) for a
+    // departures-array row. Confirmed independently against the live
+    // fixture too -- see 'captures a live departures-array row's revised
+    // arrival time' below, using JU 501 (JFK->Belgrade).
+    expect(dep[0]!.revArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:34Z') / 1000));
+  });
+});
+
+describe('revArrEpoch: revised arrival time (AeroDataBox\'s revisedTime, delay-aware)', () => {
+  const rows = parseFids(raw, 'KJFK');
+
+  it('captures a live arrivals-array row\'s revised arrival time, distinct from scheduled', () => {
+    // Real fixture row: AA 16, KSFO->KJFK, scheduled to land 23:09Z but
+    // revised to 23:43Z -- a 34-minute delay the operator already knows
+    // about. This is the exact example the task cites.
+    const r = rows.find((row) => row.carrierIata === 'AA' && row.number === '16');
+    expect(r).toBeDefined();
+    expect(r!.schedArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 23:09Z') / 1000));
+    expect(r!.revArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 23:43Z') / 1000));
+    expect(r!.revArrEpoch! - r!.schedArrEpoch!).toBe(34 * 60);
+  });
+
+  it('captures a live departures-array row\'s revised arrival time at the far end', () => {
+    // Real fixture row: JU 501 (Air Serbia), JFK->Belgrade (a
+    // departures-array row), where both scheduledTime and revisedTime on
+    // the far-end `arrival` sub-object happen to agree (on time, no delay).
+    // Included specifically to ground the direction-probe test above
+    // against a real captured row, not just a synthetic one.
+    const r = rows.find((row) => row.carrierIata === 'JU' && row.number === '501');
+    expect(r).toBeDefined();
+    expect(r!.destIata).toBe('BEG');
+    expect(r!.schedArrEpoch).toBe(Math.floor(Date.parse('2026-08-21 08:20Z') / 1000));
+    expect(r!.revArrEpoch).toBe(Math.floor(Date.parse('2026-08-21 08:20Z') / 1000));
+  });
+
+  it('leaves revArrEpoch null when the provider has no revised estimate to report', () => {
+    // Real fixture row: DL 4984 (IND->JFK) carries a scheduledTime but no
+    // revisedTime -- the common case (102/261 rows in the fixture carry a
+    // revised time; the rest, like this one, do not).
+    const r = rows.find((row) => row.carrierIata === 'DL' && row.number === '4984');
+    expect(r).toBeDefined();
+    expect(r!.schedArrEpoch).not.toBeNull();
+    expect(r!.revArrEpoch).toBeNull();
+  });
+
+  it('never produces a revised time without a scheduled one, on the live fixture', () => {
+    // PROBED (not assumed): does a revised time ever appear without a
+    // scheduled one? Not anywhere in this 261-row live capture -- but
+    // aerodatabox.ts's parser does not rely on that holding, since it reads
+    // scheduledTime and revisedTime independently (see its own comment).
+    // This test pins down the empirical fact for this fixture; it is not a
+    // claim about the parser's own logic, which is covered separately.
+    const revisedWithoutScheduled = rows.filter((r) => r.revArrEpoch !== null && r.schedArrEpoch === null);
+    expect(revisedWithoutScheduled).toHaveLength(0);
+    // Not a vacuous check either -- both the "has revised" and "has
+    // scheduled" populations are non-trivially large in this fixture.
+    expect(rows.filter((r) => r.revArrEpoch !== null).length).toBeGreaterThan(50);
+    expect(rows.filter((r) => r.schedArrEpoch !== null).length).toBeGreaterThan(200);
+  });
+
+  it('parses revArrEpoch independently of schedArrEpoch -- a revised time with no scheduled time still comes through', () => {
+    // Synthetic, because the live fixture never happens to exercise this
+    // shape (see the test above) -- but the parser must not silently drop a
+    // revised time just because scheduledTime is absent, since nothing in
+    // the AeroDataBox contract guarantees they're always paired.
+    const out = parseFids(
+      {
+        arrivals: [
+          {
+            number: 'DL 9999',
+            airline: { iata: 'DL' },
+            departure: { airport: { icao: 'KCVG', iata: 'CVG' } },
+            arrival: { revisedTime: { utc: '2026-08-20 12:34Z' } }, // no scheduledTime
+          },
+        ],
+      },
+      'KJFK',
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.schedArrEpoch).toBeNull();
+    expect(out[0]!.revArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:34Z') / 1000));
   });
 });
