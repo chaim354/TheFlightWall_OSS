@@ -1,5 +1,6 @@
 import { fetchAircraft } from './adsblol';
 import { enrich } from './enrich';
+import { resolveGatedRoute } from './routes/routeLookup';
 import { callsignKey } from './join';
 import { loadSchedule, isStale, lookupRows, lookupByCallsign, type ScheduleStorage } from './schedule/store';
 import { KM_PER_NM } from './geo';
@@ -80,7 +81,10 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
     return json({ ok: false, ts, stale, flights: [] });
   }
 
-  const flights: Flight[] = [];
+  // Aircraft kept alongside its rendered Flight: the route fallback below needs
+  // the aircraft's POSITION to run its corridor gate, and Flight carries only
+  // distance/bearing relative to the query centre, not a latitude/longitude.
+  const pairs: { a: (typeof aircraft)[number]; f: Flight }[] = [];
   for (const a of aircraft) {
     if (excludeGround && a.onGround) continue;
     if (a.altFt !== null && Number.isFinite(minAlt) && a.altFt < minAlt) continue;
@@ -99,9 +103,56 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
     }
 
     const f = enrich(a, rows, { units, centerLat: lat, centerLon: lon }, nowMs);
-    if (f) flights.push(f);
+    if (f) pairs.push({ a, f });
   }
 
-  flights.sort((x, y) => x.dst - y.dst);
-  return json({ ok: true, ts, stale, flights: flights.slice(0, max) });
+  pairs.sort((x, y) => x.f.dst - y.f.dst);
+  const top = pairs.slice(0, max);
+
+  // Last-resort route fill, AFTER the slice on purpose. Only the flights that
+  // will actually be returned are looked up -- at most `max` (8) callsigns per
+  // request rather than one per aircraft in radius, which at a 200km radius is
+  // the difference between 8 lookups and 60. Everything else about this is in
+  // routeLookup.ts, including why a 32%-wrong source is safe behind the gate.
+  await fillMissingRoutes(top, nowMs);
+
+  return json({ ok: true, ts, stale, flights: top.map((p) => p.f) });
+}
+
+/**
+ * Fill origin/destination for flights the schedule table could not route.
+ *
+ * Only ever ADDS a route to a flight that had none -- a schedule match is
+ * strictly better information (it is keyed on the actual leg, and it carries
+ * arrival times these sources do not have) and is never overwritten.
+ *
+ * The ETA is deliberately left alone. adsbdb and hexdb supply no arrival time,
+ * so a flight routed here keeps whatever enrich() already decided, which for a
+ * previously-routeless flight is the physics estimate. Showing a route without
+ * a schedule-derived ETA is honest; inventing one from a route would not be.
+ *
+ * Never throws: one unreachable third-party service must not fail the request
+ * that was otherwise ready to return.
+ */
+async function fillMissingRoutes(
+  pairs: readonly { a: { lat: number; lon: number; callsign: string }; f: Flight }[],
+  nowMs: number,
+): Promise<void> {
+  const missing = pairs.filter((p) => !p.f.from && !p.f.to && p.a.callsign.trim());
+  if (missing.length === 0) return;
+
+  await Promise.all(
+    missing.map(async (p) => {
+      try {
+        const fix = await resolveGatedRoute(p.a.callsign, p.a.lat, p.a.lon, nowMs);
+        if (!fix) return;
+        p.f.from = fix.origIata;
+        p.f.to = fix.destIata;
+      } catch {
+        // resolveGatedRoute already swallows transport failures; this is the
+        // belt-and-braces case (an unexpected throw from parsing or the cache),
+        // and one flight failing to gain a route is not a failed request.
+      }
+    }),
+  );
 }
