@@ -67,6 +67,88 @@ export const LANDING_NM = 30;
 export const NOMINAL_DESCENT_FPM = 1800;
 
 /**
+ * Vertical rate above which an aircraft is treated as genuinely climbing
+ * rather than holding altitude with noise on the reading. ADS-B vertical
+ * rates jitter by a few hundred fpm at cruise.
+ */
+export const CLIMB_VS_FPM = 500;
+
+/**
+ * Altitude at or above which a jet's groundspeed is taken as representative
+ * of the rest of its flight. Below it, while climbing, it is not: the
+ * aircraft is still accelerating, and (mostly) still under the 250kt
+ * indicated limit or only just out of it.
+ */
+export const CRUISE_ALT_FT = 28000;
+
+/**
+ * Groundspeed below which a climbing aircraft is NOT assumed to be a jet
+ * that will accelerate to jet cruise.
+ *
+ * This gate is what keeps the correction below from wrecking slow traffic. A
+ * Cessna 402 climbing out of Saranac Lake for JFK makes ~110kt and will
+ * cruise at ~180 -- projecting it to a jet cruise speed would understate its
+ * ETA by more than half, which is the error this whole file is most careful
+ * to avoid. A jet passing 10,000ft is already doing 280-320kt, comfortably
+ * clear of this line.
+ */
+export const JET_CLIMB_MIN_KT = 200;
+
+/**
+ * Groundspeed a climbing jet is assumed to make good once at cruise.
+ *
+ * Picked from the SLOW end of the real range (a long-haul twin typically
+ * makes 460-500kt over the ground in still air) for the same reason
+ * NOMINAL_DESCENT_FPM is picked slow: it biases the answer toward
+ * overstating time remaining, which is a rounding error to a viewer, rather
+ * than understating it, which is a false statement of fact on a panel with
+ * no room to qualify it.
+ */
+export const NOMINAL_CRUISE_KT = 420;
+
+/**
+ * The speed to extrapolate across the remaining distance.
+ *
+ * WHY THIS EXISTS. The model above extrapolates the aircraft's CURRENT
+ * groundspeed across everything past TERMINAL_NM. That is genuinely accurate
+ * in cruise, which is where an aircraft spends most of a long flight -- but
+ * it is badly wrong during climb-out, and wrong in proportion to how far the
+ * aircraft still has to go. DAL1, JFK->LHR, read ~10h40 against a real ~7h:
+ * ~2,940nm extrapolated at a climb-out 280kt is 10h30, while the same
+ * distance at the ~490kt it would shortly be making is 6h. The aircraft was
+ * never going to fly the Atlantic at 280 knots.
+ *
+ * So when an aircraft is demonstrably still climbing, below cruise altitude,
+ * and already fast enough to be a jet, the current reading is treated as
+ * unrepresentative and a nominal cruise speed is used instead. `Math.max`
+ * rather than a plain substitution: a jet already faster than the nominal
+ * keeps its own, better, number.
+ *
+ * ALL THREE GATES ARE REQUIRED, and each one is load-bearing:
+ *   - climbing, or a cruising aircraft's real speed would be overridden;
+ *   - below CRUISE_ALT_FT, or a step-climb at FL350 -- where groundspeed IS
+ *     representative -- would be too;
+ *   - above JET_CLIMB_MIN_KT, or a piston twin would be projected to jet
+ *     cruise and have its ETA more than halved.
+ *
+ * An unknown altitude or vertical rate means the gates cannot be evaluated,
+ * so no correction is applied -- an absent value must not invent one, the
+ * same rule the descent floor follows.
+ */
+function cruiseProjectionKt(
+  groundspeedKt: number,
+  altitudeFt?: number | null,
+  verticalRateFpm?: number | null,
+): number {
+  if (altitudeFt == null || !Number.isFinite(altitudeFt)) return groundspeedKt;
+  if (verticalRateFpm == null || !Number.isFinite(verticalRateFpm)) return groundspeedKt;
+  if (verticalRateFpm < CLIMB_VS_FPM) return groundspeedKt;
+  if (altitudeFt >= CRUISE_ALT_FT) return groundspeedKt;
+  if (groundspeedKt < JET_CLIMB_MIN_KT) return groundspeedKt;
+  return Math.max(groundspeedKt, NOMINAL_CRUISE_KT);
+}
+
+/**
  * Minutes remaining, or null if not estimable.
  *
  * Above TERMINAL_NM the aircraft's own groundspeed does the work — it is
@@ -88,6 +170,7 @@ export function etaMinutes(
   distanceNm: number,
   groundspeedKt: number,
   altitudeFt?: number | null,
+  verticalRateFpm?: number | null,
 ): number | null {
   if (!Number.isFinite(distanceNm) || distanceNm < 0) return null;
 
@@ -96,7 +179,8 @@ export function etaMinutes(
     horizontal = (distanceNm / TERMINAL_KT) * 60;
   } else {
     if (!Number.isFinite(groundspeedKt) || groundspeedKt <= 0) return null;
-    horizontal = ((distanceNm - TERMINAL_NM) / groundspeedKt) * 60 + TERMINAL_MIN;
+    const kt = cruiseProjectionKt(groundspeedKt, altitudeFt, verticalRateFpm);
+    horizontal = ((distanceNm - TERMINAL_NM) / kt) * 60 + TERMINAL_MIN;
   }
 
   if (altitudeFt == null || !Number.isFinite(altitudeFt) || altitudeFt <= 0) return horizontal;

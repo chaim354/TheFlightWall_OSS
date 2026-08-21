@@ -192,3 +192,76 @@ describe('constants', () => {
     expect(NOMINAL_DESCENT_FPM).toBeLessThanOrEqual(2000);
   });
 });
+
+describe('etaMinutes: climb-out projection', () => {
+  // The model extrapolates current groundspeed across everything past
+  // TERMINAL_NM. That is right in cruise and wrong during climb-out, in
+  // proportion to distance remaining -- which is why it showed up on a
+  // transatlantic and not on a shuttle.
+
+  const JFK_LHR_NM = 3000;
+
+  it('no longer flies the Atlantic at climb-out speed', () => {
+    // THE REGRESSION: DAL1 JFK->LHR read ~10h40 against a real ~7h.
+    const climbing = etaMinutes(JFK_LHR_NM, 280, 9000, 2200)!;
+    const uncorrected = ((JFK_LHR_NM - 60) / 280) * 60 + 18;
+    expect(uncorrected).toBeGreaterThan(600); // ~10h30, the old answer
+    expect(climbing).toBeLessThan(8 * 60);
+    expect(climbing).toBeGreaterThan(6 * 60); // and not overcorrected into fantasy
+  });
+
+  it('leaves a cruising aircraft on its own measured groundspeed', () => {
+    // At cruise the reading is genuinely accurate and must not be overridden
+    // -- including for an aircraft slower than the nominal.
+    const cruising = etaMinutes(JFK_LHR_NM, 400, 35000, 0);
+    expect(cruising).toBeCloseTo(((JFK_LHR_NM - 60) / 400) * 60 + 18, 6);
+  });
+
+  it('does not override a step climb at cruise altitude', () => {
+    // Climbing FL350->FL370 is still cruise; the groundspeed is representative.
+    const stepping = etaMinutes(JFK_LHR_NM, 460, 35000, 900);
+    expect(stepping).toBeCloseTo(((JFK_LHR_NM - 60) / 460) * 60 + 18, 6);
+  });
+
+  it('never slows an aircraft already faster than the nominal', () => {
+    // Math.max, not substitution: a fast jet keeps its own better number.
+    const fast = etaMinutes(JFK_LHR_NM, 520, 20000, 1500);
+    expect(fast).toBeCloseTo(((JFK_LHR_NM - 60) / 520) * 60 + 18, 6);
+  });
+
+  it('does NOT project a slow piston twin to jet cruise', () => {
+    // The gate that stops this fix from causing a worse error than it fixes.
+    // A Cessna 402 climbing out for a 250nm leg at 110kt would otherwise be
+    // told it arrives in 45 minutes instead of about two hours.
+    const puddleJumper = etaMinutes(250, 110, 3000, 800);
+    expect(puddleJumper).toBeCloseTo(((250 - 60) / 110) * 60 + 18, 6);
+    expect(puddleJumper!).toBeGreaterThan(100);
+  });
+
+  it('applies no correction when altitude or vertical rate is unknown', () => {
+    // An absent value must not invent a constraint -- the same rule the
+    // descent floor follows.
+    const plain = ((JFK_LHR_NM - 60) / 280) * 60 + 18;
+    expect(etaMinutes(JFK_LHR_NM, 280, null, 2200)).toBeCloseTo(plain, 6);
+    expect(etaMinutes(JFK_LHR_NM, 280, 9000, null)).toBeCloseTo(plain, 6);
+    expect(etaMinutes(JFK_LHR_NM, 280, 9000)).toBeCloseTo(plain, 6);
+  });
+
+  it('applies no correction to a descending aircraft', () => {
+    const descending = etaMinutes(JFK_LHR_NM, 280, 9000, -1800);
+    expect(descending).toBeCloseTo(((JFK_LHR_NM - 60) / 280) * 60 + 18, 6);
+  });
+
+  it('ignores vertical-rate jitter around level flight', () => {
+    // ADS-B vertical rates wander a few hundred fpm; that is not a climb.
+    const jitter = etaMinutes(JFK_LHR_NM, 300, 20000, 300);
+    expect(jitter).toBeCloseTo(((JFK_LHR_NM - 60) / 300) * 60 + 18, 6);
+  });
+
+  it('leaves short legs inside TERMINAL_NM untouched', () => {
+    // Below TERMINAL_NM groundspeed is not used at all, so there is nothing
+    // to project -- a climbing aircraft close to its destination (a
+    // go-around) must not be affected.
+    expect(etaMinutes(20, 250, 3000, 2000)).toBeCloseTo((20 / 200) * 60, 6);
+  });
+});
