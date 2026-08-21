@@ -1,3 +1,9 @@
 node_modules/
 .wrangler/
 dist/
+
+# Kamal secrets (kamal setup / kamal envify write here) -- never committed.
+.kamal/
+
+# Local file-backed schedule table, when running server.ts outside Docker.
+data/

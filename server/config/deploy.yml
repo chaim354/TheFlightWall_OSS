@@ -1,0 +1,72 @@
+# Kamal 2.x deploy config for flightwall-server (kamal-proxy, not Traefik).
+# Run `kamal` commands from server/ (this file's parent's parent), so it
+# picks up this config/deploy.yml automatically.
+#
+# Every REPLACE_ME below is a genuine placeholder -- there is no real
+# registry or hostname to fill in on this repo's behalf. See README.md
+# ("Deploying with Kamal") for kamal setup, where secrets go, and why the
+# Cloudflare side must be SSL/TLS mode Full with an Origin Certificate,
+# never Flexible.
+
+service: flightwall-server
+
+image: REPLACE_ME_REGISTRY_USERNAME/flightwall-server
+
+# The OVH box (or boxes). A single host is enough here -- this service is
+# one small process with one small on-disk schedule cache, not a fleet.
+servers:
+  - REPLACE_ME_SERVER_IP_OR_HOSTNAME
+
+registry:
+  # Docker Hub by default if omitted; set to your own registry's host
+  # (e.g. registry.example.com, or ghcr.io for GitHub Container Registry)
+  # if you're not using Docker Hub.
+  server: REPLACE_ME_REGISTRY_SERVER
+  username: REPLACE_ME_REGISTRY_USERNAME
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# Most OVH VPS/dedicated boxes are amd64. Delete this block (or set
+# `arch: arm64`) if yours isn't -- a mismatched build here is silent until
+# the container fails to start on the target host.
+builder:
+  arch: amd64
+
+proxy:
+  host: REPLACE_ME_PUBLIC_HOSTNAME  # e.g. flightwall.example.com
+  app_port: 8787                    # matches the Dockerfile's PORT default
+
+  # Cloudflare terminates the user's TLS connection (inbound only) and
+  # proxies to this box; kamal-proxy terminates THAT hop with a Cloudflare
+  # Origin Certificate. This is what SSL/TLS mode "Full" requires -- see
+  # README.md for why "Flexible" is not an option (it would leave the
+  # Cloudflare -> origin hop unencrypted while still showing a padlock to
+  # the visitor). Not `ssl: true`: that tells kamal-proxy to provision its
+  # own Let's Encrypt certificate, which is the wrong certificate for this
+  # setup -- Cloudflare needs the Origin Certificate specifically for Full
+  # mode to trust this box.
+  ssl:
+    certificate_pem: CLOUDFLARE_ORIGIN_CERT_PEM
+    private_key_pem: CLOUDFLARE_ORIGIN_KEY_PEM
+
+  healthcheck:
+    path: /up
+    interval: 10
+    timeout: 5
+
+env:
+  clear:
+    BOARDS: "KJFK,KLGA,KEWR,KBOS"
+  secret:
+    - AERODATABOX_KEY
+
+# The schedule table (server writes it to SCHEDULE_PATH, which the
+# Dockerfile defaults to /app/data/schedule.json) needs to survive a
+# redeploy -- Kamal replaces the container on every deploy, but a named
+# volume outlives that. A missing/fresh volume is fine: fileStorage()
+# treats a missing file as "no table yet," which the app already reads as
+# stale rather than as a failure -- so this is not load-bearing for the
+# service to come up, only for the schedule to survive a redeploy without
+# a re-fetch.
+volumes:
+  - "flightwall_schedule_data:/app/data"

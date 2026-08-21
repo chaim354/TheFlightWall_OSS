@@ -1,0 +1,27 @@
+# Never send these into the build context.
+node_modules
+.wrangler
+dist
+
+# Test-only: not needed to build or run the image, and this image's
+# Dockerfile relies on them being absent (its type-check step runs
+# separately, outside Docker -- see the Dockerfile's own comment).
+test
+fixtures
+
+# Workers-only / dev tooling, irrelevant to the Node/Kamal image.
+wrangler.toml
+tools
+
+# Kamal's own config: deploy.yml (config/) has nothing the image itself
+# needs, and .kamal/ can hold decrypted secrets locally -- must never enter
+# a build context that gets sent to a Docker daemon (which may be remote).
+config
+.kamal
+
+# VCS / editor / OS noise.
+.git
+.gitignore
+.dockerignore
+.DS_Store
+*.md
