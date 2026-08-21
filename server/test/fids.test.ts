@@ -20,7 +20,7 @@ describe('parseFids', () => {
     }
   });
 
-  it('parses "DL 4984" -- stripping the space -- into carrier DL, number 4984', () => {
+  it('parses "DL 4984" -- splitting on the space -- into carrier DL, number 4984', () => {
     // A real row in the fixture: an arrival, KIND (Indianapolis) -> KJFK,
     // with no callSign. Named explicitly because this exact number/space
     // combination is what the task asked this test to cover.
@@ -196,6 +196,187 @@ describe('parseFids', () => {
     expect(out[0]!.origIata).toBe('ZZZ'); // display code still known
     expect(out[0]!.origLat).toBeNull(); // but coordinates are not
     expect(out[0]!.origLon).toBeNull();
+  });
+});
+
+describe('number field carrier/number boundary (regression: the space-collapse bug)', () => {
+  // The bug: `numberStr = str(m?.number).replace(/\s+/g, '')` collapsed the
+  // ONE boundary marker between carrier and digits before a blind
+  // trailing-digit-run regex ever ran. For a carrier ending in a digit --
+  // B6 JetBlue, F9 Frontier, G4 Allegiant, Y4 Volaris, N0/D0/B0/H4/S4 -- that
+  // digit was indistinguishable from the start of the real flight number, so
+  // "B6 1184" was stored as carrier B6, number 61184 instead of 1184.
+  // Measured on the live 2,436-row table: 374 rows (15%) have a
+  // digit-ending carrier; every one was corrupted this way.
+
+  it('parses "B6 1184" into carrier B6, number 1184 -- not 61184, the corrupted reading the bug produced', () => {
+    // The bug report's own example. Not present in the 261-row fixture
+    // (JetBlue's numbers there top out lower), so synthetic -- same payload
+    // shape as every real row, per the module docstring, with airline.iata
+    // supplied exactly as AeroDataBox always sends it.
+    const out = parseFids(
+      {
+        departures: [
+          {
+            number: 'B6 1184',
+            airline: { iata: 'B6' },
+            departure: { scheduledTime: { utc: '2026-08-20 10:00Z' } },
+            arrival: {
+              airport: { icao: 'KBOS', iata: 'BOS' },
+              scheduledTime: { utc: '2026-08-20 12:00Z' },
+            },
+          },
+        ],
+      },
+      'KJFK',
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.carrierIata).toBe('B6');
+    expect(out[0]!.number).toBe('1184');
+  });
+
+  it('parses "B6 15" into carrier B6, number 15 -- not 615', () => {
+    // The bug report's second example -- a short flight number, where the
+    // corrupted reading is easy to mistake for a real (if coincidental)
+    // flight number rather than obvious garbage.
+    const out = parseFids(
+      {
+        departures: [
+          {
+            number: 'B6 15',
+            airline: { iata: 'B6' },
+            departure: { scheduledTime: { utc: '2026-08-20 10:00Z' } },
+            arrival: {
+              airport: { icao: 'KBOS', iata: 'BOS' },
+              scheduledTime: { utc: '2026-08-20 12:00Z' },
+            },
+          },
+        ],
+      },
+      'KJFK',
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.carrierIata).toBe('B6');
+    expect(out[0]!.number).toBe('15');
+  });
+
+  it('parses "AA 1405" -- a real fixture row -- into carrier AA, number 1405', () => {
+    // AA does not end in a digit, so this row was never corrupted by the
+    // bug -- included as the "normal" carrier baseline the task asked for,
+    // confirming the fix does not disturb the common case.
+    const rows = parseFids(raw, 'KJFK');
+    const r = rows.find((row) => row.carrierIata === 'AA' && row.number === '1405');
+    expect(r).toBeDefined();
+  });
+
+  it('derives BOTH carrier and number from the same space-based parse when airline.iata is absent, including for a digit-ending carrier', () => {
+    // The other half of the bug: carrierIata fell back to slicing the
+    // (already space-collapsed) numberStr when airline.iata was missing --
+    // the identical flaw, one layer over. No `airline` field at all here,
+    // forcing that fallback path.
+    const out = parseFids(
+      {
+        departures: [
+          {
+            number: 'B6 1184',
+            departure: { scheduledTime: { utc: '2026-08-20 10:00Z' } },
+            arrival: {
+              airport: { icao: 'KBOS', iata: 'BOS' },
+              scheduledTime: { utc: '2026-08-20 12:00Z' },
+            },
+          },
+        ],
+      },
+      'KJFK',
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.carrierIata).toBe('B6');
+    expect(out[0]!.number).toBe('1184');
+  });
+
+  it('still strips leading zeros after the space-based split: "AA 0032" -> "32"', () => {
+    // Leading-zero handling lives inside the new split helper now, not
+    // inline in `collect` -- pinned separately so that move can't regress it.
+    const out = parseFids(
+      {
+        departures: [
+          {
+            number: 'AA 0032',
+            airline: { iata: 'AA' },
+            departure: { scheduledTime: { utc: '2026-08-20 10:00Z' } },
+            arrival: {
+              airport: { icao: 'KCVG', iata: 'CVG' },
+              scheduledTime: { utc: '2026-08-20 12:00Z' },
+            },
+          },
+        ],
+      },
+      'KJFK',
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.carrierIata).toBe('AA');
+    expect(out[0]!.number).toBe('32');
+  });
+
+  it('never lets a stored number retain its carrier\'s trailing digit -- checked across the whole live fixture, not just one flight', () => {
+    // General regression for the CLASS of bug, not just the two examples
+    // above: for every row in the live fixture whose raw `number` field has
+    // a digit-ending carrier before the space, the stored number must be
+    // the digits AFTER the space -- never the reading you get by collapsing
+    // the space first and taking the trailing digit run of the whole
+    // string, which is exactly what the unfixed parser produced.
+    const rows = parseFids(raw, 'KJFK');
+    const rawRows = [...(raw.arrivals ?? []), ...(raw.departures ?? [])] as { number: string }[];
+
+    // Ground truth per raw row, computed independently of parseFids/
+    // splitCarrierNumber by a plain indexOf(' ') split.
+    const hazardous = rawRows
+      .map((r) => {
+        const i = r.number.indexOf(' ');
+        return i === -1 ? null : { carrier: r.number.slice(0, i), digits: r.number.slice(i + 1) };
+      })
+      .filter((x): x is { carrier: string; digits: string } => x !== null && /\d$/.test(x.carrier));
+
+    // Not vacuous -- this is the exact hazardous shape the bug report
+    // measured (374/2,436 live rows, JetBlue's B6 the bulk of it); the
+    // 261-row fixture has its own non-trivial share.
+    expect(hazardous.length).toBeGreaterThan(50);
+
+    let negativeChecks = 0;
+    for (const { carrier, digits } of hazardous) {
+      const expectedNumber = digits.replace(/^0+/, '') || '0';
+      // Replicate the OLD buggy algorithm (collapse the space, take the
+      // trailing digit run) to compute the exact forbidden value -- not a
+      // hand-derived guess, so this holds regardless of how many trailing
+      // digits any given carrier has.
+      const collapsed = carrier + digits;
+      const corruptedRaw = /(\d+)$/.exec(collapsed)![0];
+      const corrupted = corruptedRaw.replace(/^0+/, '') || '0';
+
+      expect(
+        rows.some((r) => r.carrierIata === carrier.toUpperCase() && r.number === expectedNumber),
+      ).toBe(true);
+
+      // Skip the negative half on the one shape where "corrupted" and
+      // "expected" coincide: a carrier ending in "0" (N0 in this fixture --
+      // real row "N0 401"). Prepending that "0" and then stripping leading
+      // zeros cancels back to the same digits, so the bug was numerically
+      // invisible for this specific carrier/number pair even though the
+      // same collapse-then-slice logic produced it. Confirmed by direct
+      // computation, not assumed: exactly 1 of the 76 hazardous rows in
+      // this fixture has this property. The positive check above already
+      // pins the correct value for it; there is no distinct wrong value
+      // left to rule out.
+      if (corrupted === expectedNumber) continue;
+      negativeChecks++;
+      expect(
+        rows.some((r) => r.carrierIata === carrier.toUpperCase() && r.number === corrupted),
+      ).toBe(false);
+    }
+    // Not vacuous: confirm the negative half actually ran for the
+    // overwhelming majority of hazardous rows (75 of 76 -- everything
+    // except the one coincidental-cancellation case above).
+    expect(negativeChecks).toBeGreaterThan(50);
   });
 });
 

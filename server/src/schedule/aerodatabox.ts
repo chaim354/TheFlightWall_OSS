@@ -76,6 +76,60 @@ const epoch = (s: unknown): number | null => {
   return Number.isFinite(t) ? Math.floor(t / 1000) : null;
 };
 
+/**
+ * Split a FIDS `number` field ("B6 1184", "DL 4984") into carrier and flight
+ * number.
+ *
+ * The space is the ONLY reliable boundary between the two. Many IATA carrier
+ * codes end in a digit -- B6 (JetBlue), F9 (Frontier), G4 (Allegiant), Y4
+ * (Volaris), and the single-letter-plus-digit codes N0/D0/B0/H4/S4 -- so
+ * collapsing the space before hunting for a flight number, which is what
+ * this code used to do, makes a blind trailing-digit-run match ambiguous:
+ * "B61184" (what "B6 1184" becomes once the space is gone) reads as carrier
+ * "B" number "61184" exactly as validly as carrier "B6" number "1184", and
+ * once the space is gone there is no signal left telling you which reading
+ * is right. Measured on the live stored table: 374 of 2,436 rows (15%) have
+ * a carrier ending in a digit, and every one of them was corrupted this way
+ * -- JetBlue (B6) alone accounts for 334 of the 374, e.g. "B6 1184" stored
+ * as carrier B6, number 61184 instead of 1184.
+ *
+ * Parse the space FIRST, before any digit-run matching, so the boundary
+ * survives instead of being destroyed. Verified against the full
+ * fids-kjfk.json fixture (261 rows, arrivals and departures both): every
+ * single row's `number` is a string containing exactly one ASCII space --
+ * carrier before it, digits after, no leading zeros seen but handled
+ * anyway. So the space-based branch below is the primary path and alone
+ * covers 100% of the captured fixture; nothing in it depends on the
+ * whitespace-free fallback beneath it.
+ *
+ * That fallback (no whitespace at all) exists only for a shape this fixture
+ * never shows. It has the same ambiguity for a digit-ending carrier that the
+ * bug above did -- there is no boundary left to recover one from -- but
+ * unlike the bug, that is a property of input that supplies no separator,
+ * not a mistake in this code: with nothing marking the boundary, no parse
+ * can do better. Kept only so a genuinely unexpected shape degrades to best
+ * effort rather than the row being dropped outright, matching this file's
+ * never-throw, degrade-don't-drop discipline.
+ */
+function splitCarrierNumber(raw: string): { carrier: string; number: string } | null {
+  if (!raw) return null;
+
+  const spaced = /^(\S+)\s+(\d+)$/.exec(raw);
+  if (spaced) {
+    const [, carrier, digits] = spaced;
+    return { carrier: carrier!, number: digits!.replace(/^0+/, '') || '0' };
+  }
+
+  // No whitespace boundary to lean on. Same residual ambiguity as the bug
+  // this function fixes, for the reason explained above -- not reachable by
+  // anything in the captured fixture.
+  const digits = /(\d+)$/.exec(raw)?.[1];
+  if (!digits) return null;
+  const carrier = raw.slice(0, raw.length - digits.length);
+  if (!carrier) return null;
+  return { carrier, number: digits.replace(/^0+/, '') || '0' };
+}
+
 function collect(
   list: unknown,
   airportIcao: string,
@@ -89,12 +143,11 @@ function collect(
   const isArrival = dir === 'arrival';
 
   for (const m of list as Record<string, unknown>[]) {
-    const numberStr = str(m?.number).replace(/\s+/g, '');
-    const digits = /(\d+)$/.exec(numberStr)?.[1];
-    if (!digits) continue; // no derivable flight number -- cannot index this row
+    const parsed = splitCarrierNumber(str(m?.number));
+    if (!parsed) continue; // no derivable flight number -- cannot index this row
 
     const airline = m?.airline as Record<string, unknown> | undefined;
-    const carrier = str(airline?.iata) || numberStr.slice(0, numberStr.length - digits.length);
+    const carrier = str(airline?.iata) || parsed.carrier;
     if (!carrier) continue;
 
     // The far end is whichever side ("departure" for an arrivals-array row,
@@ -120,7 +173,7 @@ function collect(
     out.push({
       callsign: str(m?.callSign) || null,
       carrierIata: carrier.toUpperCase(),
-      number: digits.replace(/^0+/, '') || '0',
+      number: parsed.number,
       origIata: isArrival ? farIata : self.iata,
       origLat: isArrival ? farCoord?.lat ?? null : self.lat,
       origLon: isArrival ? farCoord?.lon ?? null : self.lon,
