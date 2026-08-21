@@ -9,6 +9,7 @@
 #include "models/FlightInfo.h"
 #include "utils/CallsignUtils.h"
 #include "utils/LruCache.h"
+#include "utils/ServerBackoff.h"
 
 class FlightDataFetcher
 {
@@ -74,6 +75,31 @@ private:
     bool withinEnrichBudget() const
     {
         return (millis() - _cycleStartMs) < kEnrichBudgetMs;
+    }
+
+    // Escalating backoff state for the FlightWall-server call, kept HERE rather
+    // than in FlightWallServerFetcher because this is where the fallback
+    // decision already lives (fetchServerMode) -- see utils/ServerBackoff.h for
+    // the schedule and reasoning. _serverConsecutiveFailures resets to 0 on any
+    // successful server response; _serverLastFailureMs is the millis() of the
+    // failure that (re)armed the current backoff window.
+    uint32_t _serverConsecutiveFailures = 0;
+    unsigned long _serverLastFailureMs = 0;
+    // Set once a "backoff is skipping the server" line has been logged for the
+    // CURRENT window, so a long outage logs that transition once rather than on
+    // every skipped cycle. Cleared whenever the window is (re)armed by a new
+    // failure or cleared by a success, so the next window logs again.
+    bool _serverBackoffSkipLogged = false;
+
+    // Same wrap-safe idiom as withinEnrichBudget() just above: unsigned
+    // subtraction against millis() stays correct across the ~49.7-day wrap,
+    // where comparing a stored absolute "retry at" deadline with
+    // `millis() >= retryAt` would not. The actual schedule/decision is the
+    // pure, host-tested shouldSkipServer() in utils/ServerBackoff.h; this
+    // method only supplies the one wrap-sensitive input it needs.
+    bool serverBackoffActive() const
+    {
+        return shouldSkipServer(_serverConsecutiveFailures, millis() - _serverLastFailureMs);
     }
 
     // Per-leg enrichment cache (keyed by callsign, ICAO24 only as a defensive

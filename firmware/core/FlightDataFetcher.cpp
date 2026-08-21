@@ -15,6 +15,9 @@ FlightWall server (PositionSource::FlightWallServer) short-circuits the whole
 state-vector/enrichment pipeline with fetchServerMode, which fills FlightInfo
 directly from one HTTP call. If the server is unreachable that cycle falls back
 to the ordinary state-vector path forced onto adsb.lol -- see fetchServerMode.
+A server that stays unreachable is backed off (utils/ServerBackoff.h): repeated
+failures escalate the retry interval, capped, so a prolonged outage skips the
+HTTP call on most cycles instead of paying its timeout every 30s forever.
 */
 #include "core/FlightDataFetcher.h"
 #include "utils/AirlineNames.h"
@@ -218,41 +221,83 @@ size_t FlightDataFetcher::fetchFlights(std::vector<StateVector> &outStates,
 size_t FlightDataFetcher::fetchServerMode(std::vector<StateVector> &outStates,
                                           std::vector<FlightInfo> &outFlights, bool &ok)
 {
-    // One call, and everything below the wire is already done: joined to the
-    // schedule, implausible routes rejected, ETA computed, units converted,
-    // sorted nearest-first and capped. No enrichment, no per-flight connection.
-    if (_server && _server->fetchFlights(g_settings.serverUrl,
-                                         g_settings.centerLat, g_settings.centerLon,
-                                         g_settings.radiusKm, g_settings.maxFlights,
-                                         outFlights, _lastStale))
+    // Escalating backoff (utils/ServerBackoff.h): once enough consecutive
+    // failures have piled up, skip the HTTP call entirely this cycle rather
+    // than paying its (now-shortened, but still nonzero) failure cost again.
+    // serverBackoffActive() is false whenever _serverConsecutiveFailures is 0,
+    // so a server that has never failed -- or that just recovered -- always
+    // takes the real attempt below.
+    if (!serverBackoffActive())
     {
-        // The server's contract resolves a readable name (`al`) but carries no
-        // ICAO operator code, so operator_icao is empty on every flight here.
-        // is_cargo and the airline allow-list both key off operator_icao, so
-        // without this step they would silently never match anything the server
-        // returns. Derive it locally from the callsign first, exactly as every
-        // other skip-enrichment path does (see applyLocalIdentity) -- info.ident
-        // is already the server's raw `cs` field, the same kind of value
-        // s.callsign carries in Area mode.
-        for (FlightInfo &info : outFlights)
-            applyLocalIdentity(info.ident, info);
+        // One call, and everything below the wire is already done: joined to the
+        // schedule, implausible routes rejected, ETA computed, units converted,
+        // sorted nearest-first and capped. No enrichment, no per-flight connection.
+        if (_server && _server->fetchFlights(g_settings.serverUrl,
+                                             g_settings.centerLat, g_settings.centerLon,
+                                             g_settings.radiusKm, g_settings.maxFlights,
+                                             outFlights, _lastStale))
+        {
+            // The server's contract resolves a readable name (`al`) but carries no
+            // ICAO operator code, so operator_icao is empty on every flight here.
+            // is_cargo and the airline allow-list both key off operator_icao, so
+            // without this step they would silently never match anything the server
+            // returns. Derive it locally from the callsign first, exactly as every
+            // other skip-enrichment path does (see applyLocalIdentity) -- info.ident
+            // is already the server's raw `cs` field, the same kind of value
+            // s.callsign carries in Area mode.
+            for (FlightInfo &info : outFlights)
+                applyLocalIdentity(info.ident, info);
 
-        // The server cannot know about the device-side airline allow-list or the
-        // cargo/private classification, so those still run here.
-        applyLocalClassification(outFlights);
-        ok = true;
-        return outFlights.size();
+            // The server cannot know about the device-side airline allow-list or the
+            // cargo/private classification, so those still run here.
+            applyLocalClassification(outFlights);
+
+            // A single good response clears the penalty entirely -- no gradual
+            // ramp-down. Only worth a log line when it is actually ending a
+            // streak; a healthy server succeeding every cycle should stay quiet.
+            if (_serverConsecutiveFailures > 0)
+                Serial.println("FlightDataFetcher: server recovered; backoff cleared");
+            _serverConsecutiveFailures = 0;
+            _serverBackoffSkipLogged = false;
+            ok = true;
+            return outFlights.size();
+        }
+
+        // A real attempt just failed: escalate. New window, so a future skip
+        // should log again.
+        _serverConsecutiveFailures++;
+        _serverLastFailureMs = millis();
+        _serverBackoffSkipLogged = false;
+        Serial.printf("FlightDataFetcher: server unavailable (%u consecutive failure%s); "
+                      "falling back to adsb.lol, next retry in %lus\n",
+                      (unsigned)_serverConsecutiveFailures,
+                      _serverConsecutiveFailures == 1 ? "" : "s",
+                      serverBackoffMs(_serverConsecutiveFailures) / 1000UL);
+    }
+    else if (!_serverBackoffSkipLogged)
+    {
+        // First skip of this backoff window -- log it once so the serial log
+        // shows why nothing server-related is happening, rather than going
+        // quiet in a way that (per an earlier bare-catch bug in this project)
+        // is indistinguishable from having stopped working. Every later skip
+        // in the same window is expected and silent, not spam.
+        Serial.printf("FlightDataFetcher: server backoff active (%u consecutive failures); "
+                      "skipping probe, falling back to adsb.lol\n",
+                      (unsigned)_serverConsecutiveFailures);
+        _serverBackoffSkipLogged = true;
     }
 
-    // Server unreachable. Fall back to the keyless direct path for THIS cycle
-    // rather than failing: a wall that degrades to callsign-plus-metrics beats
-    // one frozen on its last list. The configured source is left unchanged, so
-    // the next cycle tries the server again with no user action.
-    Serial.println("FlightDataFetcher: server unavailable; falling back to adsb.lol");
+    // Fall back to the keyless direct path for THIS cycle rather than failing:
+    // a wall that degrades to callsign-plus-metrics beats one frozen on its
+    // last list. The configured source is left unchanged, so a later cycle --
+    // immediately if backoff isn't active, or once it lapses -- tries the
+    // server again with no user action.
+    //
     // Defensive, not a fix for an observed leak: every failure path inside
     // FlightWallServerFetcher::fetchFlights returns before it ever pushes a
-    // row, so outFlights is already empty here. Cheap insurance against that
-    // invariant changing later without this call site being revisited.
+    // row, so outFlights is already empty here (and untouched on the pure-skip
+    // path). Cheap insurance against that invariant changing later without
+    // this call site being revisited.
     outFlights.clear();
     return fetchAreaModeWith(_adsbLolState ? _adsbLolState : _openSkyState,
                              outStates, outFlights, ok);

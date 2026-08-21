@@ -29,7 +29,20 @@ WiFiClientSecure &FlightWallServerFetcher::secureClient()
     if (!m_secureInit)
     {
         m_secure.setInsecure();
-        m_secure.setHandshakeTimeout(15);
+        // 4s, NOT the 15s every other fetcher's secureClient() uses (OpenSky/FR24/
+        // adsb.lol). Those have no fallback behind them, so a slow-but-eventually-
+        // successful handshake beats a fast failure with nothing left to try --
+        // 15s is the right bound there. This source is different: adsb.lol is
+        // sitting right behind it (FlightDataFetcher::fetchServerMode falls back
+        // to it on any failure), so a fast failure that hands off promptly beats a
+        // slow one that just delays the same eventual fallback. The server answers
+        // a healthy request in tens of milliseconds, so 4s is not a bound sized to
+        // the response -- it is room for a genuinely slow handshake on a congested
+        // link, several times over, while still keeping one failed attempt to a
+        // few seconds instead of fifteen. (Paired with FlightDataFetcher's
+        // escalating backoff, a real outage stops paying even this cost on every
+        // cycle -- see utils/ServerBackoff.h.)
+        m_secure.setHandshakeTimeout(4);
         m_secureInit = true;
     }
     m_secure.stop();
@@ -63,7 +76,12 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
 
     HTTPClient http;
     http.begin(secureClient(), url);
-    http.setTimeout(15000);
+    // 4s, matching secureClient()'s handshake timeout -- see the comment there for
+    // why this source uses a much shorter bound than the other fetchers' 15s. This
+    // one covers the read side: a healthy reply's body is a couple KB behind a
+    // request that answers in tens of milliseconds, so 4s is generous margin for a
+    // slow response, not a bound sized to how long the response actually takes.
+    http.setTimeout(4000);
     http.addHeader("Accept", "application/json");
 
     int code = http.GET();
