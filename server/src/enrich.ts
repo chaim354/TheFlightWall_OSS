@@ -1,5 +1,5 @@
 import { haversineKm, bearingDeg, KM_PER_NM } from './geo';
-import { etaMinutes, formatEta } from './eta';
+import { etaMinutes, formatEta, TERMINAL_NM } from './eta';
 import { matchSchedule } from './join';
 import { airlineName } from './airlines';
 import type { Aircraft, Flight, ScheduleRow } from './types';
@@ -31,6 +31,82 @@ function futureEpoch(epochSec: number | null, nowSec: number): number | null {
 }
 
 /**
+ * How fast a schedule-derived arrival can plausibly imply the aircraft is
+ * covering ground, in kt, before the row is more likely stale or mismatched
+ * than genuinely fast. A schedule time carries no internal signal that it is
+ * wrong the way a physics estimate does -- physics is anchored to the
+ * aircraft's own live position and speed, so a bad value tends to look
+ * strange; a bad schedule time looks exactly like a good one until checked
+ * against geometry. This is that check, for time instead of route -- same
+ * spirit as join.ts's corridorExcessKm, which rejects a route the
+ * aircraft's position makes impossible.
+ *
+ * Derived from the airframe, not backed into the two live failures below:
+ * subsonic airliners essentially never exceed ~510kt true airspeed (Mach
+ * 0.89 at a cruise-altitude speed of sound of ~574kt -- already faster than
+ * most of the fleet flies). Past that, only wind can add more, and a
+ * strong but genuinely SUSTAINED jet-stream push -- not a one-minute gust
+ * core -- is on the order of 110kt. 510 + 110 = 620.
+ *
+ * That number happens to land between the two live failures, which is the
+ * whole difficulty this guard exists to navigate:
+ *   - THY6044 (660nm claimed in 15min = 2,640kt implied) fails by 4x. No
+ *     credible wind explains that; any bound from 400kt to 1000kt catches
+ *     it identically, so nothing about THY6044 drove the exact number.
+ *   - DAL688 (2,099nm claimed in 200min = 630kt implied) fails by under 2%
+ *     against this bound. That is inside the noise of exactly how generous
+ *     "sustained" should be, and a genuine storm-assisted eastbound
+ *     Atlantic crossing DOES reach this neighborhood: British Airways 112,
+ *     JFK-LHR, rode Storm Ciara's jet stream to a widely-reported 4h56m on
+ *     9 Feb 2020 (peak groundspeed 825mph/717kt, per contemporary press
+ *     coverage) -- ~2,992nm great-circle in 4h56m implies a ~606kt average
+ *     for the whole flight. Real, documented, not hypothetical (see
+ *     enrich.test.ts for the worked case this guard must NOT reject).
+ * DAL688 is kept as a reject anyway, deliberately: it is JFK->SEA,
+ * WESTbound, a direction the jet stream (which blows west-to-east) opposes
+ * rather than assists, so the one physical mechanism that could excuse a
+ * 600+kt average does not apply to it the way it would an eastbound
+ * Atlantic leg. This guard has no way to use that fact directly -- it is a
+ * single scalar, deliberately, with no notion of route direction -- so
+ * catching DAL688 here necessarily also means an exceptional EASTBOUND leg
+ * faster than ~620kt would be rejected too, and fall through to physics
+ * instead of the real time it actually has. Accepted anyway, because the
+ * two outcomes are not symmetric: a false reject is cheap -- physics reads
+ * this SAME aircraft's own live groundspeed, so a genuine tailwind leg is
+ * not blind to its own tailwind there either -- while a false accept is
+ * not: it puts a confidently wrong number on a 64px panel the viewer has no
+ * way to tell from a real one.
+ */
+export const MAX_SCHEDULE_GS_KT = 620;
+
+/**
+ * A schedule-derived epoch is plausible only if the remaining distance is
+ * coverable, at MAX_SCHEDULE_GS_KT, in the time it claims. If it is not,
+ * the row is stale or mismatched -- a real arrival time, just not for this
+ * leg or this day -- so it is treated exactly like a failed futureEpoch
+ * check: as if the field had never been supplied, and the chain moves on to
+ * the next candidate rather than handing an impossible number to
+ * round()/formatEta.
+ *
+ * Below TERMINAL_NM this check does not run: at short range, one minute of
+ * rounding in the schedule feed (times are minute-granular, not
+ * second-granular) swings the implied speed by tens of knots on its own,
+ * and straight-line distance stops tracking actual remaining track once
+ * vectoring, holds and go-arounds enter the picture -- the same reasons
+ * etaMinutes (eta.ts) stops trusting a computed speed at that same
+ * threshold. A row with no destination coordinates (nm is NaN, see below)
+ * is likewise something this check cannot evaluate, so it is let through
+ * unexamined rather than penalized for a check it has no way to pass or
+ * fail.
+ */
+function plausibleEpoch(epochSec: number | null, nowSec: number, nm: number): number | null {
+  if (epochSec === null) return null;
+  if (!Number.isFinite(nm) || nm <= TERMINAL_NM) return epochSec;
+  const minMinutesRequired = (nm / MAX_SCHEDULE_GS_KT) * 60;
+  return (epochSec - nowSec) / 60 >= minMinutesRequired ? epochSec : null;
+}
+
+/**
  * One aircraft plus the schedule -> one display-ready flight, or null to drop it.
  *
  * A schedule miss is NOT a failure: the flight still renders with its callsign,
@@ -55,6 +131,20 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
   if (row) {
     const nowSec = nowMs / 1000;
 
+    // Distance to destination, when the row has coordinates for it. Needed
+    // for the physics model below, for the plausibility guard the epochs
+    // pass through next, and ALSO for formatEta's LANDING/rounding contract
+    // regardless of which source produced etaMin -- that display contract
+    // does not change with the source, only the number it is applied to.
+    // NaN when coordinates are missing; formatEta already treats a
+    // non-finite distance as "cannot confirm LANDING by proximity" and
+    // falls through to its ordinary rounding, and plausibleEpoch likewise
+    // treats it as "cannot check, don't reject", so this needs no extra
+    // branching here.
+    const nm = row.destLat !== null && row.destLon !== null
+      ? haversineKm(a.lat, a.lon, row.destLat, row.destLon) / KM_PER_NM
+      : Number.NaN;
+
     // Priority chain -- a real arrival time beats any model, because it
     // already accounts for climb, cruise, descent, routing, taxi and the
     // actual delay (see eta.ts's own header comment on everything the
@@ -62,21 +152,16 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
     // delay-aware figure; either beats physics because a schedule entry is
     // a fact about a plan, not a guess about the future. Physics remains
     // the fallback: it runs when neither time is usable below.
-    const revEpoch = futureEpoch(row.revArrEpoch, nowSec);
-    const schedEpoch = futureEpoch(row.schedArrEpoch, nowSec);
+    //
+    // Each tier passes through two independent filters before it is
+    // eligible: futureEpoch rejects a time already in the past, and
+    // plausibleEpoch rejects a time geometry says cannot be true. Both are
+    // applied PER TIER, exactly like the existing past-arrival handling --
+    // a revised time that fails either check must not drag down a
+    // perfectly good scheduled time sitting right next to it.
+    const revEpoch = plausibleEpoch(futureEpoch(row.revArrEpoch, nowSec), nowSec, nm);
+    const schedEpoch = plausibleEpoch(futureEpoch(row.schedArrEpoch, nowSec), nowSec, nm);
     const arrivalEpoch = revEpoch ?? schedEpoch;
-
-    // Distance to destination, when the row has coordinates for it. Needed
-    // for the physics model, and ALSO for formatEta's LANDING/rounding
-    // contract regardless of which source produced etaMin -- that display
-    // contract does not change with the source, only the number it is
-    // applied to. NaN when coordinates are missing; formatEta already
-    // treats a non-finite distance as "cannot confirm LANDING by proximity"
-    // and falls through to its ordinary rounding, so this needs no extra
-    // branching here.
-    const nm = row.destLat !== null && row.destLon !== null
-      ? haversineKm(a.lat, a.lon, row.destLat, row.destLon) / KM_PER_NM
-      : Number.NaN;
 
     if (arrivalEpoch !== null) {
       etaMin = (arrivalEpoch - nowSec) / 60;

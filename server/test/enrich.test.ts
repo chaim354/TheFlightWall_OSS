@@ -410,3 +410,172 @@ describe('enrich: JBU81 JFK->RNO regression (real arrival time beats a bad physi
     expect(f.eta_text).toBe('~5h00');
   });
 });
+
+// Task: a schedule-derived ETA is only as trustworthy as the row it came
+// from, and unlike physics (anchored to the aircraft's own live position and
+// speed), a schedule time carries no internal signal that it is wrong -- a
+// stale or mismatched row looks exactly like a good one until checked
+// against geometry. This guard rejects a revised/scheduled epoch that
+// implies covering the remaining distance faster than MAX_SCHEDULE_GS_KT
+// allows: the schedule-time analogue of join.ts's corridorExcessKm, which
+// does the same job for route claims instead of time claims. See
+// enrich.ts's own MAX_SCHEDULE_GS_KT comment for the full derivation of the
+// bound and an honest accounting of what it does and does not catch.
+describe('enrich: a schedule-derived ETA that outruns the remaining distance is treated as stale, not fast', () => {
+  it('THY6044 regression: falls through to physics when the scheduled time implies 2,640kt over 660nm', () => {
+    // Observed live: JFK->ATL, 660nm to go, eta_src "scheduled" claiming 15
+    // minutes -- implying an average groundspeed of 660 / (15/60) =
+    // 2,640kt, ~4x MAX_SCHEDULE_GS_KT (620) and far past anything a
+    // subsonic airliner can do under any wind. The row is a real arrival
+    // time, just not for this leg or this day.
+    //
+    // 44.62927266987777 is precisely 660nm due north of ATL (same
+    // longitude) -- same construction as the WJA2101 regression above,
+    // verified against src/geo.ts's own haversineKm. The row carries the
+    // aircraft's own operating callsign, so join.ts's exact-match path
+    // returns it unconditionally: no corridor check runs, so this synthetic
+    // position does not need to sit on the real JFK-ATL route, only to be
+    // exactly 660nm from ATL.
+    const ATL = { lat: 33.6367, lon: -84.4281 };
+    const rows: ScheduleRow[] = [{
+      callsign: 'THY6044', carrierIata: 'TK', number: '6044',
+      origIata: 'JFK', destIata: 'ATL',
+      origLat: 40.6394, origLon: -73.7793, destLat: ATL.lat, destLon: ATL.lon,
+      schedArrEpoch: NOW_SEC + 15 * 60, revArrEpoch: null,
+    }];
+    const f = enrich(
+      ac({ callsign: 'THY6044', lat: 44.62927266987777, lon: ATL.lon, distanceNm: null, bearingDeg: null }),
+      rows, { units: 'imperial' }, NOW_MS,
+    )!;
+    expect(f.to).toBe('ATL');
+    // Falls through to physics rather than the impossible 15-minute figure.
+    // ac()'s default groundspeed (400kt) and altitude (18000ft) give a
+    // clean, hand-verifiable number: (660-60)/400*60 + 18 (TERMINAL_MIN) =
+    // 108 exactly; the 18000ft descent floor (10min) does not bind.
+    expect(f.eta_src).toBe('physics');
+    expect(f.eta_min).toBe(108);
+    expect(f.eta_text).toBe('~1h50');
+  });
+
+  it('DAL688 regression: falls through to physics when the scheduled time implies 630kt over 2,099nm', () => {
+    // Observed live: JFK->SEA, 2,099nm to go, eta_src "scheduled" claiming
+    // 200 minutes -- implying 2,099 / (200/60) = 629.7kt, only ~1.6% over
+    // MAX_SCHEDULE_GS_KT (620). This is the marginal case: unlike THY6044,
+    // a materially looser bound could plausibly let this one through (see
+    // MAX_SCHEDULE_GS_KT's own comment for the full reasoning on why it is
+    // kept as a reject anyway -- in short, DAL688 is JFK->SEA, WESTbound, a
+    // direction the jet stream cannot boost the way it boosts an eastbound
+    // Atlantic leg, and a false reject here is cheap because physics reads
+    // this same aircraft's own groundspeed).
+    //
+    // 82.40761217283855 is precisely 2,099nm due north of SEA (same
+    // longitude), verified the same way as THY6044 above.
+    const SEA = { lat: 47.4479, lon: -122.3103 };
+    const rows: ScheduleRow[] = [{
+      callsign: 'DAL688', carrierIata: 'DL', number: '688',
+      origIata: 'JFK', destIata: 'SEA',
+      origLat: 40.6394, origLon: -73.7793, destLat: SEA.lat, destLon: SEA.lon,
+      schedArrEpoch: NOW_SEC + 200 * 60, revArrEpoch: null,
+    }];
+    const f = enrich(
+      ac({ callsign: 'DAL688', lat: 82.40761217283855, lon: SEA.lon, distanceNm: null, bearingDeg: null }),
+      rows, { units: 'imperial' }, NOW_MS,
+    )!;
+    expect(f.to).toBe('SEA');
+    // (2099-60)/400*60 + 18 = 323.85 -> rounds to 324; the 18000ft descent
+    // floor (10min) does not bind.
+    expect(f.eta_src).toBe('physics');
+    expect(f.eta_min).toBe(324);
+    expect(f.eta_text).toBe('~5h20');
+  });
+
+  it('does not reject a genuine fast eastbound leg -- BA112 JFK-LHR in 4h56 implies ~606kt, under the bound', () => {
+    // The case MAX_SCHEDULE_GS_KT's own comment must not break: a real,
+    // storm-assisted jet-stream tailwind on an eastbound Atlantic crossing,
+    // not a hypothetical. British Airways 112 rode Storm Ciara's jet stream
+    // from JFK to LHR in a widely-reported 4h56m on 9 Feb 2020. JFK-LHR is a
+    // ~2,991.5nm great-circle (real coordinates); 4h56m (296min) implies
+    // 2,991.5 / (296/60) = ~606.4kt -- comfortably inside MAX_SCHEDULE_GS_KT
+    // (620, which requires at least ~289.5min for this distance), so the
+    // schedule time survives and is used as given, not silently downgraded
+    // to a physics guess.
+    const JFK = { lat: 40.6394, lon: -73.7793 };
+    const LHR = { lat: 51.4700, lon: -0.4543 };
+    const rows: ScheduleRow[] = [{
+      callsign: 'BAW112', carrierIata: 'BA', number: '112',
+      origIata: 'JFK', destIata: 'LHR',
+      origLat: JFK.lat, origLon: JFK.lon, destLat: LHR.lat, destLon: LHR.lon,
+      schedArrEpoch: NOW_SEC + 296 * 60, revArrEpoch: null,
+    }];
+    const f = enrich(
+      ac({ callsign: 'BAW112', lat: JFK.lat, lon: JFK.lon, distanceNm: null, bearingDeg: null }),
+      rows, { units: 'imperial' }, NOW_MS,
+    )!;
+    expect(f.to).toBe('LHR');
+    expect(f.eta_src).toBe('scheduled');
+    expect(f.eta_min).toBe(296);
+    expect(f.eta_text).toBe('~5h00');
+  });
+
+  it('rejects only the implausible tier -- a bad revised time does not block a good scheduled time next to it', () => {
+    // Per-tier independence, the same contract the existing past-arrival
+    // guard already has (see "uses the scheduled time when the revised
+    // time is present but in the past" above): THY6044's geometry (660nm
+    // out) with revArrEpoch claiming the same impossible 15 minutes as the
+    // real bug, and schedArrEpoch claiming a plausible 90 minutes
+    // (660/(90/60) = 440kt, comfortably under the bound). The revised tier
+    // is rejected on its own; the scheduled tier right next to it is not
+    // dragged down by it.
+    const ATL = { lat: 33.6367, lon: -84.4281 };
+    const rows: ScheduleRow[] = [{
+      callsign: 'THY6044', carrierIata: 'TK', number: '6044',
+      origIata: 'JFK', destIata: 'ATL',
+      origLat: 40.6394, origLon: -73.7793, destLat: ATL.lat, destLon: ATL.lon,
+      schedArrEpoch: NOW_SEC + 90 * 60, revArrEpoch: NOW_SEC + 15 * 60,
+    }];
+    const f = enrich(
+      ac({ callsign: 'THY6044', lat: 44.62927266987777, lon: ATL.lon, distanceNm: null, bearingDeg: null }),
+      rows, { units: 'imperial' }, NOW_MS,
+    )!;
+    expect(f.eta_src).toBe('scheduled');
+    expect(f.eta_min).toBe(90);
+    expect(f.eta_text).toBe('~1h30');
+  });
+
+  it('does not apply the guard inside TERMINAL_NM, where minute-level rounding dominates the implied speed', () => {
+    // A close-in schedule time that LOOKS fast is not necessarily wrong: at
+    // ~52nm (the default ac()/LGA pairing) a single minute of rounding in
+    // the schedule feed (times are minute-, not second-, granular) swings
+    // the implied speed by hundreds of knots on its own, and straight-line
+    // distance stops tracking actual remaining track once vectoring and
+    // holds enter the picture -- see MAX_SCHEDULE_GS_KT's own comment,
+    // which points at this being the same reason etaMinutes (eta.ts) stops
+    // trusting a computed speed at this same TERMINAL_NM threshold. Below
+    // it the guard does not run at all, so a 4-minute claim over ~52nm --
+    // which would fail the guard at long range -- passes through exactly as
+    // it would have before this guard existed.
+    const rows: ScheduleRow[] = [{ ...sched[0]!, schedArrEpoch: NOW_SEC + 4 * 60, revArrEpoch: null }];
+    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    expect(f.eta_src).toBe('scheduled');
+    expect(f.eta_min).toBe(4);
+    expect(f.eta_text).toBe('~5m'); // never rounds down to a bare zero
+  });
+
+  it('does not reject a schedule time when the row has no destination coordinates to check it against', () => {
+    // Same "cannot evaluate, so let it through" stance formatEta already
+    // takes for a non-finite distance (see "shows the route without an ETA"
+    // in the edge-cases block above). With no destination coordinates there
+    // is no distance to compare the claimed time against, so there is no
+    // impossible-speed claim to detect -- the schedule time is used as-is.
+    const rows: ScheduleRow[] = [{
+      callsign: 'EDV5075', carrierIata: 'DL', number: '5075',
+      origIata: 'CVG', destIata: 'LGA',
+      origLat: CVG.lat, origLon: CVG.lon, destLat: null, destLon: null,
+      schedArrEpoch: NOW_SEC + 2 * 60, // "impossible" at any real distance, but there is none to check
+      revArrEpoch: null,
+    }];
+    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    expect(f.eta_src).toBe('scheduled');
+    expect(f.eta_min).toBe(2);
+  });
+});
