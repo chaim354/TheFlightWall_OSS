@@ -411,23 +411,32 @@ describe('enrich: JBU81 JFK->RNO regression (real arrival time beats a bad physi
   });
 });
 
-// Task: a schedule-derived ETA is only as trustworthy as the row it came
-// from, and unlike physics (anchored to the aircraft's own live position and
-// speed), a schedule time carries no internal signal that it is wrong -- a
-// stale or mismatched row looks exactly like a good one until checked
-// against geometry. This guard rejects a revised/scheduled epoch that
-// implies covering the remaining distance faster than MAX_SCHEDULE_GS_KT
-// allows: the schedule-time analogue of join.ts's corridorExcessKm, which
-// does the same job for route claims instead of time claims. See
-// enrich.ts's own MAX_SCHEDULE_GS_KT comment for the full derivation of the
-// bound and an honest accounting of what it does and does not catch.
-describe('enrich: a schedule-derived ETA that outruns the remaining distance is treated as stale, not fast', () => {
+// Task: a schedule-derived ETA is only as trustworthy as the journey it
+// still describes, and unlike physics (anchored to the aircraft's own live
+// position and speed), a schedule time carries no internal signal that it
+// no longer applies -- a flight delayed past what its published time can
+// still make looks exactly like a good time until checked against
+// geometry. This guard rejects a revised/scheduled epoch that implies
+// covering the remaining distance faster than MAX_SCHEDULE_GS_KT allows:
+// the schedule-time analogue of join.ts's corridorExcessKm, which does the
+// same job for route claims instead of time claims. It is primarily a
+// delay filter -- see enrich.ts's own MAX_SCHEDULE_GS_KT comment for the
+// full reasoning, including why it has to be read together with
+// revArrEpoch rather than in isolation, and an honest accounting of what
+// it does and does not catch.
+describe('enrich: a schedule-derived ETA a delay has made unreachable is not used', () => {
   it('THY6044 regression: falls through to physics when the scheduled time implies 2,640kt over 660nm', () => {
     // Observed live: JFK->ATL, 660nm to go, eta_src "scheduled" claiming 15
     // minutes -- implying an average groundspeed of 660 / (15/60) =
     // 2,640kt, ~4x MAX_SCHEDULE_GS_KT (620) and far past anything a
-    // subsonic airliner can do under any wind. The row is a real arrival
-    // time, just not for this leg or this day.
+    // subsonic airliner can do under any wind. Confirmed in the live
+    // schedule table (as TK6044): scheduled 03:13Z (+13min, impossible for
+    // 660nm) sat beside a since-published revised 04:40Z (+100min,
+    // correct) -- the scheduled figure was never bad data, just a promise
+    // a delay had already broken. This test predates that revision
+    // existing (revArrEpoch: null below), which is exactly the window this
+    // guard is for -- see the "recovers via a plausible revised time" test
+    // further down for the case once TK6044's revision is in.
     //
     // 44.62927266987777 is precisely 660nm due north of ATL (same
     // longitude) -- same construction as the WJA2101 regression above,
@@ -460,13 +469,20 @@ describe('enrich: a schedule-derived ETA that outruns the remaining distance is 
   it('DAL688 regression: falls through to physics when the scheduled time implies 630kt over 2,099nm', () => {
     // Observed live: JFK->SEA, 2,099nm to go, eta_src "scheduled" claiming
     // 200 minutes -- implying 2,099 / (200/60) = 629.7kt, only ~1.6% over
-    // MAX_SCHEDULE_GS_KT (620). This is the marginal case: unlike THY6044,
-    // a materially looser bound could plausibly let this one through (see
-    // MAX_SCHEDULE_GS_KT's own comment for the full reasoning on why it is
-    // kept as a reject anyway -- in short, DAL688 is JFK->SEA, WESTbound, a
-    // direction the jet stream cannot boost the way it boosts an eastbound
-    // Atlantic leg, and a false reject here is cheap because physics reads
-    // this same aircraft's own groundspeed).
+    // MAX_SCHEDULE_GS_KT (620). Confirmed a heavily delayed flight, not a
+    // borderline-real one: DAL688 had not made the progress its published
+    // schedule assumed, so 200 minutes described a journey the delay had
+    // already ruled out. That thin 1.6% margin is not a false-positive risk
+    // to weigh against THY6044's clean 4x -- a delayed flight's scheduled
+    // time degrades continuously as the delay grows, sitting just past the
+    // line early on and further past it the longer the delay runs, so
+    // catching DAL688 here means catching its delay near the start of that
+    // curve, not scraping in a marginal call (see MAX_SCHEDULE_GS_KT's own
+    // comment for the full reasoning, including the genuine-fast-leg case,
+    // BA112 below, this bound must still let through -- DAL688 is also
+    // JFK->SEA, WESTbound, a direction the jet stream cannot boost the way
+    // it boosts an eastbound Atlantic leg, corroborating that 630kt was
+    // never a tailwind on this flight specifically).
     //
     // 82.40761217283855 is precisely 2,099nm due north of SEA (same
     // longitude), verified the same way as THY6044 above.
@@ -540,6 +556,36 @@ describe('enrich: a schedule-derived ETA that outruns the remaining distance is 
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(90);
     expect(f.eta_text).toBe('~1h30');
+  });
+
+  it('TK6044: recovers via a plausible revised time once the operator publishes one for a delayed scheduled time', () => {
+    // The complementary half of the THY6044 regression above, and the
+    // concrete case for MAX_SCHEDULE_GS_KT's "read together with
+    // revArrEpoch" point: TK6044's live schedule row carried scheduled
+    // 03:13Z (+13min, implying 660/(13/60) = ~3,046kt -- impossible, and
+    // rejected by this guard on its own) alongside a since-published
+    // revised 04:40Z (+100min, implying 660/(100/60) = 396kt -- plausible).
+    // The priority chain checks revised first and, once it passes this
+    // same guard, uses it outright -- so once the operator's revision
+    // lands, the delayed scheduled figure next to it is moot rather than
+    // merely suppressed. This is the "after" to the other test's "before":
+    // together they cover the whole timeline of a delay, from before any
+    // revision exists (this guard is the only protection) to after one is
+    // published (revArrEpoch is simply correct).
+    const ATL = { lat: 33.6367, lon: -84.4281 };
+    const rows: ScheduleRow[] = [{
+      callsign: 'THY6044', carrierIata: 'TK', number: '6044',
+      origIata: 'JFK', destIata: 'ATL',
+      origLat: 40.6394, origLon: -73.7793, destLat: ATL.lat, destLon: ATL.lon,
+      schedArrEpoch: NOW_SEC + 13 * 60, revArrEpoch: NOW_SEC + 100 * 60,
+    }];
+    const f = enrich(
+      ac({ callsign: 'THY6044', lat: 44.62927266987777, lon: ATL.lon, distanceNm: null, bearingDeg: null }),
+      rows, { units: 'imperial' }, NOW_MS,
+    )!;
+    expect(f.eta_src).toBe('revised');
+    expect(f.eta_min).toBe(100);
+    expect(f.eta_text).toBe('~1h40');
   });
 
   it('does not apply the guard inside TERMINAL_NM, where minute-level rounding dominates the implied speed', () => {

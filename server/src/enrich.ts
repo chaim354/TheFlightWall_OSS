@@ -32,61 +32,101 @@ function futureEpoch(epochSec: number | null, nowSec: number): number | null {
 
 /**
  * How fast a schedule-derived arrival can plausibly imply the aircraft is
- * covering ground, in kt, before the row is more likely stale or mismatched
- * than genuinely fast. A schedule time carries no internal signal that it is
- * wrong the way a physics estimate does -- physics is anchored to the
- * aircraft's own live position and speed, so a bad value tends to look
- * strange; a bad schedule time looks exactly like a good one until checked
- * against geometry. This is that check, for time instead of route -- same
- * spirit as join.ts's corridorExcessKm, which rejects a route the
- * aircraft's position makes impossible.
+ * covering ground, in kt, before the claimed time is one a DELAY has
+ * already made unreachable.
  *
- * Derived from the airframe, not backed into the two live failures below:
- * subsonic airliners essentially never exceed ~510kt true airspeed (Mach
- * 0.89 at a cruise-altitude speed of sound of ~574kt -- already faster than
- * most of the fleet flies). Past that, only wind can add more, and a
- * strong but genuinely SUSTAINED jet-stream push -- not a one-minute gust
- * core -- is on the order of 110kt. 510 + 110 = 620.
+ * This is primarily a delay filter that happens to be expressed as a speed
+ * bound, not a data-hygiene check. `schedArrEpoch` is the published
+ * timetable entry and never moves once set (see ScheduleRow's own
+ * comment): it is computed from a departure time, and if that departure
+ * did not happen on time, the scheduled arrival still describes the
+ * ON-TIME journey, not the one the aircraft is actually flying. A flight
+ * running late enough still has a scheduled arrival ahead of "now" -- so
+ * futureEpoch does not filter it out -- while being nowhere near able to
+ * make it: the time is real, just for a journey delay has already ruled
+ * out. A mismatched or genuinely stale row (a real time, but for a
+ * different leg or day entirely) produces the identical symptom and is
+ * caught the same way, but delay is the common case and mismatch the rare
+ * one: most schedule-only rows that fail this check will be an ordinary
+ * delayed flight, not a data error.
  *
- * That number happens to land between the two live failures, which is the
- * whole difficulty this guard exists to navigate:
- *   - THY6044 (660nm claimed in 15min = 2,640kt implied) fails by 4x. No
- *     credible wind explains that; any bound from 400kt to 1000kt catches
- *     it identically, so nothing about THY6044 drove the exact number.
+ * That framing is also why this guard has to be read together with
+ * `revArrEpoch`, not in isolation. Once the operator publishes a revised
+ * time it is delay-aware by definition, and the priority chain below
+ * checks and uses it before scheduled ever matters -- a plausible revised
+ * time is simply correct. This guard is what covers the window BEFORE that
+ * revision is published, or on rows where one never arrives at all: only
+ * 102 of the 261 rows in the captured KJFK fixture carry a revised time at
+ * all (see aerodatabox.ts's own commit message), so most rows have nothing
+ * but the scheduled figure to fall back on if the flight they describe
+ * turns out to be running late. The two mechanisms cover the same failure
+ * from opposite ends of its timeline; removing either on the theory that
+ * the other makes it redundant would reopen exactly the gap the other one
+ * closes.
+ *
+ * The bound itself is derived from the airframe, not backed into the two
+ * live failures below: subsonic airliners essentially never exceed ~510kt
+ * true airspeed (Mach 0.89 at a cruise-altitude speed of sound of ~574kt --
+ * already faster than most of the fleet flies). Past that, only wind can
+ * add more, and a strong but genuinely SUSTAINED jet-stream push -- not a
+ * one-minute gust core -- is on the order of 110kt. 510 + 110 = 620.
+ *
+ * That number happens to land between the two live failures:
+ *   - THY6044 (660nm claimed in 15min = 2,640kt implied) fails by 4x -- a
+ *     flight delayed badly enough that the countdown to its fixed
+ *     scheduled arrival was already deep into the impossible. Any bound
+ *     from 400kt to 1000kt catches it identically, so nothing about
+ *     THY6044 drove the exact number. Its own live schedule row (as
+ *     TK6044) shows the mechanism close up: scheduled 03:13Z (+13min,
+ *     impossible for 660nm) sitting beside a since-published revised
+ *     04:40Z (+100min, correct) -- the scheduled figure was never bad
+ *     data, just a promise the delay had already broken.
  *   - DAL688 (2,099nm claimed in 200min = 630kt implied) fails by under 2%
- *     against this bound. That is inside the noise of exactly how generous
- *     "sustained" should be, and a genuine storm-assisted eastbound
- *     Atlantic crossing DOES reach this neighborhood: British Airways 112,
- *     JFK-LHR, rode Storm Ciara's jet stream to a widely-reported 4h56m on
- *     9 Feb 2020 (peak groundspeed 825mph/717kt, per contemporary press
- *     coverage) -- ~2,992nm great-circle in 4h56m implies a ~606kt average
- *     for the whole flight. Real, documented, not hypothetical (see
- *     enrich.test.ts for the worked case this guard must NOT reject).
- * DAL688 is kept as a reject anyway, deliberately: it is JFK->SEA,
- * WESTbound, a direction the jet stream (which blows west-to-east) opposes
- * rather than assists, so the one physical mechanism that could excuse a
- * 600+kt average does not apply to it the way it would an eastbound
- * Atlantic leg. This guard has no way to use that fact directly -- it is a
- * single scalar, deliberately, with no notion of route direction -- so
- * catching DAL688 here necessarily also means an exceptional EASTBOUND leg
- * faster than ~620kt would be rejected too, and fall through to physics
- * instead of the real time it actually has. Accepted anyway, because the
- * two outcomes are not symmetric: a false reject is cheap -- physics reads
- * this SAME aircraft's own live groundspeed, so a genuine tailwind leg is
- * not blind to its own tailwind there either -- while a false accept is
- * not: it puts a confidently wrong number on a 64px panel the viewer has no
- * way to tell from a real one.
+ *     against this bound -- confirmed a heavily delayed flight, not a
+ *     borderline-real one. That thin margin argues FOR the bound, not
+ *     against it: a delayed flight's scheduled time degrades continuously
+ *     as the delay grows, sitting just past the line early on and further
+ *     past it the longer the delay runs. Catching DAL688 at 1.6% over means
+ *     catching its delay near the start of that curve, not scraping in a
+ *     marginal call -- the alternative is not "avoid a false positive", it
+ *     is "wait for the number to get as obviously wrong as THY6044's before
+ *     acting on it".
+ *
+ * A genuine fast leg can sit in that same numeric neighborhood, which is
+ * the real, separate question this bound also has to weigh: British
+ * Airways 112, JFK-LHR, rode Storm Ciara's jet stream to a widely-reported
+ * 4h56m on 9 Feb 2020 (peak groundspeed 825mph/717kt, per contemporary
+ * press coverage) -- ~2,992nm great-circle in 4h56m implies a ~606kt
+ * average for the whole flight, comfortably under this bound. Real,
+ * documented, not hypothetical (see enrich.test.ts for the worked case
+ * this guard must NOT reject). DAL688 is additionally JFK->SEA, WESTbound,
+ * a direction the jet stream (which blows west-to-east) opposes rather
+ * than assists -- corroborating, once the delay is already confirmed, that
+ * 630kt was never a tailwind on that flight specifically. This guard has
+ * no way to use route direction directly -- it is a single scalar,
+ * deliberately, the same blunt-instrument shape as join.ts's
+ * corridorExcessKm -- so catching DAL688-shaped delays here necessarily
+ * also means an exceptional EASTBOUND leg faster than ~620kt would be
+ * rejected too, and fall through to physics instead of the real time it
+ * actually has. Accepted anyway, because the two outcomes are not
+ * symmetric: a false reject is cheap -- physics reads this SAME aircraft's
+ * own live groundspeed, so a genuine tailwind leg is not blind to its own
+ * tailwind there either -- while a false accept is not: it puts a
+ * confidently wrong number on a 64px panel the viewer has no way to tell
+ * from a real one.
  */
 export const MAX_SCHEDULE_GS_KT = 620;
 
 /**
  * A schedule-derived epoch is plausible only if the remaining distance is
  * coverable, at MAX_SCHEDULE_GS_KT, in the time it claims. If it is not,
- * the row is stale or mismatched -- a real arrival time, just not for this
- * leg or this day -- so it is treated exactly like a failed futureEpoch
- * check: as if the field had never been supplied, and the chain moves on to
- * the next candidate rather than handing an impossible number to
- * round()/formatEta.
+ * the flight is most likely running late enough that its published time no
+ * longer describes a journey it can still make (see MAX_SCHEDULE_GS_KT's
+ * own comment) -- or, less commonly, the row is a real arrival time for a
+ * different leg or day entirely. Either way it is treated exactly like a
+ * failed futureEpoch check: as if the field had never been supplied, and
+ * the chain moves on to the next candidate rather than handing an
+ * impossible number to round()/formatEta.
  *
  * Below TERMINAL_NM this check does not run: at short range, one minute of
  * rounding in the schedule feed (times are minute-granular, not
