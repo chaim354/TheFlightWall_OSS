@@ -24,6 +24,38 @@ static String optStr(JsonObject o, const char *key)
     return String(v);
 }
 
+#if defined(BOARD_HAS_PSRAM)
+namespace
+{
+// Same allocator AdsbLolFetcher and FlightRadar24Fetcher already use, and it is
+// needed here for the opposite reason to theirs.
+//
+// Those two parse BIG bodies, so arduino-esp32 sends their allocations to PSRAM
+// on its own: anything larger than CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (4096
+// bytes on this toolchain -- verified in the packaged sdkconfig, see
+// platformio.ini) prefers PSRAM. Forcing it there is belt-and-braces for them.
+//
+// This fetcher is the opposite case. Its reply is ~2KB by design -- the server
+// has already joined, filtered, sorted and capped, so there is nothing bulky
+// left to send. That puts BOTH the response String and this document UNDER the
+// 4096-byte threshold, which means they stay in internal RAM, and they are
+// allocated and freed on every single fetch cycle. Small does not mean free:
+// that is per-cycle churn in the one pool the TLS handshake needs a large
+// CONTIGUOUS block from (see PIXEL_COLOR_DEPTH_BITS in platformio.ini, where
+// 6-bit colour was chosen precisely to widen that block from ~40KB to ~56KB).
+//
+// So the fetcher least likely to need PSRAM on size grounds is the one that has
+// to ask for it explicitly, and it is also the only path a server-mode device
+// runs every cycle.
+struct PsramAllocator : ArduinoJson::Allocator
+{
+    void *allocate(size_t n) override { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); }
+    void deallocate(void *p) override { heap_caps_free(p); }
+    void *reallocate(void *p, size_t n) override { return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM); }
+};
+} // namespace
+#endif
+
 WiFiClientSecure &FlightWallServerFetcher::secureClient()
 {
     if (!m_secureInit)
@@ -95,8 +127,16 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
     String body = http.getString();
     http.end();
 
-    // Small by design — the server sends ~2KB, not the ~70KB an area feed does.
+    // Small by design -- the server sends ~2KB, not the ~70KB an area feed does.
+    // Small, but parsed OUT of internal RAM anyway: see PsramAllocator above for
+    // why being under the 4KB auto-threshold is what makes this the one path
+    // that still churns the pool the TLS handshake competes for.
+#if defined(BOARD_HAS_PSRAM)
+    static PsramAllocator psramAllocator;
+    JsonDocument doc(&psramAllocator);
+#else
     JsonDocument doc;
+#endif
     DeserializationError err = deserializeJson(doc, body);
     if (err)
     {

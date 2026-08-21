@@ -2,6 +2,7 @@
 Purpose: Implementation of the on-device configuration & control web server.
 */
 #include "core/WebConfigServer.h"
+#include "esp_heap_caps.h"
 #include "core/Settings.h"
 #include "config/HardwareConfiguration.h" // board-guarded pins reported in /api/status
 #include "adapters/GeoLocator.h"
@@ -162,6 +163,20 @@ void WebConfigServer::handleGetStatus()
     // source. Flights render normally either way -- informational only.
     doc["serverStale"] = _serverStale;
     doc["freeHeap"] = (uint32_t)ESP.getFreeHeap();
+    // freeHeap ALONE is misleading, and it misled a live diagnosis: the device was
+    // failing every fetch with ~174KB free, which reads healthy. What a TLS
+    // handshake actually needs is a large CONTIGUOUS internal block -- the same
+    // quantity PIXEL_COLOR_DEPTH_BITS=6 exists to widen (~40KB -> ~56KB, see
+    // platformio.ini). Total free can stay flat while that block fragments away
+    // underneath it, so report the block itself, not just the sum.
+    //
+    // main.cpp's logHeap() has printed these to serial all along; they were simply
+    // unreachable over the network, which is the only channel available when the
+    // board is mounted on a wall. Same three numbers, same calls.
+    doc["largestInternal"] = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    doc["largestDma"] = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+    doc["freeInternal"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    doc["freePsram"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["lightLevel"] = _lightLevel;
     doc["lightDark"] = _lightDark;
     // Board-specific pins so the (single, board-agnostic) web UI can label the light
