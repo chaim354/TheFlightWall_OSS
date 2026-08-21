@@ -44,16 +44,48 @@ export interface ServerConfig {
 const DEFAULT_PORT = 8787;
 const DEFAULT_BOARDS = 'KJFK,KLGA,KEWR,KBOS';
 const DEFAULT_SCHEDULE_PATH = './data/schedule.json';
-const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+/**
+ * AeroDataBox refresh cadence.
+ *
+ * Two hours, not six. The window is +/-6h around BUILD time, so at six-hourly
+ * refreshes its forward half is spent by the end of each cycle: at build+6h
+ * the aircraft overhead are landing at build+6h and later, and the table stops
+ * exactly there. Route fill decayed across every cycle as a result, and rows
+ * AeroDataBox populates late were missed entirely -- DL2532 (PBI->LGA, landing
+ * 13:50Z) was absent from a table built at 13:43Z and present in the same
+ * board 15 minutes later. At two hours the window is never more than 2h
+ * off-centre and a late-populated row is picked up within 2h.
+ *
+ * Cost, against the $5/mo Pro tier's 6,000 units/month (see
+ * fixtures/README.md for how the 2-units-per-call tier was measured):
+ *   4 boards x 2 units x 12/day x 30 = 2,880 units/month
+ * versus 960 at six-hourly. Three times the spend, no change in dollars, and
+ * still ~2x headroom. Hourly would be 5,760 -- inside the tier but with no
+ * margin for a retry storm, so two hours is the defensible point.
+ */
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
 /**
- * Port Authority merge cadence.
+ * Port Authority merge cadence -- DISABLED (0).
  *
- * Ten minutes is ~8 requests per pass, i.e. about 0.8/min. Measured safe
- * headroom: 18 requests at 2s spacing over five minutes (3.6/min) drew no
- * throttling at all, while an unspaced burst of ~12-15 did. See panynj.ts.
+ * The adapter works and is fully tested against real captured boards, but the
+ * endpoint will not serve us in production:
+ *
+ *   - The OVH box was refused 403 on its FIRST request, with and without a
+ *     browser User-Agent.
+ *   - Blocks escalate. A first block cleared in ~15-20 minutes; a second, after
+ *     only modest additional traffic, had not cleared after 40 minutes of
+ *     five-minute polling.
+ *   - And the cadence that looked safe was measured from a residential IP,
+ *     which says nothing about a datacenter one -- the wrong machine entirely.
+ *
+ * A source that escalates blocks under light exploratory load cannot be a live
+ * dependency for the panel. The code is kept because it is correct, documented
+ * and costs nothing while disabled: set this to a positive number to re-enable
+ * it if the boards are ever reachable from wherever this runs (a different
+ * egress, or a residential host).
  */
-const TEN_MINUTES_MS = 10 * 60 * 1000;
+const PANYNJ_DISABLED = 0;
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
@@ -61,9 +93,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     aerodataboxKey: env.AERODATABOX_KEY ?? '',
     boards: env.BOARDS ?? DEFAULT_BOARDS,
     schedulePath: env.SCHEDULE_PATH ?? DEFAULT_SCHEDULE_PATH,
-    refreshIntervalMs: SIX_HOURS_MS,
+    refreshIntervalMs: TWO_HOURS_MS,
     boardFetchDelayMs: BOARD_FETCH_DELAY_MS,
-    panynjIntervalMs: TEN_MINUTES_MS,
+    panynjIntervalMs: PANYNJ_DISABLED,
     panynjPageDelayMs: PAGE_DELAY_MS,
   };
 }

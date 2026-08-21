@@ -131,8 +131,20 @@ adapter was being built and cleared on its own both times.
 
 A deliberate probe — 18 requests at 2s spacing over 5 minutes — drew no
 throttling, suggesting a 10-minute/8-request cadence had ample headroom. **That
-did not hold**: a later, lighter burst was refused, which means the accounting
-window is longer than the probe measured and the probe's own traffic counted
-toward it. The cadence in `server.ts` is therefore a guess bounded by the
-backoff in `refresh.ts`, not a measured-safe figure. It needs watching in
-production before being trusted or shortened.
+did not hold**, twice over:
+
+- A later, lighter burst was refused, so the accounting window is longer than
+  the probe measured and the probe's own traffic counted toward it.
+- **Blocks escalate.** The first block cleared in ~15–20 minutes. The second,
+  after only modest extra traffic, had not cleared after 40 minutes of
+  five-minute polling.
+- The probe was run from a **residential** IP. That says nothing about a
+  datacenter one, so the cadence it suggested was measured on the wrong
+  machine — an error worth naming, because the number looked authoritative.
+- The OVH box was refused **403 on its first ever request**, with and without a
+  browser `User-Agent`.
+
+**The source therefore ships disabled** (`panynjIntervalMs: 0`). The adapter is
+correct and tested; it is the endpoint's willingness to serve this deployment
+that is missing. Re-enable only from an egress that is actually allowed, and
+re-measure from that host rather than trusting anything above.

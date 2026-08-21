@@ -34,11 +34,13 @@ describe('configFromEnv', () => {
     expect(cfg.aerodataboxKey).toBe(''); // no default -- there isn't a sensible one
     expect(cfg.boards).toBe('KJFK,KLGA,KEWR,KBOS');
     expect(cfg.schedulePath).toBe('./data/schedule.json');
-    expect(cfg.refreshIntervalMs).toBe(6 * 60 * 60 * 1000);
+    // Two hours, not six: the +/-6h window is centred on build time, so a
+    // six-hourly refresh runs out of forward coverage by the end of each cycle.
+    expect(cfg.refreshIntervalMs).toBe(2 * 60 * 60 * 1000);
     expect(cfg.boardFetchDelayMs).toBe(1500);
-    // The Port Authority merge runs on its own, much shorter period -- it is
-    // free, and the short cadence is the whole point of having it.
-    expect(cfg.panynjIntervalMs).toBe(10 * 60 * 1000);
+    // The Port Authority source ships disabled -- the endpoint refuses this
+    // deployment's egress and escalates its blocks. See server.ts.
+    expect(cfg.panynjIntervalMs).toBe(0);
     expect(cfg.panynjPageDelayMs).toBe(2000);
   });
 
