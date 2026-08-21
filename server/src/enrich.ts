@@ -162,7 +162,7 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
   const cs = a.callsign.trim();
   if (!cs) return null; // no identity, not worth a slot
 
-  const row = matchSchedule(cs, a.lat, a.lon, rows);
+  const row = matchSchedule(cs, a.lat, a.lon, rows, nowMs / 1000);
 
   let etaMin: number | null = null;
   let etaText: string | null = null;

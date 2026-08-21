@@ -1,4 +1,4 @@
-import { corridorExcessKm } from './geo';
+import { corridorExcessKm, haversineKm, KM_PER_NM } from './geo';
 import type { ScheduleRow } from './types';
 
 /**
@@ -10,6 +10,70 @@ export const MAX_CORRIDOR_EXCESS_KM = 300;
 
 /** Minimum geometric separation, km, before we call one row a better fit. */
 const TIEBREAK_MARGIN_KM = 50;
+
+/**
+ * Slowest groundspeed an airborne scheduled flight is assumed to make good
+ * over the rest of its leg, for the "is this aircraft even on this leg" test
+ * below. Deliberately far below any airliner's cruise -- a turboprop makes
+ * ~250kt and a jet 400-500 -- because this bound exists to reject rows that
+ * are wrong by HOURS, not to model flight time. Anything tighter would start
+ * arguing with headwinds.
+ */
+const MIN_ENROUTE_GS_KT = 180;
+
+/**
+ * Added on top, for time the aircraft may spend not making progress toward
+ * the destination at all: holds, vectoring, a ground stop before an
+ * en-route leg, a diversion and recovery.
+ */
+const ENROUTE_SLACK_MIN = 180;
+
+/**
+ * Could an aircraft here still be flying the leg this row describes?
+ *
+ * WHY THIS EXISTS. Geometry alone cannot answer it. Every board this server
+ * watches is NYC-area, so a corridor into or out of NYC passes near an
+ * aircraft over NYC almost by construction -- the corridor check discards
+ * geometrically impossible rows (SFO->LAX seen over New York) but is nearly
+ * blind between a row for THIS leg and a row for the same flight number on a
+ * different day. Measured live: TCN719, an operator not in CARRIER_CANDIDATES,
+ * matched `B6 719 JFK->ATL` and rendered a route and an 11h30 ETA. There was
+ * only ONE candidate for number 719, so the tiebreak never ran; the corridor
+ * excess was ~0 because the aircraft was over JFK and the row starts at JFK.
+ * What actually disqualified that row was time: it was scheduled to land at
+ * 03:46Z the following day, i.e. to DEPART about nine hours after the aircraft
+ * being matched was already in the air.
+ *
+ * THE BOUND IS ONE-SIDED, and only the far side. A row is rejected when its
+ * arrival is implausibly FAR away for the distance still to run. It is never
+ * rejected for being too soon -- enrich.ts's plausibleEpoch already owns that
+ * direction for the ETA, and applying it here would throw away the route as
+ * well as the time.
+ *
+ * DELAYS PASS, and that is why the SCHEDULED time is used rather than the
+ * revised one. A delay moves the revised arrival LATER while the scheduled
+ * arrival stays put or slides into the past, so testing the scheduled time
+ * cannot punish a late-running flight -- exactly the DAL688 case this project
+ * has already been bitten by. What moves a scheduled arrival implausibly far
+ * into the future is not delay; it is the row belonging to another day.
+ *
+ * A row this cannot evaluate -- no arrival time, or no destination
+ * coordinates -- is let THROUGH rather than rejected. That is the opposite of
+ * excessFor's stance on missing coordinates, and deliberately so: a missing
+ * corridor makes a row uncheckable against the strongest signal available,
+ * whereas a missing time leaves the corridor check still doing its job, and
+ * rejecting on it would blank every row from a provider that supplies routes
+ * without arrival times.
+ */
+function temporallyPlausible(r: ScheduleRow, lat: number, lon: number, nowSec: number): boolean {
+  const arrival = r.schedArrEpoch ?? r.revArrEpoch;
+  if (arrival === null) return true; // nothing to test against
+  if (r.destLat === null || r.destLon === null) return true; // no distance to test with
+
+  const nm = haversineKm(lat, lon, r.destLat, r.destLon) / KM_PER_NM;
+  const maxMinutes = (nm / MIN_ENROUTE_GS_KT) * 60 + ENROUTE_SLACK_MIN;
+  return (arrival - nowSec) / 60 <= maxMinutes;
+}
 
 export interface CallsignKey {
   operator: string;
@@ -96,6 +160,7 @@ export function matchSchedule(
   lat: number,
   lon: number,
   rows: readonly ScheduleRow[],
+  nowSec: number,
 ): ScheduleRow | null {
   const cs = callsign.trim().toUpperCase();
 
@@ -128,6 +193,14 @@ export function matchSchedule(
     candidates = candidates.filter((r) => allowed.includes(r.carrierIata));
     if (candidates.length === 0) return null;
   }
+
+  // Drop rows this aircraft could not still be flying. Applied BEFORE the
+  // geometry scoring below, not after, because the failure it catches is one
+  // geometry cannot see: a single surviving candidate is returned outright
+  // (`scored.length === 1`), so the tiebreak never gets a chance to be
+  // sceptical about it. See temporallyPlausible.
+  candidates = candidates.filter((r) => temporallyPlausible(r, lat, lon, nowSec));
+  if (candidates.length === 0) return null;
 
   const scored = candidates
     .map((r) => ({ row: r, excess: excessFor(r, lat, lon) }))

@@ -21,6 +21,10 @@ class FakeStorage implements ScheduleStorage {
   }
 }
 
+/** Fixed 'now'; these rows' epochs are far in the past, which the temporal
+ *  filter passes through -- see test/join.test.ts for its own cases. */
+const NOW = 1_787_000_000;
+
 /** DL 5075 CVG->LGA, the shape both sources would produce for one flight. */
 const base = (over: Partial<ScheduleRow> = {}): ScheduleRow => ({
   callsign: null,
@@ -80,7 +84,7 @@ describe('refreshPanynj: merging with the AeroDataBox table', () => {
 
     const rows = storedRowsOf(storage.value);
     // A point on the CVG->LGA corridor.
-    const hit = matchSchedule('EDV5075', 40.5, -75.5, rows);
+    const hit = matchSchedule('EDV5075', 40.5, -75.5, rows, NOW);
     expect(hit).not.toBeNull();
     expect(hit!.destIata).toBe('LGA');
 
@@ -91,13 +95,13 @@ describe('refreshPanynj: merging with the AeroDataBox table', () => {
     // falls through to number + carrier + geometry, where two rows describing
     // the same leg score an identical excess and the tiebreak refuses both.
     const union = [base({ schedArrEpoch: 100 }), base({ schedArrEpoch: 200 })];
-    expect(matchSchedule('EDV5075', 40.5, -75.5, union)).toBeNull();
+    expect(matchSchedule('EDV5075', 40.5, -75.5, union, NOW)).toBeNull();
 
     // And when a callsign IS present the exact path returns before the
     // tiebreak is ever reached -- so the union is not uniformly fatal, which
     // is exactly why this needed asserting rather than assuming.
     const withCallsign = [base({ callsign: 'EDV5075' }), base({ schedArrEpoch: 200 })];
-    expect(matchSchedule('EDV5075', 40.5, -75.5, withCallsign)).not.toBeNull();
+    expect(matchSchedule('EDV5075', 40.5, -75.5, withCallsign, NOW)).not.toBeNull();
   });
 
   it('keeps the AeroDataBox callsign under the fresher Port Authority row', async () => {
