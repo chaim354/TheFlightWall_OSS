@@ -126,14 +126,25 @@ const API_HOST = 'aerodatabox.p.rapidapi.com';
  * than one API -- cheap to send, and it is what the plan's own sketch names
  * as the surface this key is for.
  *
- * The 12-hour window (2h back, 10h forward) matters: flights already
- * airborne departed in the past, so a forward-only window misses exactly the
- * aircraft overhead right now.
+ * The window matters and is centred, not forward-biased -- see the comment on
+ * the computation below for the measurement that settled it.
  */
 export async function fetchBoard(icao: string, apiKey: string): Promise<ScheduleRow[]> {
+  // Window is centred, not forward-biased. FIDS rows are keyed on SCHEDULED
+  // time, but we match aircraft that are airborne NOW -- and a delayed flight
+  // still in the air can have been scheduled many hours ago. A -2h/+10h window
+  // missed every one of them.
+  //
+  // Measured against 8 aircraft actually overhead JFK, matching on the KJFK
+  // board alone:
+  //   -2h/+10h  436 rows  0/8 matched   <- what this used to be
+  //   -6h/+6h   508 rows  3/8 matched
+  //   -9h/+3h   538 rows  3/8 matched   <- more rows, no better
+  // -9h buys nothing over -6h and starves the forward half, which is what
+  // catches flights about to depart. 12h total is AeroDataBox's cap.
   const now = new Date();
-  const from = new Date(now.getTime() - 2 * 3600_000).toISOString().slice(0, 16);
-  const to = new Date(now.getTime() + 10 * 3600_000).toISOString().slice(0, 16);
+  const from = new Date(now.getTime() - 6 * 3600_000).toISOString().slice(0, 16);
+  const to = new Date(now.getTime() + 6 * 3600_000).toISOString().slice(0, 16);
   const url =
     `https://${API_HOST}/flights/airports/icao/${icao}/${from}/${to}` +
     `?withLeg=true&direction=Both&withCancelled=false&withCodeshared=false`;
