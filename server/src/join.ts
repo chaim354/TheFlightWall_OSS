@@ -111,8 +111,9 @@ export function callsignKey(callsign: string): CallsignKey | null {
  * observed flying as AA three times and DL twice in one sample — so they list
  * every partner and let geometry break the tie.
  *
- * null means "unknown operator, do not constrain" — geometry alone decides,
- * carrying whatever residual risk that already implies (see matchSchedule).
+ * null means "unknown operator" — and matchSchedule now declines the match
+ * outright rather than letting geometry decide alone, because on live traffic
+ * that fallback produced only wrong routes. See the comment at its use.
  *
  * A known operator is different: it can only ever narrow candidates, never
  * widen them, and matchSchedule returns null rather than widening back to the
@@ -177,7 +178,30 @@ export function matchSchedule(
   if (candidates.length === 0) return null;
 
   const allowed = candidateCarriers(key.operator);
-  if (allowed) {
+  if (!allowed) {
+    // UNKNOWN OPERATOR -> no route. It reached here having already failed the
+    // exact-callsign path above, so nothing is left but number + geometry,
+    // and geometry cannot carry that weight: every board this server watches
+    // is NYC-area, so a corridor into or out of NYC passes near an aircraft
+    // over NYC almost by construction. A lone same-number row is then
+    // returned outright, with nothing having actually corroborated it.
+    //
+    // Measured on live traffic, and the split was total. Of six
+    // unknown-operator aircraft overhead, the three the schedule ALSO carried
+    // an operating callsign for (ITY608 ITA Airways, EJA743 NetJets, KAP5483
+    // Cape Air) were matched correctly by the exact path. The three it did not
+    // (JKR57, EJM290, TCN719) were each matched to an unrelated airline row
+    // sharing only a flight number -- EJM290, an Executive Jet Management
+    // business jet, became `AS290 EWR->PDX` with a 9h30 ETA; TCN719 became
+    // `B6 719 JFK->ATL` with an 11h30 one.
+    //
+    // So the schedule table itself already answers "is this operator running
+    // scheduled service here": if it is, it ships the callsign and the exact
+    // path matches. Guessing past that point only ever produced wrong
+    // answers, which on a 64px panel are indistinguishable from right ones.
+    return null;
+  }
+  {
     // A known operator is positive information, not a hint: we know every
     // carrier it can fly for, and none of the rows sharing this number
     // belong to one of them. That means the true row is simply missing from

@@ -133,13 +133,24 @@ describe('matchSchedule', () => {
     expect(matchSchedule('EDV5075', pos.lat, pos.lon, rows, NOW)).toBeNull();
   });
 
-  it('still falls through to geometry when the operator is entirely absent from the table', () => {
-    // ZZZ has no entry in CARRIER_CANDIDATES at all, so candidateCarriers
-    // returns null ("do not constrain") and the single row sharing this
-    // number must be accepted on geometry alone. This is the fallback an
-    // incomplete table is supposed to degrade into -- it must still work.
+  it('declines the match entirely when the operator is absent from the table', () => {
+    // CHANGED BEHAVIOUR, on live evidence. This used to fall through to
+    // geometry alone. Measured over six unknown-operator aircraft, that
+    // fallback was wrong every time it fired: JKR57, EJM290 and TCN719 each
+    // locked onto an unrelated airline row sharing only a flight number,
+    // while the three that were right (ITY608, EJA743, KAP5483) all came from
+    // the exact-callsign path instead. Geometry cannot corroborate a lone
+    // NYC-area row for an aircraft over NYC.
     const rows = [row({ carrierIata: 'XY', number: '2100' })];
-    expect(matchSchedule('ZZZ2100', pos.lat, pos.lon, rows, NOW)?.carrierIata).toBe('XY');
+    expect(matchSchedule('ZZZ2100', pos.lat, pos.lon, rows, NOW)).toBeNull();
+  });
+
+  it('still matches an unknown operator when the schedule ships its callsign', () => {
+    // The other half, and why this is not simply a coverage cut: a foreign or
+    // charter operator the table knows by callsign keeps its route. ITA
+    // Airways (ITY), NetJets (EJA) and Cape Air (KAP) all matched this way.
+    const rows = [row({ carrierIata: 'AZ', number: '608', callsign: 'ITY608', destIata: 'JFK' })];
+    expect(matchSchedule('ITY608', pos.lat, pos.lon, rows, NOW)?.carrierIata).toBe('AZ');
   });
 
   it('rejects a row missing coordinates rather than trusting it unchecked', () => {
@@ -195,14 +206,14 @@ describe('matchSchedule: temporal plausibility', () => {
     // land at 03:46Z the NEXT day -- i.e. to depart some nine hours after this
     // aircraft was already airborne.
     const rows = [jfkAtl({ schedArrEpoch: NOW + 11 * HOUR })];
-    expect(matchSchedule('TCN719', overJfk.lat, overJfk.lon, rows, NOW)).toBeNull();
+    expect(matchSchedule('JBU719', overJfk.lat, overJfk.lon, rows, NOW)).toBeNull();
   });
 
   it('keeps the same row when its arrival is consistent with the leg', () => {
     // The other half: the guard must not simply blank JFK->ATL. Two hours out
     // is an ordinary time for a ~660nm leg.
     const rows = [jfkAtl({ schedArrEpoch: NOW + 2 * HOUR })];
-    const m = matchSchedule('TCN719', overJfk.lat, overJfk.lon, rows, NOW);
+    const m = matchSchedule('JBU719', overJfk.lat, overJfk.lon, rows, NOW);
     expect(m?.destIata).toBe('ATL');
   });
 
@@ -211,11 +222,11 @@ describe('matchSchedule: temporal plausibility', () => {
     // ~5,970nm and legitimately lands ~14h out; the bound has to be a function
     // of the distance still to run, not a constant.
     const rows = [row({
-      carrierIata: 'NH', number: '9', origIata: 'JFK', destIata: 'HND',
+      carrierIata: 'DL', number: '9', origIata: 'JFK', destIata: 'HND',
       origLat: 40.6398, origLon: -73.7789, destLat: 35.5523, destLon: 139.7798,
       schedArrEpoch: NOW + 14 * HOUR,
     })];
-    expect(matchSchedule('ANA9', overJfk.lat, overJfk.lon, rows, NOW)?.destIata).toBe('HND');
+    expect(matchSchedule('DAL9', overJfk.lat, overJfk.lon, rows, NOW)?.destIata).toBe('HND');
   });
 
   it('rejects a next-day row for an aircraft already near the destination', () => {
@@ -233,13 +244,13 @@ describe('matchSchedule: temporal plausibility', () => {
     // late-running flight, however late it is. Here the revised arrival is 9
     // hours out, far past the bound, and the row must still match.
     const rows = [jfkAtl({ schedArrEpoch: NOW - 3 * HOUR, revArrEpoch: NOW + 9 * HOUR })];
-    const m = matchSchedule('TCN719', overJfk.lat, overJfk.lon, rows, NOW);
+    const m = matchSchedule('JBU719', overJfk.lat, overJfk.lon, rows, NOW);
     expect(m?.destIata).toBe('ATL');
   });
 
   it('falls back to the revised time only when there is no scheduled one', () => {
     const rows = [jfkAtl({ schedArrEpoch: null, revArrEpoch: NOW + 11 * HOUR })];
-    expect(matchSchedule('TCN719', overJfk.lat, overJfk.lon, rows, NOW)).toBeNull();
+    expect(matchSchedule('JBU719', overJfk.lat, overJfk.lon, rows, NOW)).toBeNull();
   });
 
   it('lets a row with no arrival time through rather than rejecting what it cannot judge', () => {
@@ -247,7 +258,7 @@ describe('matchSchedule: temporal plausibility', () => {
     // Authority departures board does exactly this) must not lose every row to
     // a check it has no way to pass. The corridor check still applies.
     const rows = [jfkAtl({ schedArrEpoch: null, revArrEpoch: null })];
-    expect(matchSchedule('TCN719', overJfk.lat, overJfk.lon, rows, NOW)?.destIata).toBe('ATL');
+    expect(matchSchedule('JBU719', overJfk.lat, overJfk.lon, rows, NOW)?.destIata).toBe('ATL');
   });
 
   it('still applies to a known operator, which can also collide across days', () => {
