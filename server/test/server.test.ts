@@ -36,6 +36,10 @@ describe('configFromEnv', () => {
     expect(cfg.schedulePath).toBe('./data/schedule.json');
     expect(cfg.refreshIntervalMs).toBe(6 * 60 * 60 * 1000);
     expect(cfg.boardFetchDelayMs).toBe(1500);
+    // The Port Authority merge runs on its own, much shorter period -- it is
+    // free, and the short cadence is the whole point of having it.
+    expect(cfg.panynjIntervalMs).toBe(10 * 60 * 1000);
+    expect(cfg.panynjPageDelayMs).toBe(2000);
   });
 
   it('reads every var when all are set', () => {
@@ -61,6 +65,8 @@ describe('startServer', () => {
       aerodataboxKey: '', // missing key -- must still serve (per spec)
       boards: 'KJFK',
       schedulePath: join(dir, 'schedule.json'),
+      panynjIntervalMs: 0, // no network from tests
+      panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
@@ -95,6 +101,8 @@ describe('startServer', () => {
       aerodataboxKey: '',
       boards: 'KJFK',
       schedulePath: join(dir, 'schedule.json'),
+      panynjIntervalMs: 0, // no network from tests
+      panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
@@ -112,6 +120,8 @@ describe('startServer', () => {
       aerodataboxKey: 'a-key',
       boards: 'KJFK,KLGA',
       schedulePath: join(dir, 'schedule.json'),
+      panynjIntervalMs: 0, // no network from tests
+      panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
@@ -128,6 +138,8 @@ describe('startServer', () => {
       aerodataboxKey: '',
       boards: 'KJFK',
       schedulePath: join(dir, 'schedule.json'),
+      panynjIntervalMs: 0, // no network from tests
+      panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
       boardFetchDelayMs: 0,
     });
@@ -143,6 +155,8 @@ describe('startServer', () => {
         aerodataboxKey: '',
         boards: 'KJFK',
         schedulePath: join(dir, 'schedule2.json'),
+        panynjIntervalMs: 0, // no network from tests
+        panynjPageDelayMs: 0,
         refreshIntervalMs: 24 * 60 * 60 * 1000,
         boardFetchDelayMs: 0,
       }),

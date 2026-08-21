@@ -13,3 +13,7 @@ firmware/data/*.gz
 
 # Worker dependencies (server/ has its own .gitignore for the rest)
 server/node_modules
+
+# wrangler's local cache -- holds the Cloudflare account id. Left over from
+# the deleted Worker; ignored so it cannot be swept into a commit.
+.wrangler

@@ -76,3 +76,45 @@ export function getAirportCoord(icao: string): AirportCoord | undefined {
   const t = AIRPORT_TUPLES[icao.toUpperCase()];
   return t ? { iata: t[0], lat: t[1], lon: t[2] } : undefined;
 }
+
+/**
+ * IATA -> ICAO, built once on first use.
+ *
+ * Exists because not every provider keys on ICAO. AeroDataBox's FIDS gives
+ * both codes, so `getAirportCoord` above suffices for it; the Port Authority
+ * boards (src/schedule/panynj.ts) give ONLY IATA -- `destinationAirportCode:
+ * "ORD"` -- with no ICAO anywhere in the payload, so a reverse index is the
+ * only way to reach coordinates for those rows.
+ *
+ * Safe to invert: IATA codes are unique across this table -- 4,565 entries,
+ * 4,565 distinct IATA codes, zero collisions (measured against the generated
+ * table, and asserted in test/airports.test.ts so a future regeneration that
+ * introduced one would fail rather than silently pick a winner). That is a
+ * property of this filtered table, not of IATA codes in general: the
+ * generator already requires a non-empty `iata_code` and drops the airport
+ * types most likely to carry a reused or informal code.
+ *
+ * Built lazily rather than at module load so the cost is paid only by
+ * deployments that actually use an IATA-keyed provider.
+ */
+let iataIndex: Record<string, string> | null = null;
+
+function iataToIcao(): Record<string, string> {
+  if (!iataIndex) {
+    const idx: Record<string, string> = {};
+    for (const icao of Object.keys(AIRPORT_TUPLES)) idx[AIRPORT_TUPLES[icao]![0]] = icao;
+    iataIndex = idx;
+  }
+  return iataIndex;
+}
+
+/**
+ * Look up an airport by IATA code (case insensitive). Same contract as
+ * `getAirportCoord`: returns undefined, never throws, for a code this table
+ * does not cover -- which a caller must degrade to "cannot check this leg"
+ * rather than trusting unchecked.
+ */
+export function getAirportCoordByIata(iata: string): AirportCoord | undefined {
+  const icao = iataToIcao()[iata.toUpperCase()];
+  return icao ? getAirportCoord(icao) : undefined;
+}

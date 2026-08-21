@@ -76,3 +76,63 @@ far-end airports are a floor this table is checked against
 (much smaller, residual) coverage gap that remains: an airport OurAirports
 does not classify as `large_airport`/`medium_airport`, or does not catalogue
 at all.
+
+## panynj-*.json — Port Authority of New York and New Jersey flight boards
+
+**Captured:** 2026-08-21, ~14:47 UTC (10:47 ET).
+**Endpoint:** `POST https://www.jfkairport.com/api/graphql`, `content-type: text/plain`, body = the JSON request payload run through lz-string's `compressToEncodedURIComponent`. Window was a +/-3h range in New York local time; `limit: 500`.
+**Files:** `panynj-jfk-arrivals.json` (500 rows, page 1 of 2), `panynj-lga-departures.json` (336 rows, complete), `panynj-queries.json` (the two request payloads, decompressed).
+
+Free, no key, no session — verified working from a plain Node process with no
+cookies or browser context.
+
+### Why the query text is stored verbatim
+
+The endpoint matches the query TEXT against an allowlist. A query differing
+from theirs only in **whitespace** (`paging { next __typename }` collapsed onto
+one line) is rejected with a 400 and an HTML error page. `panynj-queries.json`
+therefore holds both queries exactly as captured, and `test/panynj.test.ts`
+asserts `src/schedule/panynj.ts` still reproduces them byte-for-byte — so a
+Port Authority redeploy that reformats them fails a test here rather than
+silently 400ing in production.
+
+### What these boards give that AeroDataBox does not
+
+| | AeroDataBox | Port Authority |
+|---|---|---|
+| cost | billable | free |
+| refresh | 6-hourly, window centred on build time | minutes, window centred on now |
+| revised arrival time | 102/261 (39%) | 482/500 (96%) |
+| carrier + number | one `"B6 1184"` string to split | separate `airlineCode` / `flightNumber` fields |
+| operating callsign | 116/261 (44%) | never |
+| arrival time on a DEPARTURES row | yes (far end) | no such field |
+| BOS | yes | no — Massport, not Port Authority |
+
+The last three rows are why `refresh.ts` merges the two sources rather than
+replacing one with the other.
+
+### Measured quirks
+
+- `dateRevised` is **always null** (0/500 and 0/336) even when `timeRevised` is
+  set, so the revised date must be inferred from `dateScheduled` — with
+  midnight-rollover handling, or an 11:50 PM flight revised to 12:20 AM reads
+  as 23.5 hours early instead of 30 minutes late.
+- Times are New York **local**, 12-hour (`"09:40 AM"`), so DST matters.
+- Codeshares are included and inflate JFK 3-4x: one JFK->ORD departure appeared
+  15 times, under VS/DL/SK/LA/KQ among others.
+- `status` includes `Cancelled`, which the parser drops.
+
+### Rate limiting — the safe rate is NOT established
+
+The endpoint answers **403** when it decides we have asked for too much; the
+block is per-origin and time-based, and while it holds every request fails,
+including ones that succeeded moments earlier. It was tripped twice while this
+adapter was being built and cleared on its own both times.
+
+A deliberate probe — 18 requests at 2s spacing over 5 minutes — drew no
+throttling, suggesting a 10-minute/8-request cadence had ample headroom. **That
+did not hold**: a later, lighter burst was refused, which means the accounting
+window is longer than the probe measured and the probe's own traffic counted
+toward it. The cadence in `server.ts` is therefore a guess bounded by the
+backoff in `refresh.ts`, not a measured-safe figure. It needs watching in
+production before being trusted or shortened.

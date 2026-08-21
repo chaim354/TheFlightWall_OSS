@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { getAirportCoord } from '../src/schedule/airports';
+import { getAirportCoord, getAirportCoordByIata } from '../src/schedule/airports';
 
 describe('getAirportCoord', () => {
   it('resolves a known major airport with coordinates matching reality', () => {
@@ -41,6 +41,48 @@ describe('getAirportCoord', () => {
     expect(getAirportCoord('ZZZZ')).toBeUndefined();
     expect(getAirportCoord('')).toBeUndefined();
     expect(() => getAirportCoord('not-an-icao-code')).not.toThrow();
+  });
+});
+
+describe('getAirportCoordByIata', () => {
+  // The Port Authority boards (src/schedule/panynj.ts) give ONLY IATA codes,
+  // so this reverse lookup is the only route from those rows to coordinates.
+
+  it('resolves the same airport the ICAO lookup does', () => {
+    for (const [icao, iata] of [['KJFK', 'JFK'], ['KLGA', 'LGA'], ['KEWR', 'EWR'], ['KBOS', 'BOS'], ['SCEL', 'SCL'], ['TJSJ', 'SJU']]) {
+      expect(getAirportCoordByIata(iata!)).toEqual(getAirportCoord(icao!));
+    }
+  });
+
+  it('is case-insensitive and degrades to undefined rather than throwing', () => {
+    expect(getAirportCoordByIata('jfk')).toEqual(getAirportCoordByIata('JFK'));
+    expect(getAirportCoordByIata('ZZZ')).toBeUndefined();
+    expect(getAirportCoordByIata('')).toBeUndefined();
+    expect(() => getAirportCoordByIata('not-an-iata-code')).not.toThrow();
+  });
+
+  it('IATA codes are unique across the table, so inverting it picks no arbitrary winner', () => {
+    // The safety property the reverse index rests on. Measured at 4,565
+    // entries / 4,565 distinct IATA codes / 0 collisions -- but that is a
+    // property of THIS filtered table, not of IATA codes generally, so a
+    // future regeneration that admitted a duplicate would start silently
+    // resolving one airport's code to another's coordinates. Re-derived from
+    // the generated source rather than hardcoded.
+    const src = readFileSync(new URL('../src/schedule/airports.ts', import.meta.url), 'utf8');
+    const start = src.indexOf('{"', src.indexOf('AIRPORT_TUPLES'));
+    const semi = src.indexOf(';', start);
+    const tuples = JSON.parse(src.slice(start, src.lastIndexOf('}', semi) + 1)) as Record<string, [string, number, number]>;
+
+    const seen = new Map<string, string>();
+    const collisions: string[] = [];
+    for (const [icao, t] of Object.entries(tuples)) {
+      const prior = seen.get(t[0]);
+      if (prior) collisions.push(`${t[0]}: ${prior} and ${icao}`);
+      else seen.set(t[0], icao);
+    }
+    expect(collisions).toEqual([]);
+    expect(seen.size).toBe(Object.keys(tuples).length);
+    expect(seen.size).toBeGreaterThan(4000); // sanity: the parse really found the table
   });
 });
 

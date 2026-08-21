@@ -50,6 +50,17 @@ export interface ScheduleRow {
    * carry a revised one) -- most rows simply have no update to report yet.
    */
   revArrEpoch: number | null;
+  /**
+   * Which provider this row came from: `adb` AeroDataBox, `pa` Port Authority.
+   *
+   * Optional, and absent on every table written before two sources existed --
+   * treat `undefined` as "not Port Authority", which is what it was. Used only
+   * by refreshPanynj, to know which rows its own next pass supersedes; without
+   * it, stale Port Authority rows would accumulate on every merge until the
+   * 6-hourly AeroDataBox pass reset the table. Nothing downstream of the
+   * schedule table reads it.
+   */
+  src?: 'adb' | 'pa';
 }
 
 /** A display-ready flight, in the units the device renders. */

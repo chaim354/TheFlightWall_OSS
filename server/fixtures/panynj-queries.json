@@ -1,0 +1,39 @@
+{
+  "_comment": "Exact GraphQL request payloads captured from www.jfkairport.com on 2026-08-21. The endpoint matches query TEXT against an allowlist, so these strings must be reproduced byte-for-byte; test/panynj.test.ts asserts src/schedule/panynj.ts still does.",
+  "departures": {
+    "operationName": "GetDepartingFlights",
+    "query": "query GetDepartingFlights($departureAirport: String!, $departureDateTime: String!, $destinationAirport: String, $carrierCode: String, $limit: Int, $after: String) {\n  getDepartingFlights(\n    departureAirport: $departureAirport\n    departureDateTime: $departureDateTime\n    destinationAirport: $destinationAirport\n    carrierCode: $carrierCode\n    limit: $limit\n    after: $after\n  ) {\n    data {\n      dateScheduled\n      timeScheduled\n      dateRevised\n      timeRevised\n      destinationName\n      destinationAirportCode\n      airlineCode\n      airlineName\n      flightNumber\n      terminal\n      gate\n      status\n      __typename\n    }\n    paging {\n      next\n      __typename\n    }\n    __typename\n  }\n}",
+    "sampleVariables": {
+      "departureAirport": "JFK",
+      "departureDateTime": "2026-08-21T10:21/2026-08-21T23:59",
+      "destinationAirport": "",
+      "carrierCode": "",
+      "limit": 15,
+      "after": ""
+    },
+    "extensions": {
+      "clientLibrary": {
+        "name": "@apollo/client",
+        "version": "4.0.4"
+      }
+    }
+  },
+  "arrivals": {
+    "operationName": "GetArrivingFlights",
+    "query": "query GetArrivingFlights($arrivalAirport: String!, $arrivalDateTime: String!, $originAirport: String, $carrierCode: String, $limit: Int, $after: String) {\n  getArrivingFlights(\n    arrivalAirport: $arrivalAirport\n    arrivalDateTime: $arrivalDateTime\n    originAirport: $originAirport\n    carrierCode: $carrierCode\n    limit: $limit\n    after: $after\n  ) {\n    data {\n      dateScheduled\n      timeScheduled\n      dateRevised\n      timeRevised\n      originName\n      originAirportCode\n      airlineCode\n      airlineName\n      flightNumber\n      terminal\n      gate\n      status\n      isInternationalFlight\n      __typename\n    }\n    paging {\n      next\n      __typename\n    }\n    __typename\n  }\n}",
+    "sampleVariables": {
+      "arrivalAirport": "JFK",
+      "arrivalDateTime": "2026-08-21T11:15/2026-08-21T23:59",
+      "originAirport": "",
+      "carrierCode": "",
+      "limit": 15,
+      "after": ""
+    },
+    "extensions": {
+      "clientLibrary": {
+        "name": "@apollo/client",
+        "version": "4.0.4"
+      }
+    }
+  }
+}

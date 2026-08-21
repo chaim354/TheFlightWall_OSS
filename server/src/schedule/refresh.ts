@@ -1,4 +1,5 @@
 import { fetchBoard } from './aerodatabox';
+import { fetchBoard as fetchPanynj, PAGE_DELAY_MS } from './panynj';
 import { saveSchedule, type ScheduleStorage } from './store';
 import type { ScheduleRow } from '../types';
 
@@ -41,7 +42,10 @@ export async function refreshSchedule(
   for (let i = 0; i < boards.length; i++) {
     const icao = boards[i]!;
     try {
-      rows.push(...(await fetchBoard(icao, apiKey)));
+      // Tagged at this layer rather than in aerodatabox.ts's parser so the
+      // parser stays a pure payload->row mapping (and its tests keep asserting
+      // exact row shapes).
+      for (const r of await fetchBoard(icao, apiKey)) rows.push({ ...r, src: 'adb' });
       ok++;
     } catch (e) {
       // One board failing must not cost us the other three.
@@ -59,4 +63,198 @@ export async function refreshSchedule(
 
   await saveSchedule(storage, rows, nowMs);
   console.log(`schedule: ${rows.length} rows from ${ok}/${boards.length} boards`);
+}
+
+/**
+ * Refresh from the Port Authority boards and MERGE the result into whatever
+ * the AeroDataBox pass last stored, rather than replacing it.
+ *
+ * The two sources are complementary, not redundant:
+ *
+ *   - Port Authority is free and live, so it can run every few minutes with
+ *     its window centred on now. That is what fixes the decay described in
+ *     panynj.ts's header. It also carries a revised arrival time on ~96% of
+ *     arrivals against AeroDataBox's ~39%.
+ *   - AeroDataBox covers BOS, which the Port Authority does not operate at
+ *     all; supplies an operating callsign on ~44% of its rows (the
+ *     exact-match path in join.ts, the most reliable match there is, and one
+ *     these boards cannot feed because they publish only the marketing
+ *     carrier and number); and carries a far-end arrival time for DEPARTURES,
+ *     which the Port Authority departures board has no field for at all.
+ *
+ * WHY THE MERGE IS BY KEY AND NOT A UNION. Simply concatenating both sources
+ * would be actively harmful, not merely wasteful. Two rows describing the
+ * SAME flight have the same origin and destination, so they score an
+ * identical corridor `excess` in matchSchedule -- and its tiebreak returns
+ * null unless one candidate beats the next by TIEBREAK_MARGIN_KM. A union
+ * would therefore BLANK the route for exactly the flights both sources list.
+ * (Not universally: a row carrying an operating callsign is returned by the
+ * exact-match path before the tiebreak is reached. But a Port Authority row
+ * never carries one and 56% of AeroDataBox rows do not either, so most
+ * flights fall through to the path that blanks. Both halves of that are
+ * asserted in test/refreshPanynj.test.ts.) Rows are keyed on
+ * carrier+number+route and merged field-wise instead: the fresher Port
+ * Authority row wins, and anything it leaves null -- its callsign always, its
+ * arrival times on departures rows -- is filled from the AeroDataBox row it
+ * superseded.
+ *
+ * Never throws, and never writes a table it could not populate: if every
+ * board fails the previous table is left in place to age honestly.
+ */
+export async function refreshPanynj(
+  storage: ScheduleStorage,
+  nowMs: number,
+  delayMs: number = PAGE_DELAY_MS,
+): Promise<void> {
+  if (nowMs < blockedUntilMs) {
+    console.log(`panynj: backing off, ${Math.round((blockedUntilMs - nowMs) / 1000)}s remaining`);
+    return;
+  }
+
+  const fresh: ScheduleRow[] = [];
+  let ok = 0;
+  let attempted = 0;
+  let forbidden = false;
+
+  for (const iata of PANYNJ_AIRPORTS) {
+    for (const dir of ['arrival', 'departure'] as const) {
+      // Once we know we are blocked, the remaining boards in this pass will
+      // be blocked too, and hammering a rate limiter is what deepens it.
+      if (forbidden) break;
+      if (attempted > 0 && delayMs > 0) await sleep(delayMs);
+      attempted++;
+      try {
+        const rows = await fetchPanynj(iata, dir, nowMs, { pageDelayMs: delayMs });
+        for (const r of rows) fresh.push({ ...r, src: 'pa' });
+        ok++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // One board-direction failing must not cost the other five -- unless
+        // it is a 403, which is this endpoint's rate-limit response and
+        // applies to the whole origin, not to one board.
+        if (/\b403\b/.test(msg)) forbidden = true;
+        console.error(`panynj ${iata} ${dir} failed:`, msg);
+      }
+    }
+  }
+
+  if (forbidden) noteBlocked(nowMs);
+  else if (ok > 0) clearBlocked();
+
+  if (ok === 0) {
+    console.error('all panynj boards failed; keeping the previous table');
+    return;
+  }
+
+  const kept = (await storedRows(storage)).filter((r) => r.src !== 'pa');
+  const merged = mergeByFlight(fresh, kept);
+  await saveSchedule(storage, merged, nowMs);
+  console.log(
+    `schedule: ${merged.length} rows (${fresh.length} panynj from ${ok}/${attempted} boards, ${kept.length} kept)`,
+  );
+}
+
+export const PANYNJ_AIRPORTS = ['JFK', 'LGA', 'EWR'] as const;
+
+/**
+ * Backoff after a 403.
+ *
+ * WHY THIS IS NOT OPTIONAL. The Port Authority endpoint answers 403 when it
+ * decides we have asked for too much, and the block is per-origin and
+ * time-based, not per-board: while it holds, EVERY request fails, including
+ * ones that had been succeeding moments earlier. It was tripped twice while
+ * this adapter was being built and cleared on its own both times.
+ *
+ * AND THE SAFE RATE IS NOT KNOWN. A deliberate probe -- 18 requests at 2s
+ * spacing across 5 minutes -- drew no throttling at all, which suggested a
+ * 10-minute, 8-request cadence had an order of magnitude of headroom. That
+ * conclusion did not survive: a later, much lighter burst was refused, which
+ * means there is a longer accounting window than the probe measured and the
+ * probe's own traffic counted toward it. So the cadence in server.ts is a
+ * guess bounded by this backoff, not a measured-safe figure, and the honest
+ * position is that it needs observing in production before being trusted or
+ * shortened.
+ *
+ * Doubling from 15 minutes to a 4-hour ceiling. Long, deliberately: the
+ * AeroDataBox table underneath is complete and only hours stale, so backing
+ * off a long way costs a little route freshness, while hammering a limiter
+ * risks a harder block that costs this source entirely.
+ */
+const BACKOFF_BASE_MS = 15 * 60 * 1000;
+const BACKOFF_MAX_MS = 4 * 60 * 60 * 1000;
+
+let blockedUntilMs = 0;
+let backoffMs = 0;
+
+function noteBlocked(nowMs: number): void {
+  backoffMs = backoffMs === 0 ? BACKOFF_BASE_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+  blockedUntilMs = nowMs + backoffMs;
+  console.error(`panynj: 403, backing off ${Math.round(backoffMs / 60000)}m`);
+}
+
+function clearBlocked(): void {
+  blockedUntilMs = 0;
+  backoffMs = 0;
+}
+
+/** Test-only: module state would otherwise leak between cases. */
+export function resetPanynjBackoff(): void {
+  clearBlocked();
+}
+
+/**
+ * Every row in the stored table.
+ *
+ * Read back out of `byNumber` because that is where the rows live -- the
+ * stored shape is `{builtAtMs, index:{byNumber, byCallsign}}` with no flat
+ * array, and `byNumber` is the complete set (indexRows files EVERY row under
+ * its number, while `byCallsign` gets only those that have a callsign).
+ *
+ * Degrades to an empty list rather than throwing: a missing or unreadable
+ * table means this pass simply has nothing to merge onto.
+ */
+async function storedRows(storage: ScheduleStorage): Promise<ScheduleRow[]> {
+  const stored = await storage.read().catch(() => null);
+  const byNumber = stored?.index?.byNumber;
+  if (!byNumber || typeof byNumber !== 'object') return [];
+  return Object.values(byNumber).flat();
+}
+
+/** Identity of a scheduled leg, for deduplicating across sources. */
+const flightKey = (r: ScheduleRow): string =>
+  `${r.carrierIata}|${r.number}|${r.origIata ?? ''}|${r.destIata ?? ''}`;
+
+/**
+ * Merge `fresh` over `kept`, one row per flight.
+ *
+ * Field-wise, not row-wise: a fresh row wins on every field it actually has,
+ * but a null in it is filled from the row it superseded rather than
+ * destroying information the other source had. That is what preserves an
+ * AeroDataBox callsign under a Port Authority row, and what keeps the far-end
+ * arrival time on a departures row the Port Authority board cannot supply one
+ * for.
+ */
+function mergeByFlight(fresh: readonly ScheduleRow[], kept: readonly ScheduleRow[]): ScheduleRow[] {
+  const out = new Map<string, ScheduleRow>();
+  for (const r of kept) out.set(flightKey(r), r);
+  for (const r of fresh) {
+    const key = flightKey(r);
+    const prior = out.get(key);
+    out.set(key, prior ? fillNulls(r, prior) : r);
+  }
+  return [...out.values()];
+}
+
+/** `primary` with each null field filled from `secondary`. */
+function fillNulls(primary: ScheduleRow, secondary: ScheduleRow): ScheduleRow {
+  return {
+    ...primary,
+    callsign: primary.callsign ?? secondary.callsign,
+    origLat: primary.origLat ?? secondary.origLat,
+    origLon: primary.origLon ?? secondary.origLon,
+    destLat: primary.destLat ?? secondary.destLat,
+    destLon: primary.destLon ?? secondary.destLon,
+    schedArrEpoch: primary.schedArrEpoch ?? secondary.schedArrEpoch,
+    revArrEpoch: primary.revArrEpoch ?? secondary.revArrEpoch,
+  };
 }
