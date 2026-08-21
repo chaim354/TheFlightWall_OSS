@@ -82,17 +82,35 @@ export const CLIMB_VS_FPM = 500;
 export const CRUISE_ALT_FT = 28000;
 
 /**
- * Groundspeed below which a climbing aircraft is NOT assumed to be a jet
- * that will accelerate to jet cruise.
+ * Groundspeed at or above which a climbing aircraft is taken to be a jet.
  *
  * This gate is what keeps the correction below from wrecking slow traffic. A
  * Cessna 402 climbing out of Saranac Lake for JFK makes ~110kt and will
  * cruise at ~180 -- projecting it to a jet cruise speed would understate its
  * ETA by more than half, which is the error this whole file is most careful
- * to avoid. A jet passing 10,000ft is already doing 280-320kt, comfortably
- * clear of this line.
+ * to avoid. A jet passing 10,000ft is already doing 280-320kt.
  */
 export const JET_CLIMB_MIN_KT = 200;
+
+/**
+ * Remaining distance at or beyond which a climbing aircraft is taken to be a
+ * jet REGARDLESS of its current groundspeed.
+ *
+ * Speed alone is not enough, and live traffic proved it: JBU1371, an A320
+ * out of LGA for FLL, was passing 1,825ft at 184kt -- unambiguously a jet,
+ * unambiguously below JET_CLIMB_MIN_KT, because it was barely a minute off
+ * the runway and still accelerating. The speed gate alone left it reading
+ * 5h02 for a leg of about two and a half hours. In the first minute of a
+ * climb an airliner and a light twin genuinely do look alike on speed.
+ *
+ * Leg length separates them where speed cannot: 930nm is not a distance a
+ * piston twin flies. The Cape Air case above was a 250nm hop, well inside
+ * this. The residual exposure is a turboprop on a genuinely long leg -- a
+ * Dash 8 doing 450nm would be projected to jet cruise and understated -- but
+ * that combination is rare in this airspace, and it is bounded, whereas the
+ * error being removed was measured at +235%.
+ */
+export const JET_LEG_MIN_NM = 400;
 
 /**
  * Groundspeed a climbing jet is assumed to make good once at cruise.
@@ -128,14 +146,18 @@ export const NOMINAL_CRUISE_KT = 420;
  *   - climbing, or a cruising aircraft's real speed would be overridden;
  *   - below CRUISE_ALT_FT, or a step-climb at FL350 -- where groundspeed IS
  *     representative -- would be too;
- *   - above JET_CLIMB_MIN_KT, or a piston twin would be projected to jet
- *     cruise and have its ETA more than halved.
+ *   - and it must look like a jet: either already above JET_CLIMB_MIN_KT, or
+ *     flying a leg at least JET_LEG_MIN_NM long. Without that last clause a
+ *     piston twin would be projected to jet cruise and have its ETA more
+ *     than halved; without the distance half of it, an airliner one minute
+ *     off the runway is still too slow to recognise (see JET_LEG_MIN_NM).
  *
  * An unknown altitude or vertical rate means the gates cannot be evaluated,
  * so no correction is applied -- an absent value must not invent one, the
  * same rule the descent floor follows.
  */
 function cruiseProjectionKt(
+  distanceNm: number,
   groundspeedKt: number,
   altitudeFt?: number | null,
   verticalRateFpm?: number | null,
@@ -144,7 +166,8 @@ function cruiseProjectionKt(
   if (verticalRateFpm == null || !Number.isFinite(verticalRateFpm)) return groundspeedKt;
   if (verticalRateFpm < CLIMB_VS_FPM) return groundspeedKt;
   if (altitudeFt >= CRUISE_ALT_FT) return groundspeedKt;
-  if (groundspeedKt < JET_CLIMB_MIN_KT) return groundspeedKt;
+  const isJet = groundspeedKt >= JET_CLIMB_MIN_KT || distanceNm >= JET_LEG_MIN_NM;
+  if (!isJet) return groundspeedKt;
   return Math.max(groundspeedKt, NOMINAL_CRUISE_KT);
 }
 
@@ -179,7 +202,7 @@ export function etaMinutes(
     horizontal = (distanceNm / TERMINAL_KT) * 60;
   } else {
     if (!Number.isFinite(groundspeedKt) || groundspeedKt <= 0) return null;
-    const kt = cruiseProjectionKt(groundspeedKt, altitudeFt, verticalRateFpm);
+    const kt = cruiseProjectionKt(distanceNm, groundspeedKt, altitudeFt, verticalRateFpm);
     horizontal = ((distanceNm - TERMINAL_NM) / kt) * 60 + TERMINAL_MIN;
   }
 

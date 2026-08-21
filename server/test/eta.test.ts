@@ -265,3 +265,31 @@ describe('etaMinutes: climb-out projection', () => {
     expect(etaMinutes(20, 250, 3000, 2000)).toBeCloseTo((20 / 200) * 60, 6);
   });
 });
+
+describe('etaMinutes: recognising a jet that is still too slow to look like one', () => {
+  it('projects an airliner one minute off the runway, on leg length alone', () => {
+    // JBU1371 live: A320, LGA->FLL, passing 1,825ft at 184kt -- below
+    // JET_CLIMB_MIN_KT purely because it had barely left the ground. The
+    // speed gate alone left this reading 5h02 for a ~2h30 leg.
+    const nm = 930;
+    const projected = etaMinutes(nm, 184, 1825, 960)!;
+    const speedGateOnly = ((nm - 60) / 184) * 60 + 18;
+    expect(speedGateOnly).toBeGreaterThan(290); // ~5h, the wrong answer
+    expect(projected).toBeLessThan(180); // now a realistic ~2h20
+    expect(projected).toBeGreaterThan(120);
+  });
+
+  it('does not extend that to a slow aircraft on a short leg', () => {
+    // Same speed band, but 250nm is a hop a light twin really does fly, so
+    // the distance clause must not fire.
+    const slow = etaMinutes(250, 150, 3000, 800);
+    expect(slow).toBeCloseTo(((250 - 60) / 150) * 60 + 18, 6);
+  });
+
+  it('still requires a climb: a slow aircraft cruising a long leg keeps its speed', () => {
+    // The distance clause identifies a jet, it does not on its own license
+    // the projection -- a level aircraft's measured speed is real.
+    const level = etaMinutes(930, 184, 1825, 0);
+    expect(level).toBeCloseTo(((930 - 60) / 184) * 60 + 18, 6);
+  });
+});
