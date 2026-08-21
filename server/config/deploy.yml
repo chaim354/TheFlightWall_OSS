@@ -2,27 +2,27 @@
 # Run `kamal` commands from server/ (this file's parent's parent), so it
 # picks up this config/deploy.yml automatically.
 #
-# Every REPLACE_ME below is a genuine placeholder -- there is no real
-# registry or hostname to fill in on this repo's behalf. See README.md
+# Registry, server, and hostname below are filled in for this deployment
+# (ghcr.io/chaim354, the OVH box, flightwall.tinkerex.com). See README.md
 # ("Deploying with Kamal") for kamal setup, where secrets go, and why the
 # Cloudflare side must be SSL/TLS mode Full with an Origin Certificate,
 # never Flexible.
 
 service: flightwall-server
 
-image: REPLACE_ME_REGISTRY_USERNAME/flightwall-server
+image: chaim354/flightwall-server
 
 # The OVH box (or boxes). A single host is enough here -- this service is
 # one small process with one small on-disk schedule cache, not a fleet.
 servers:
-  - REPLACE_ME_SERVER_IP_OR_HOSTNAME
+  - 15.204.216.249
 
 registry:
   # Docker Hub by default if omitted; set to your own registry's host
   # (e.g. registry.example.com, or ghcr.io for GitHub Container Registry)
   # if you're not using Docker Hub.
-  server: REPLACE_ME_REGISTRY_SERVER
-  username: REPLACE_ME_REGISTRY_USERNAME
+  server: ghcr.io
+  username: chaim354
   password:
     - KAMAL_REGISTRY_PASSWORD
 
@@ -33,7 +33,7 @@ builder:
   arch: amd64
 
 proxy:
-  host: REPLACE_ME_PUBLIC_HOSTNAME  # e.g. flightwall.example.com
+  host: flightwall.tinkerex.com
   app_port: 8787                    # matches the Dockerfile's PORT default
 
   # Cloudflare terminates the user's TLS connection (inbound only) and

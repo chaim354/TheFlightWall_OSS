@@ -88,16 +88,52 @@ from mid-2025 or later, when kamal-proxy gained custom SSL certificate
 support; run `kamal version` and upgrade if it predates that), Docker
 running wherever you run `kamal` from, and SSH access to the target box.
 
-1. **Fill in the placeholders in `config/deploy.yml`**: `image`'s registry
-   username, `registry.server`/`registry.username`, `servers` (the OVH
-   box's IP or hostname), and `proxy.host` (the public hostname you'll
-   point at it). None of these are guessed for you on purpose -- there is
-   no real registry or hostname to default to.
+1. **`config/deploy.yml`'s placeholders are filled in for this deployment**:
+   `image`/`registry.username` are `chaim354`, `registry.server` is
+   `ghcr.io`, `servers` is the OVH box (`15.204.216.249`), and
+   `proxy.host` is `flightwall.tinkerex.com`. Deploying your own fork
+   instead: replace those five values with your own registry
+   username/server, OVH box IP/hostname, and public hostname -- none of
+   them are guessed for you on purpose.
 
 2. **Secrets go in `.kamal/secrets`** (create it; it's gitignored --
    `server/.gitignore` already excludes `.kamal/`). `kamal init` will
    scaffold this file for you if you'd rather start from its template.
-   This deploy needs three secrets:
+   This deploy needs four secrets. This deployment sources all four from
+   1Password (vault `tinkerex`) via the `op` CLI, using Kamal's
+   command-substitution form so nothing is ever stored in plaintext:
+
+   ```sh
+   # server/.kamal/secrets
+   KAMAL_REGISTRY_PASSWORD=$(op read "op://tinkerex/ghcr.io/password")
+   CLOUDFLARE_ORIGIN_CERT_PEM=$(op read "op://tinkerex/tinkerex-origin/certificate")
+   CLOUDFLARE_ORIGIN_KEY_PEM=$(op read "op://tinkerex/tinkerex-origin/private key")
+   AERODATABOX_KEY=$(op read "op://tinkerex/aerodatabox/credential")
+   ```
+
+   `ghcr.io` and `tinkerex-origin` already exist in the `tinkerex` vault.
+   `aerodatabox` does not -- it holds a real API key, so creating it is a
+   deliberate step for whoever owns the vault, not something to script
+   blindly. Create it yourself with:
+
+   ```sh
+   op item create --category "API Credential" --vault tinkerex \
+     --title aerodatabox credential=<your-aerodatabox-key>
+   ```
+
+   (get a key at https://aerodatabox.com/ -- the free tier covers a
+   handful of boards; the assignment-statement form above puts the key on
+   your shell command line, which 1Password's own CLI docs note can land
+   in shell history, so prefer pasting it into an interactive `op item
+   create` prompt or 1Password's UI if that matters to you). Until the
+   item exists, `op read` for it fails and Kamal's command substitution
+   silently resolves `AERODATABOX_KEY` to an empty string rather than
+   erroring the deploy -- the server still starts fine without it (see
+   the Config table above), it just skips schedule refresh until the key
+   is added and the container is redeployed.
+
+   No `op` CLI, or prefer plain files instead of a password manager?
+   Kamal's command substitution runs any command, e.g.:
 
    ```sh
    # server/.kamal/secrets
@@ -129,7 +165,10 @@ running wherever you run `kamal` from, and SSH access to the target box.
      specifically -- it is not a publicly-trusted cert and browsers will
      not trust it directly, which is fine, because nothing but Cloudflare
      ever connects to this box's TLS listener. Save the certificate and
-     private key to the two files referenced in step 2.
+     private key into the `tinkerex-origin` 1Password item (`certificate`
+     and `private key` fields -- already done for this deployment), or
+     the two files referenced in step 2 if you're using the file-based
+     fallback instead.
 
 4. **First deploy:**
 
