@@ -197,13 +197,6 @@ void WebConfigServer::handleGetStatus()
     _server.send(200, "application/json", out);
 }
 
-// Prefer IATA, fall back to ICAO — the rule AirportInfo documents as the display code,
-// and the same one iataRoute() applies when drawing the panel.
-static String displayCode(const AirportInfo &a)
-{
-    return a.code_iata.length() ? a.code_iata : a.code_icao;
-}
-
 String WebConfigServer::buildFlightsJson() const
 {
     JsonDocument doc;
@@ -230,8 +223,8 @@ String WebConfigServer::buildFlightsJson() const
             // `${x.origin||'?'}`, so the card showed "? → ?" for traffic the panel beside
             // it was displaying correctly. Under OpenSky/adsbdb both codes are populated,
             // so this also switches the list from KJFK to JFK and matches the wall.
-            o["origin"] = displayCode(f.origin);
-            o["destination"] = displayCode(f.destination);
+            o["origin"] = f.origin.displayCode();
+            o["destination"] = f.destination.displayCode();
             o["helicopter"] = f.is_helicopter;
             o["cargo"] = f.is_cargo;
             o["private"] = f.is_private;

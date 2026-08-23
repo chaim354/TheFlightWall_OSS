@@ -288,8 +288,8 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
 
     if (L.showRoute)
     {
-        String origin = f.origin.code_icao;
-        String dest = f.destination.code_icao;
+        String origin = f.origin.displayCode();
+        String dest = f.destination.displayCode();
         if (origin.length() || dest.length())
             outLines.push_back(origin + ">" + dest);
     }
@@ -497,8 +497,8 @@ void Hub75Display::displayFlightCard(const FlightInfo &f)
 // "ORD-LAX" style route, preferring IATA codes.
 static String iataRoute(const FlightInfo &f)
 {
-    String o = f.origin.code_iata.length() ? f.origin.code_iata : f.origin.code_icao;
-    String d = f.destination.code_iata.length() ? f.destination.code_iata : f.destination.code_icao;
+    String o = f.origin.displayCode();
+    String d = f.destination.displayCode();
     if (!o.length() && !d.length())
         return String("");
     return o + "-" + d;

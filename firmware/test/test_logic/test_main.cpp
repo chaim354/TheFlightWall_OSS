@@ -13,6 +13,7 @@ Compile-only check (no board):   pio test --without-uploading --without-testing
 
 #include "core/Filters.h"
 #include "core/Settings.h"
+#include "models/AirportInfo.h"
 
 // ---- Filters --------------------------------------------------------------
 
@@ -171,6 +172,31 @@ void test_server_url_trailing_slash_normalized()
     TEST_ASSERT_TRUE(g_settings.serverUrl == "https://example.com");
 }
 
+// ---- AirportInfo::displayCode ----------------------------------------------
+
+// The rule three consumers used to re-derive, one of them wrongly. The case
+// that mattered is the third: a server- or FR24-sourced flight carries IATA
+// only, and reading code_icao alone made the panel drop the route line
+// entirely.
+void test_airport_display_code()
+{
+    AirportInfo both;
+    both.code_icao = "KJFK";
+    both.code_iata = "JFK";
+    TEST_ASSERT_TRUE(both.displayCode() == "JFK"); // IATA preferred
+
+    AirportInfo icaoOnly;
+    icaoOnly.code_icao = "KJFK";
+    TEST_ASSERT_TRUE(icaoOnly.displayCode() == "KJFK"); // falls back
+
+    AirportInfo iataOnly; // what the server and FR24 paths actually produce
+    iataOnly.code_iata = "JFK";
+    TEST_ASSERT_TRUE(iataOnly.displayCode() == "JFK");
+
+    AirportInfo neither;
+    TEST_ASSERT_TRUE(neither.displayCode() == "");
+}
+
 // ---- seedDefaults ---------------------------------------------------------
 
 // The `erase` command's contract. seedDefaults() used to be a hand-maintained
@@ -256,6 +282,7 @@ void setup()
     RUN_TEST(test_position_source_roundtrip);
     RUN_TEST(test_position_source_unknown_falls_back_to_opensky);
     RUN_TEST(test_server_url_trailing_slash_normalized);
+    RUN_TEST(test_airport_display_code);
     RUN_TEST(test_seed_defaults_resets_every_field);
     RUN_TEST(test_seed_defaults_matches_config_constants);
     UNITY_END();
