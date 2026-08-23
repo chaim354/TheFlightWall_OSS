@@ -8,6 +8,12 @@ import { handleFlights, MAX_FLIGHTS_CEILING, type Env } from '../src/flights';
 import { fetchAircraft } from '../src/adsblol';
 import { KV_KEY, indexRows, STALE_AFTER_MS, kvStorage } from '../src/schedule/store';
 import type { Aircraft, ScheduleRow } from '../src/types';
+import { getAirportCoord } from '../src/schedule/airports';
+
+// Ask the table production asks, rather than restating its output -- see
+// test/enrich.test.ts for why (F-SRV16-A).
+const CVG = getAirportCoord('KCVG')!;
+const LGA = getAirportCoord('KLGA')!;
 
 // A minimal in-memory stand-in for the Workers KVNamespace binding. Only
 // `get`/`put` are implemented -- the only two methods anything under test
@@ -304,7 +310,7 @@ describe('handleFlights: schedule staleness', () => {
     const oldSchedule: ScheduleRow[] = [{
       callsign: null, carrierIata: 'DL', number: '5075',
       origIata: 'CVG', destIata: 'LGA',
-      origLat: 39.0488, origLon: -84.6678, destLat: 40.7769, destLon: -73.8740,
+      origLat: CVG.lat, origLon: CVG.lon, destLat: LGA.lat, destLon: LGA.lon,
       schedArrEpoch: null, revArrEpoch: null,
     }];
     await seedSchedule(kv, oldSchedule, now - STALE_AFTER_MS - 1000);
@@ -325,7 +331,7 @@ describe('handleFlights: schedule staleness', () => {
     await seedSchedule(kv, [{
       callsign: null, carrierIata: 'DL', number: '5075',
       origIata: 'CVG', destIata: 'LGA',
-      origLat: 39.0488, origLon: -84.6678, destLat: 40.7769, destLon: -73.8740,
+      origLat: CVG.lat, origLon: CVG.lon, destLat: LGA.lat, destLon: LGA.lon,
       schedArrEpoch: null, revArrEpoch: null,
     }], now);
     const res = await handleFlights(mkUrl({ lat: LAT, lon: LON }), mkEnv(kv), now);
@@ -371,7 +377,7 @@ describe('handleFlights: schedule-time ETA end to end', () => {
     await seedSchedule(kv, [{
       callsign: null, carrierIata: 'DL', number: '5075',
       origIata: 'CVG', destIata: 'LGA',
-      origLat: 39.0488, origLon: -84.6678, destLat: 40.7769, destLon: -73.8740,
+      origLat: CVG.lat, origLon: CVG.lon, destLat: LGA.lat, destLon: LGA.lon,
       schedArrEpoch, revArrEpoch: null,
     }], now);
     const res = await handleFlights(mkUrl({ lat: LAT, lon: LON }), mkEnv(kv), now);

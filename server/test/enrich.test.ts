@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { enrich } from '../src/enrich';
 import type { Aircraft, ScheduleRow } from '../src/types';
+import { getAirportCoord } from '../src/schedule/airports';
 
-const LGA = { lat: 40.7769, lon: -73.8740 };
-const CVG = { lat: 39.0488, lon: -84.6678 };
+// Ask the table production asks. These were hand-copied from a two-table
+// version of airports.ts that 8556a5a DELETED, and LGA had since drifted
+// 120 m from the value the Worker actually emits (F-SRV16-A). Nothing failed
+// -- the corridor gate is 300 km -- but it meant every geometry assertion
+// here was validated against a position production does not produce.
+const LGA = getAirportCoord('KLGA')!;
+const CVG = getAirportCoord('KCVG')!;
 
 // Fixed instant used everywhere enrich() needs "now". enrich() is pure and
 // takes it as an argument rather than reading Date.now() itself, so every
