@@ -39,7 +39,20 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - Reachable on the network at `http://flightwall.local` (mDNS) once connected.
 
 ### Tests
-Pure logic (filters + Settings JSON parse/round-trip) is covered by Unity tests in `test/`:
+Two suites, and they run in different places.
+
+**Host tests — no board needed.** The pure-logic suites (`test/test_*.cpp`: parsers,
+classify, lru, buttons, clock, route, serverjson, serverbackoff) are standalone g++
+programs, each with its own `main()`:
+- `./run_host_tests.sh` — build and run all of them; exits non-zero if any fails.
+- `./run_host_tests.sh route lru` — just those.
+
+Adding `test/test_foo.cpp` is enough for it to be picked up; the runner globs, so there
+is no list to update. Each file guards its body with `#ifndef PIO_UNIT_TESTING`, which
+is what keeps it out of the `pio test` binary — see the comment in `platformio.ini`.
+
+**On-device tests.** Unity suite in `test/test_logic/`, covering filters and the
+Settings JSON parse/round-trip:
 - `pio test` — build, flash, and run on a connected ESP32 (reports over serial).
 - `pio test --without-uploading --without-testing` — compile-only check, no board needed.
 
