@@ -16,15 +16,25 @@ Most of what earlier handoffs called "never run on hardware" now IS device-verif
 | S3 migration (PSRAM, pin map, 6-bit depth) | **DEVICE-VERIFIED.** PSRAM 8.35MB live, flights render, web UI loads. |
 | Enrichment, logo LRU sizing, TCS3472 read path, buttons, web UI | **DEVICE-VERIFIED.** |
 | Route-correctness fixes: hexdb first-leg parsing, leg-keyed enrichment cache, FR24 partial-inline overlay (`8b5075a`..`ccf1d40`) | **COMPILE + HOST-TEST ONLY.** Materially changes the enrichment path the row above verified; none of it has run on the device. Least exercised: the FR24 inline-overlay path (Task 3) — GA/private and route-less FR24 flights now depend on a per-flight enrichment lookup that previously never ran for them at all. |
-| Server position source + adsb.lol fallback (`792224c`..`f5c2b5c`) | **PARTIALLY DEVICE-VERIFIED on ESP32-S3, 2026-08-20.** Verified: adsb.lol direct fetches (39–40 flights/cycle, routes still enriched via adsbdb); the server-failure fallback (unresolvable `serverUrl` → logs `server unavailable; falling back to adsb.lol` → keeps rendering); recovery on a settings change with no reboot; 60 min continuous with **0 reboots**, heap plateauing (decline rate fell 82% between the first and second 30 min, and rose above its own start in 6 of 23 samples — bounded cache fill, not a leak), `largestInternal` steady at 151540 apart from a transient dip during a TLS handshake. **NOT verified:** the server happy path (Step 3) — no Worker exists yet, so **no ETA has ever rendered on the panel**; the new web UI (`uploadfs` was deliberately skipped because it would wipe `/settings.json`, i.e. WiFi password and API keys); and **nothing was confirmed by looking at the panel** — all of the above is from the serial log and the device's own `/api/flights`, not from pixels. |
+| Server position source + adsb.lol fallback (`792224c`..`f5c2b5c`) | **DEVICE-VERIFIED end to end, 2026-08-23.** Earlier verification covered adsb.lol direct fetches and the server-failure fallback; the server HAPPY PATH is now confirmed too, against a live deployment at `flightwall.tinkerex.com`: 12 flights/cycle, 11 of 12 with a route, **10 of 12 with an ETA, and the maintainer confirmed flights with ETAs rendering ON THE PANEL** — the one thing every prior handoff had to leave unverified. Cross-board legs (`CHS>BOS ~35m`, `LGA>IND ~1h20`) resolve, which the duplicate-row bug fixed this session used to blank deterministically. The new web UI is flashed and serving. |
 | 6-bit colour-depth fix (`4218dc0`) | **Device-verified but on ONE ping sample per condition** — see §3. The fault swings ~32× between identical back-to-back runs, so treat the 75%→0% result as strong-but-not-proven. |
 | Clock / timezone / new defaults (`eea030d`) | **COMPILE + HOST-TEST ONLY.** The board dropped off USB before it could be flashed. The ONLY unverified commit from this session. |
+| Audit remediation, Tiers 1-6 (branch `claude/audit-priority-list-d3dbf5`, 30 commits) | **DEVICE-VERIFIED, 2026-08-23.** Flashed (firmware + `uploadfs`) and the server deployed. Confirmed on hardware: ETAs render on the panel; `/api/settings` no longer returns any secret in plaintext (`wifiPasswordSet` booleans only); `adc1Min/Max` now advertises `1-3`, not the `1-10` that included seven HUB75 data lines; `seedDefaults()` reads its config constants (`tile cache capacity=15 (maxFlights=12)`); the setup AP no longer absorbs (no reboot loop with no credentials stored). Held pending the `-DCORE_DEBUG_LEVEL=4` measurement run: F-FW09-A (TLS keep-alive branch choice) and F-FW12-A's 13-site FR24 migration. |
 | `WiFi.setSleep(false)` (`d010d8d`) | **A DISPROVEN NO-OP.** Modem sleep was already off (verified in core source). Harmless but the message frames it as a fix; revert or amend when convenient. |
 
 Both envs (`esp32dev`, `esp32s3`) build clean. Host tests all pass:
 `cd firmware && ./run_host_tests.sh`
 
-`main` is stale; everything lives on `flightwall-mini-parity`.
+`main` is stale. The audit remediation lives on `claude/audit-priority-list-d3dbf5`
+(30 commits, branched from `main` at `d58ed83`) and is what is currently flashed
+and deployed; earlier work lives on `flightwall-mini-parity`.
+
+The plan those 30 commits execute is `docs/superpowers/audits/2026-08-23-priority-list.md`,
+derived from `docs/superpowers/audits/2026-08-23-simplification-audit.md` (which lives on
+`claude/codebase-simplification-audit-2f73a3` and should be merged alongside, so the
+findings and their remediation land together). Open decisions are tracked in
+`docs/superpowers/audits/2026-08-23-decision-memo.md` — Q7 (the KV migration) is the
+only one still unanswered, at its documented default: defer.
 
 ---
 
@@ -150,16 +160,30 @@ the breakout's `LED` pad to GND (onboard illumination LED poisons the reading).
 **`showGeneralAviation:false`** hides GA/private tails (N-numbers). The plane visibly overhead near
 JFK is often a GA aircraft the two-pass filter drops. Flip it on if the user wants those.
 
-**Security (audited, none done):** `GET /api/settings` returns WiFi PSK + OpenSky secret + AeroAPI
-key in plaintext, unauthenticated (confirmed by pulling them this session). Fix: a redacted
-`toJson` variant emitting `wifiPasswordSet:true` booleans. Also: open setup AP + terminal (never
-retries STA), and `setInsecure()` on billable-key paths. User has deferred all three.
+**Security — two of three DONE (2026-08-23), one still open.**
+- ~~`GET /api/settings` returns credentials in plaintext~~ **FIXED.** `toJsonPublic()` serves a
+  redacted projection (`wifiPasswordSet` booleans); `toJson()` stays full for persistence, since it
+  is also the on-flash format. `fromJson` now treats an EMPTY secret as "unchanged, never clear",
+  so a cached old page cannot blank the PSK. Verified on the device: no plaintext secret fields.
+- ~~Open setup AP never retries STA~~ **FIXED.** `g_apMode` was set and never cleared, gating the
+  whole self-heal block — a power cut that beat the router up stranded the device broadcasting an
+  open AP permanently. Now reboots to retry after 10 min *when credentials exist*; with none stored
+  it stays up (genuine first-time provisioning). Retry window resets on a settings WRITE, not on
+  station count — a phone auto-rejoining the remembered open AP would otherwise re-create it.
+- **STILL OPEN:** `setInsecure()` on billable-key paths (`APIConfiguration.h:39`
+  `AEROAPI_INSECURE_TLS = true`). Also NOT addressed, deliberately: a LAN peer can still restart
+  the device and rewrite its settings, including pointing `serverUrl` at a host they control. The
+  config UI has no auth, and a token the page itself hands out would be theatre. README says so.
 
-**Stale comments to clean up:** `getFreeHeap`/PSRAM comment (§2). `BaseDisplay::framebuffer()` /
-`Hub75Display::framebuffer()` are now DEAD CODE (the web preview was removed in `17b213c`) whose
-comments still describe a preview — safe 3-line deletion, `Hub75Display` is the only implementor.
+**Stale comments to clean up:** `getFreeHeap`/PSRAM comment (§2).
+~~`BaseDisplay::framebuffer()` / `Hub75Display::framebuffer()` dead code~~ **DELETED 2026-08-23**,
+along with the `firmware/README.md` line that still advertised the removed `/api/framebuffer`
+endpoint to downstream builders.
 
-**`[heapdiag]` instrumentation** still in `main.cpp`/`Hub75Display::initialize`. Strip when done.
+**`[heapdiag]` instrumentation** still in `main.cpp`/`Hub75Display::initialize`. Strip when done —
+deliberately NOT stripped on 2026-08-23, because the pending `-DCORE_DEBUG_LEVEL=4` run is supposed
+to produce a heap baseline and the web UI only just started rendering these numbers. Removing the
+instrumentation immediately before the measurement it exists for is the wrong order.
 
 ---
 
