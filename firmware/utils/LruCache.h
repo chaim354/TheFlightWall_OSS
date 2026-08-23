@@ -70,19 +70,40 @@ public:
 
     // If key exists: update value and promote to MRU. Else insert at MRU and,
     // if over capacity, evict the LRU (back).
-    void put(const K &key, const V &value)
+    //
+    // Returns a pointer to the STORED value, or nullptr if the entry did not
+    // survive insertion -- which happens when capacity is 0, since trim() runs
+    // before this returns. Same validity rule as find(): good until the next
+    // put()/eviction.
+    //
+    // Two reasons for the pointer rather than void. A caller that wants to
+    // build a large value in place (Hub75Display decodes a ~2KB logo tile
+    // straight into the cache) had to write put(key, V{}) then find(key) --
+    // which briefly stores a DIFFERENT value than intended, and for LogoTile an
+    // empty shell is exactly the w==0 "known missing" sentinel. And the find
+    // after it was annotated "never null", which is true only while capacity
+    // is non-zero; setCapacity(0) is legal and that cache is sized from a
+    // runtime setting.
+    //
+    // Takes `value` BY VALUE so a caller can std::move into it; the copy that
+    // used to be forced by const& is now the caller's choice.
+    V *put(const K &key, V value)
     {
         auto mit = _index.find(key);
         if (mit != _index.end())
         {
-            mit->second->second = value;                        // update in place
+            mit->second->second = std::move(value);             // update in place
             _items.splice(_items.begin(), _items, mit->second); // promote to MRU
-            return;
+            return &mit->second->second;
         }
 
-        _items.emplace_front(key, value);
+        _items.emplace_front(key, std::move(value));
         _index[key] = _items.begin();
         trim();
+
+        // trim() may have evicted the entry we just inserted (capacity 0).
+        auto after = _index.find(key);
+        return after == _index.end() ? nullptr : &after->second->second;
     }
 
     // Re-bound the cache at runtime. Callers whose working set is configurable

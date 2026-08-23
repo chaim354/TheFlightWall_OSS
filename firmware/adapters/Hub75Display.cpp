@@ -384,12 +384,12 @@ const Hub75Display::LogoTile *Hub75Display::tileFor(const String &key)
         f.close();
     }
 
-    // put() takes the value by const&, so insert an empty shell and move the
-    // decoded pixels into it — no transient second copy of the tile.
-    _logoCache.put(key, LogoTile{});
-    LogoTile *slot = _logoCache.find(key); // just inserted -> MRU, never null
-    *slot = std::move(tile);
-    return slot;
+    // Move the decoded tile straight in and use the slot put() hands back. The
+    // old shape inserted an empty LogoTile first and then found it -- which
+    // stored the w==0 "known missing" sentinel for the duration, and assumed
+    // the find could not fail. It can: with capacity 0 the entry is evicted on
+    // the way in, and _logoCache is sized from a runtime setting.
+    return _logoCache.put(key, std::move(tile));
 }
 
 uint16_t Hub75Display::accentColorFor(const String &code)
@@ -950,91 +950,78 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
     present();
 }
 
-// Frame key for the active no-flights mode: a value that changes exactly when
-// the screen should redraw. Returns -1 for the static "dots" mode (never
-// animates). For clock: the current local minute-of-day (updates each minute).
-// For funfact: the rotating fact index. For clockfact: combine the alternation
-// phase with whichever sub-screen is active.
-long Hub75Display::noFlightsFrameKey()
+// Decide, once, what the no-flights screen should be showing and what value
+// changes exactly when it needs redrawing.
+//
+// Everything that was duplicated lives here: which mode was configured, which
+// half of clockfact's alternation is up, and whether a requested clock is
+// actually usable (time(nullptr) < 100000 means NTP has not synced).
+Hub75Display::NoFlightsFrame Hub75Display::noFlightsFrame() const
 {
     const String &mode = g_settings.layout.noFlightsMode;
     const bool wantClock = (mode == "clock" || mode == "clockfact");
     const bool wantFact = (mode == "funfact" || mode == "clockfact");
+
+    NoFlightsFrame f;
     if (!wantClock && !wantFact)
-        return -1; // "dots" (or unknown) -> static
+        return f; // "dots" or an unknown value -> static
 
-    long key = 0;
-    if (mode == "clockfact")
-    {
-        // Alternate every rotate interval; key must move on each phase flip and
-        // on the underlying clock-minute / fact rotation.
-        const long phase = (long)((millis() / kNoFlightsRotateMs) % 2);
-        key = phase * 1000000L;
-    }
+    // Read millis() ONCE: both halves of clockfact derived their phase from
+    // separate reads, which could straddle a rotate boundary.
+    const unsigned long ticks = millis() / kNoFlightsRotateMs;
+    const size_t factCount = kFunFactCount ? kFunFactCount : 1;
+    const size_t factIdx = (size_t)(ticks % factCount);
 
-    if (wantClock && (mode != "clockfact" || (millis() / kNoFlightsRotateMs) % 2 == 0))
+    const bool clockPhase = (mode != "clockfact") || (ticks % 2 == 0);
+    const bool synced = time(nullptr) >= 100000;
+
+    if (wantClock && clockPhase && synced)
     {
+        struct tm tmv;
         time_t now = time(nullptr);
-        if (now < 100000) // not synced -> fall back to fact rotation / dots
-            key += (long)((millis() / kNoFlightsRotateMs) % (kFunFactCount ? kFunFactCount : 1));
-        else
-        {
-            struct tm tmv;
-            localtime_r(&now, &tmv); // TZ-aware (configTzTime); DST included
-            key += (long)tmv.tm_hour * 60L + tmv.tm_min; // minute of day
-        }
+        localtime_r(&now, &tmv); // TZ-aware (configTzTime); DST included
+        f.screen = NoFlightsFrame::Screen::Clock;
+        // Minute of day. The fact key below sits in a separate decade, so a
+        // clockfact flip always moves the key even within the same minute.
+        f.key = (long)tmv.tm_hour * 60L + tmv.tm_min;
+        return f;
     }
-    else // fun fact (funfact mode, or clockfact on the fact phase)
+
+    // Fact, either because it was asked for, or because clockfact is on its
+    // fact phase, or because a clock was wanted and time is not synced yet.
+    if (wantFact || (wantClock && !synced && mode == "clockfact"))
     {
-        key += (long)((millis() / kNoFlightsRotateMs) % (kFunFactCount ? kFunFactCount : 1));
+        f.screen = NoFlightsFrame::Screen::Fact;
+        f.factIdx = factIdx;
+        f.key = 1000000L + (long)factIdx; // distinct decade from the clock key
+        return f;
     }
-    return key;
+
+    return f; // plain clock, not synced -> dots, and dots never animate
 }
 
-// Dispatch the no-flights screen by the configured mode. Composes onto the
-// canvas and presents. Falls back to the dots/loading screen for "dots",
-// unknown values, or when a clock is requested but time isn't synced yet.
+// Recompose key for the active no-flights mode. -1 means static.
+long Hub75Display::noFlightsFrameKey()
+{
+    return noFlightsFrame().key;
+}
+
+// Dispatch the no-flights screen. Composes onto the canvas and presents.
 void Hub75Display::displayNoFlights()
 {
-    const String &mode = g_settings.layout.noFlightsMode;
-    bool showClock = false, showFact = false;
-    if (mode == "clock")
-        showClock = true;
-    else if (mode == "funfact")
-        showFact = true;
-    else if (mode == "clockfact")
+    const NoFlightsFrame f = noFlightsFrame();
+    switch (f.screen)
     {
-        if ((millis() / kNoFlightsRotateMs) % 2 == 0)
-            showClock = true;
-        else
-            showFact = true;
-    }
-
-    if (showClock)
-    {
-        if (time(nullptr) >= 100000)
-        {
-            drawClockScreen();
-            return;
-        }
-        // Clock requested but not synced: in clockfact, show a fact instead; in
-        // plain clock mode, fall back to the dots screen.
-        if (mode == "clockfact")
-            showFact = true;
-        else
-        {
-            displayLoadingScreen();
-            return;
-        }
-    }
-
-    if (showFact)
-    {
-        drawFunFactScreen();
+    case NoFlightsFrame::Screen::Clock:
+        drawClockScreen();
         return;
+    case NoFlightsFrame::Screen::Fact:
+        drawFunFactScreen(f.factIdx);
+        return;
+    case NoFlightsFrame::Screen::Dots:
+        break;
     }
-
-    displayLoadingScreen(); // "dots" / unknown
+    displayLoadingScreen();
 }
 
 // Large centered HH:MM with a "Mon Jun 17" date line below. Caller guarantees
@@ -1093,7 +1080,7 @@ void Hub75Display::drawClockScreen()
 
 // Rotating, word-wrapped fun fact, vertically centered. Wraps on spaces into
 // lines of at most maxCols columns; a single over-long word is truncated.
-void Hub75Display::drawFunFactScreen()
+void Hub75Display::drawFunFactScreen(size_t factIdx)
 {
     if (kFunFactCount == 0)
     {
@@ -1101,7 +1088,10 @@ void Hub75Display::drawFunFactScreen()
         return;
     }
     const uint16_t color = textColor();
-    const size_t idx = (size_t)((millis() / kNoFlightsRotateMs) % kFunFactCount);
+    // Which fact is decided by noFlightsFrame(), not re-derived here: this was a
+    // third read of millis() that had to land on the same rotation as the
+    // recompose key's.
+    const size_t idx = factIdx % kFunFactCount;
     const String fact = String(kFunFacts[idx]);
 
     const int charWidth = 6, charHeight = 8, lineSpacing = 2;

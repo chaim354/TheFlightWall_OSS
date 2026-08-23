@@ -124,9 +124,32 @@ private:
     void displayStackedCard(const FlightInfo &f);    // square/tall panels: logo top, text below
     void displayTextOnlyCard(const FlightInfo &f);   // very short panels: bordered text
     void displayLoadingScreen();
-    void displayNoFlights();                                 // dispatches by g_settings.layout.noFlightsMode
+    // ONE decode of layout.noFlightsMode, used by both the dispatcher and the
+    // recompose key.
+    //
+    // They used to decode it independently, each re-deriving which sub-screen
+    // clockfact is currently showing from its own millis() read, and each
+    // resolving "clock wanted but time not synced" its own way -- so in plain
+    // clock mode before NTP the key advanced every rotate interval while the
+    // screen stayed on static dots, recomposing for a picture that never
+    // changed. Deciding once removes the possibility of the two disagreeing.
+    struct NoFlightsFrame
+    {
+        enum class Screen
+        {
+            Dots,
+            Clock,
+            Fact
+        };
+        Screen screen = Screen::Dots;
+        long key = -1;      // -1 = static, never needs recomposing
+        size_t factIdx = 0; // valid only when screen == Fact
+    };
+    NoFlightsFrame noFlightsFrame() const;
+
+    void displayNoFlights();                                 // dispatches by noFlightsFrame()
     void drawClockScreen();                                  // large HH:MM + date line
-    void drawFunFactScreen();                                // rotating word-wrapped fun fact
+    void drawFunFactScreen(size_t factIdx);                  // word-wrapped fun fact
     long noFlightsFrameKey();                                // recompose key for the active animated mode
     uint16_t textColor();
 
