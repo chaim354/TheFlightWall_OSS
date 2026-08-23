@@ -156,9 +156,19 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
         s.velocity = isnan(gsKt) ? NAN : gsKt * kKnotsToMetersPerSec;
         s.heading = optNum(a, "track");
 
-        double rateFpm = optNum(a, "baro_rate");
-        if (isnan(rateFpm))
-            rateFpm = optNum(a, "geom_rate");
+        // The "ground" sentinel governs the vertical rate too, not just altitude
+        // above. A surface aircraft has no climb rate, and the two fallback
+        // chains are otherwise identical -- leaving this one ungated let a
+        // rebroadcast row report a rate while its altitude had been discarded
+        // as unknowable. Matches server/src/adsblol.ts, which parses the same
+        // feed independently.
+        double rateFpm = NAN;
+        if (!s.on_ground)
+        {
+            rateFpm = optNum(a, "baro_rate");
+            if (isnan(rateFpm))
+                rateFpm = optNum(a, "geom_rate");
+        }
         s.vertical_rate = isnan(rateFpm) ? NAN : rateFpm * kFpmToMetersPerSec;
 
         // Inline, and the reason this source removes the aircraft lookup: type

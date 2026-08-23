@@ -53,8 +53,23 @@ export function parseAdsbLol(body: unknown): Aircraft[] {
     if (lat === null || lon === null) continue;
 
     // alt_baro is the string "ground" for surface aircraft, not a number.
+    //
+    // The sentinel governs BOTH derived quantities, not just altitude. It used
+    // to gate only altFt while verticalRateFpm read its identical fallback
+    // chain ungated -- so a surface aircraft could carry a climb rate. Not
+    // hypothetical: of the 74 "alt_baro":"ground" rows in the captured fixture,
+    // 2 carry a rate, both adsr_icao rebroadcast rows (a recurring class, not a
+    // one-off), and one of those has geom_rate surviving from the very GNSS
+    // source whose alt_geom the ground gate had just discarded.
+    //
+    // ETA-neutral by construction: eta.ts returns early when altitudeFt is
+    // null, which is always true here. Only the `vs` wire field changes.
+    // firmware/adapters/AdsbLolFetcher.cpp carries an independent copy of this
+    // parse and is gated the same way, so a device on the server path and one
+    // on the direct path agree.
     const onGround = r.alt_baro === 'ground';
     const altFt = onGround ? null : num(r.alt_baro) ?? num(r.alt_geom);
+    const verticalRateFpm = onGround ? null : num(r.baro_rate) ?? num(r.geom_rate);
 
     out.push({
       hex: str(r.hex).toLowerCase(),
@@ -66,7 +81,7 @@ export function parseAdsbLol(body: unknown): Aircraft[] {
       altFt,
       groundspeedKt: num(r.gs),
       trackDeg: num(r.track),
-      verticalRateFpm: num(r.baro_rate) ?? num(r.geom_rate),
+      verticalRateFpm,
       onGround,
       category: str(r.category) || null,
       distanceNm: num(r.dst),

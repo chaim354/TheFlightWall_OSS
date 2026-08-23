@@ -90,3 +90,37 @@ describe('parseAdsbLol', () => {
     expect(good2!.typeIcao).toBe('A320');
   });
 });
+
+describe('the "ground" sentinel governs every derived quantity', () => {
+  // It used to gate altitude only, while verticalRateFpm read its identical
+  // fallback chain ungated -- so a surface aircraft could report a climb rate.
+  // Measured in the captured fixture: 74 rows carry alt_baro:"ground" and 2 of
+  // them carry a rate, both adsr_icao rebroadcast rows. A recurring class, not
+  // a one-off.
+
+  it('nulls the vertical rate for an on-ground aircraft', () => {
+    const parsed = parseAdsbLol({
+      ac: [{ hex: 'a30b66', flight: 'TEST1 ', lat: 40, lon: -73, alt_baro: 'ground', alt_geom: 1250, geom_rate: -64 }],
+    });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.onGround).toBe(true);
+    expect(parsed[0]!.altFt).toBeNull();
+    // geom_rate came from the SAME GNSS source as the alt_geom the ground gate
+    // just discarded; keeping one and dropping the other is the inconsistency.
+    expect(parsed[0]!.verticalRateFpm).toBeNull();
+  });
+
+  it('leaves an airborne aircraft\'s rate alone', () => {
+    const parsed = parseAdsbLol({
+      ac: [{ hex: 'abc123', flight: 'TEST2 ', lat: 40, lon: -73, alt_baro: 18000, baro_rate: -1200 }],
+    });
+    expect(parsed[0]!.verticalRateFpm).toBe(-1200);
+  });
+
+  it('holds across the whole captured fixture: no on-ground row keeps a rate', () => {
+    const all = parseAdsbLol(raw);
+    const onGround = all.filter((a) => a.onGround);
+    expect(onGround.length).toBeGreaterThan(50); // sanity on the check itself
+    expect(onGround.filter((a) => a.verticalRateFpm !== null)).toEqual([]);
+  });
+});
