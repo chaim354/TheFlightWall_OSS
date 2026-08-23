@@ -30,6 +30,16 @@ void SerialConsole::begin()
     Serial.println("FlightWall serial console ready. Type 'help' for commands.");
 }
 
+bool SerialConsole::consumeSettingsChanged()
+{
+    if (_settingsChanged)
+    {
+        _settingsChanged = false;
+        return true;
+    }
+    return false;
+}
+
 // `light` / `light watch`. Prints the reading in the SELECTED SENSOR'S units and
 // spells out the hysteresis arithmetic, because the threshold's meaning changes with
 // the sensor type (raw ADC 0-4095 / lux / raw Clear) and no single default can suit
@@ -186,6 +196,7 @@ void SerialConsole::handleLine(String line)
         g_settings.wifiSsid = ssid;
         g_settings.wifiPassword = pw; // may be empty for open networks
         g_settings.save();
+        _settingsChanged = true;
         Serial.print(F("WiFi saved (ssid='"));
         Serial.print(ssid);
         Serial.println(F("'). Type 'restart' to connect."));
@@ -202,6 +213,7 @@ void SerialConsole::handleLine(String line)
         g_settings.openSkyClientId = id;
         g_settings.openSkyClientSecret = secret;
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("OpenSky credentials saved."));
     }
     else if (cmd == "aeroapi")
@@ -213,6 +225,7 @@ void SerialConsole::handleLine(String line)
         }
         g_settings.aeroApiKey = args;
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("AeroAPI key saved."));
     }
     else if (cmd == "enrich")
@@ -230,6 +243,7 @@ void SerialConsole::handleLine(String line)
             return;
         }
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Enrichment source saved."));
     }
     else if (cmd == "mode")
@@ -245,6 +259,7 @@ void SerialConsole::handleLine(String line)
             return;
         }
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Mode saved."));
     }
     else if (cmd == "loc")
@@ -263,6 +278,7 @@ void SerialConsole::handleLine(String line)
         g_settings.centerLon = lonS.toDouble();
         g_settings.radiusKm = radS.toDouble();
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Location saved."));
     }
     else if (cmd == "get")
@@ -279,6 +295,7 @@ void SerialConsole::handleLine(String line)
         if (g_settings.fromJson(args))
         {
             g_settings.save();
+            _settingsChanged = true;
             Serial.println(F("Settings applied + saved."));
         }
         else
@@ -314,6 +331,7 @@ void SerialConsole::handleLine(String line)
     {
         g_settings.seedDefaults();
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Settings reset to defaults. Type 'restart'."));
     }
     else if (cmd == "restart")

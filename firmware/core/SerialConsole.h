@@ -38,8 +38,23 @@ public:
     // 500ms sampling stall, and the reading aliases. Serial has no such dependency.
     void setLightSensor(const LightSensor *light) { _light = light; }
 
+    // One-shot "I changed g_settings" signal, drained by loop().
+    //
+    // The same flag WebConfigServer has, and for the same reason -- this is not
+    // a new concept, it is the one the console was missing. It was the ONLY
+    // writer to g_settings that neither re-applied its own changes nor told
+    // anyone, so four groups of latched state (schedule.timezone, which lives in
+    // libc's environment; light enable/type/pin; buttons.enabled; and
+    // display.maxFlights, which sizes the logo pool) simply never took effect
+    // until the next reboot. The console even printed "Settings applied +
+    // saved." while "applied" was false for all four -- and told users to enable
+    // the light sensor "via 'set'", after which its own `light` command reported
+    // NO READING on correctly wired hardware.
+    bool consumeSettingsChanged();
+
 private:
     String _buf;
+    bool _settingsChanged = false;
     const LightSensor *_light = nullptr;
     bool _watchLight = false;
     unsigned long _lastWatchMs = 0;

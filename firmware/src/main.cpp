@@ -584,7 +584,11 @@ void loop()
         ESP.restart();
     }
 
-    if (g_web.consumeSettingsChanged())
+    // Bitwise |, NOT ||. Both flags are one-shot and must BOTH be drained every
+    // pass: short-circuiting would leave the console's set while the web's was
+    // true, so a console change made in the same pass as a web change would be
+    // silently swallowed until the next unrelated web save.
+    if (g_web.consumeSettingsChanged() | g_console.consumeSettingsChanged())
     {
         // Re-apply runtime-tunable settings immediately. Hardware/WiFi changes
         // take effect on next reboot.
