@@ -19,6 +19,7 @@ Run loop:
 #include <utility>
 #include <time.h>
 #include <WiFi.h>
+#include "esp_netif.h"
 #include "esp_wifi.h"
 // Direct includes so PlatformIO's LDF adds these bundled framework libraries to
 // the build (it does not always follow them through project headers).
@@ -110,6 +111,9 @@ static void applyWifiRegion()
     esp_wifi_set_country(&ctry);
 }
 
+/** Defined below; called once the STA lease is up. */
+static void useReliableDns();
+
 static bool connectWifiSta()
 {
     if (!g_settings.hasWifi())
@@ -138,7 +142,69 @@ static bool connectWifiSta()
         attempts++;
     }
     Serial.println();
+    if (WiFi.status() == WL_CONNECTED)
+        useReliableDns();
     return WiFi.status() == WL_CONNECTED;
+}
+
+/**
+ * Point the resolver at public DNS instead of whatever DHCP handed out.
+ *
+ * MEASURED, not precautionary. With CORE_DEBUG_LEVEL raised to INFO, the
+ * failing fetch cycles turned out to be neither TLS nor TCP:
+ *
+ *   [E][WiFiGeneric.cpp:1583] hostByName(): DNS Failed for api.adsb.lol
+ *   [E][WiFiGeneric.cpp:1583] hostByName(): DNS Failed for flightwall.tinkerex.com
+ *
+ * Both fetchers failing together, on a link with -60dBm signal, 159KB of
+ * contiguous internal heap and a LAN that answered pings in 12ms, because
+ * neither could resolve a name. Nothing downstream of that -- handshake
+ * timeouts, buffer sizes, fallback ordering -- was ever the problem.
+ *
+ * lwIP's resolver is a poor fit for a flaky upstream: a small cache, a short
+ * timeout and few retries, so a merely SLOW answer from the router is
+ * indistinguishable from no answer. Querying a public resolver directly takes
+ * the router's forwarder out of the path entirely.
+ *
+ * DHCP is left doing everything else. Only the two DNS entries are replaced,
+ * by writing them into the STA netif after the lease is up -- WiFi.config()
+ * would pin the address, gateway and netmask too, which is a much bigger
+ * behavioural change than this needs and would break on any network that
+ * hands out something other than what was hardcoded.
+ *
+ * Failure here is deliberately non-fatal: if the netif is not ready or the
+ * call is rejected, the DHCP-supplied servers stay in place and the device
+ * behaves exactly as it did before.
+ */
+static void useReliableDns()
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!netif)
+    {
+        Serial.println("DNS: no STA netif; keeping DHCP resolvers");
+        return;
+    }
+
+    // Cloudflare primary, Google secondary -- two independent operators, so a
+    // single provider's outage does not take name resolution with it.
+    const uint32_t servers[2] = {
+        0x01010101u, // 1.1.1.1
+        0x08080808u, // 8.8.8.8
+    };
+    const esp_netif_dns_type_t types[2] = {ESP_NETIF_DNS_MAIN, ESP_NETIF_DNS_BACKUP};
+
+    for (int i = 0; i < 2; i++)
+    {
+        esp_netif_dns_info_t dns = {};
+        dns.ip.type = ESP_IPADDR_TYPE_V4;
+        // esp_ip4_addr_t stores the address in network byte order; the literals
+        // above are written big-endian-as-read, so convert rather than assign.
+        dns.ip.u_addr.ip4.addr = htonl(servers[i]);
+        esp_err_t err = esp_netif_set_dns_info(netif, types[i], &dns);
+        if (err != ESP_OK)
+            Serial.printf("DNS: could not set resolver %d (%s); keeping DHCP\n", i, esp_err_to_name(err));
+    }
+    Serial.println("DNS: using 1.1.1.1 / 8.8.8.8");
 }
 
 static void startSetupAp()
