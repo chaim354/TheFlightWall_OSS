@@ -20,10 +20,14 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 /**
  * Refresh the schedule table from every configured board: fetch each in
  * turn (paced by `delayMs` so a burst doesn't trip AeroDataBox's rate
- * limit), then write the combined rows -- unless every board failed, in
- * which case the previous table is left in place rather than overwritten
- * with an empty one. An empty table would blank every route until the next
- * refresh; the existing table aging into `stale` is the honest outcome.
+ * limit), collapse the rows to one per flight leg, then write them -- unless
+ * that leaves nothing, in which case the previous table is left in place
+ * rather than overwritten with an empty one. An empty table would blank every
+ * route until the next refresh; the existing table aging into `stale` is the
+ * honest outcome.
+ *
+ * Note the guard is on ROWS PRODUCED, not on boards that answered. A board can
+ * return 200 and yield nothing -- see the comment at the write below.
  *
  * Never throws: a single board failing is logged and skipped, same
  * discipline as every other fetch in this codebase (adsblol.ts,
@@ -38,6 +42,10 @@ export async function refreshSchedule(
 ): Promise<void> {
   const rows: ScheduleRow[] = [];
   let ok = 0;
+  // Boards that answered without throwing and still yielded nothing. Tracked
+  // separately from `ok` because the two are NOT the same outcome, and
+  // conflating them is what let a partially-empty table read as healthy.
+  const barren: string[] = [];
 
   for (let i = 0; i < boards.length; i++) {
     const icao = boards[i]!;
@@ -45,8 +53,10 @@ export async function refreshSchedule(
       // Tagged at this layer rather than in aerodatabox.ts's parser so the
       // parser stays a pure payload->row mapping (and its tests keep asserting
       // exact row shapes).
+      const before = rows.length;
       for (const r of await fetchBoard(icao, apiKey)) rows.push({ ...r, src: 'adb' });
       ok++;
+      if (rows.length === before) barren.push(icao);
     } catch (e) {
       // One board failing must not cost us the other three.
       console.error(`board ${icao} failed:`, e instanceof Error ? e.message : String(e));
@@ -54,15 +64,54 @@ export async function refreshSchedule(
     if (i < boards.length - 1 && delayMs > 0) await sleep(delayMs);
   }
 
-  if (ok === 0) {
-    // Writing an empty table would blank every route until the next refresh.
-    // Leave the previous one in place and let it age into `stale` honestly.
-    console.error('all boards failed; keeping the previous table');
+  // ONE ROW PER LEG. Every board is fetched `direction=Both`, so a JFK->BOS
+  // leg arrives twice -- once from the KJFK board as a departure, once from
+  // the KBOS board as an arrival -- and the two rows are field-for-field
+  // identical, because airports.ts is one unified table and the `arrival`
+  // sub-object is the scheduled arrival in both directions. Left concatenated,
+  // the pair scores an identical corridor excess and matchSchedule's tiebreak
+  // refuses both, blanking the route for exactly the inter-board shuttle
+  // traffic overhead. Same key, same merge as the Port Authority path below.
+  const merged = mergeByFlight(rows, []);
+
+  // GATE ON ROWS PRODUCED, NOT ON FETCHES THAT DID NOT THROW. `ok` counts the
+  // latter, so `ok > 0` with zero rows used to write an EMPTY table stamped
+  // with a fresh builtAtMs -- and isStale() reads builtAtMs alone, so it
+  // reported stale:false with no routes and rewrote itself identically every
+  // tick. parseFids returns [] on a payload-shape change, and collect() bails
+  // silently on a non-array or an unknown board ICAO, so this is reachable
+  // without a single failed request. Testing the MERGED array is deliberate:
+  // it is the thing actually about to be written.
+  // PARTIAL COVERAGE MUST NOT PASS SILENTLY. A board that answers 200 and
+  // yields nothing is a defect every time: a 12h FIDS window at any of these
+  // airports is never legitimately empty, so this means a payload-shape change
+  // parseFids returned [] for, a board ICAO getAirportCoord does not know (
+  // collect() bails on it), or a board throttled into an empty body. With the
+  // other boards still contributing, neither guard below fires and the table
+  // is written a quarter short with a fresh builtAtMs -- healthy-looking and
+  // self-sustaining. It is still better to store what we got than to discard
+  // it, so this reports rather than blocks; deciding whether a coverage floor
+  // should also block the write needs production data on how often this fires.
+  if (barren.length > 0) {
+    console.error(
+      `boards answered with no rows: ${barren.join(', ')}` +
+        (merged.length === 0 ? '' : ' -- writing partial coverage'),
+    );
+  }
+
+  if (merged.length === 0) {
+    // Leave the previous table in place and let it age into `stale` honestly.
+    // Strictly more conservative than writing: a genuinely empty window costs
+    // freshness, where an empty write costs every route.
+    console.error(`no rows from ${ok}/${boards.length} boards; keeping the previous table`);
     return;
   }
 
-  await saveSchedule(storage, rows, nowMs);
-  console.log(`schedule: ${rows.length} rows from ${ok}/${boards.length} boards`);
+  await saveSchedule(storage, merged, nowMs);
+  console.log(
+    `schedule: ${merged.length} rows from ${ok - barren.length}/${boards.length} boards` +
+      (merged.length === rows.length ? '' : ` (${rows.length - merged.length} cross-board duplicates collapsed)`),
+  );
 }
 
 /**
@@ -143,6 +192,14 @@ export async function refreshPanynj(
 
   if (ok === 0) {
     console.error('all panynj boards failed; keeping the previous table');
+    return;
+  }
+
+  // Same rule as refreshSchedule: a pass that produced no rows must not
+  // re-stamp builtAtMs. Without this, boards that answer 200 with an empty
+  // body refresh the table's apparent age while adding nothing to it.
+  if (fresh.length === 0) {
+    console.error(`panynj: no rows from ${ok}/${attempted} boards; keeping the previous table`);
     return;
   }
 
