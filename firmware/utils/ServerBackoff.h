@@ -3,8 +3,29 @@
 #include <cstdint>
 
 // Escalating retry backoff for the FlightWall-server call specifically (see
-// FlightDataFetcher::fetchServerMode). Unlike OpenSky/FR24/adsb.lol, this
-// source has a working fallback (adsb.lol) sitting right behind it --
+// FlightDataFetcher::fetchServerMode).
+//
+// THE ORIGINAL PREMISE WAS MEASURED FALSE. This schedule was tuned on the
+// assumption -- stated in this comment -- that "this source has a working
+// fallback (adsb.lol) sitting right behind it", which made skipping the server
+// cheap: the panel would still update from the fallback. Over a 60-minute
+// window on real hardware, adsb.lol succeeded 0 times in 46 cycles. There is no
+// working fallback, so a skipped cycle is not a cheaper path to the same data,
+// it is a cycle where the panel shows nothing new.
+//
+// That inverts the trade. A failed attempt is bounded and cheap (one 4s
+// handshake); a skipped cycle is a minute of stale display. So the cap comes
+// down from 300s to 120s. Measured against the same hour: the two failure
+// clusters cost 4m52s and 3m37s of stale panel, nearly all of it backoff
+// rather than fetching, and a 120s cap would have cut roughly 4.5 minutes off
+// the ~9 minutes of staleness across the hour.
+//
+// The base is deliberately unchanged -- see below.
+//
+// Historic note, kept because it explains the shape: this source's shortened
+// per-call timeouts (4s handshake, 4s read; see FlightWallServerFetcher's
+// secureClient()) are the other half of the same fix, bounding the cost of any
+// ONE failed attempt --
 // FlightWallServerFetcher's shortened per-call timeouts (4s handshake, 4s
 // read; see its secureClient()) are the other half of this fix, bounding the
 // cost of any ONE failed attempt. This half stops a server that has been down
@@ -15,17 +36,20 @@
 //   Base  30s   -- exactly one skipped fetch cycle, so a single transient
 //                  failure costs one retry delay, not an immediate re-probe.
 //   Grows x2 per additional consecutive failure.
-//   Cap   300s  -- reached after 4 failures (30 -> 60 -> 120 -> 240 -> capped
-//                  at 300), so a real outage settles into "try roughly once
-//                  every 5 minutes" within about 4 fetch cycles (~2 minutes).
-//                  At the 30s default that is 9 skipped cycles for every 1
-//                  real attempt once capped -- "almost nothing per cycle" --
-//                  while still recovering within single-digit minutes of the
-//                  server coming back: the cap bounds the WAIT, not the
-//                  attempt count, so the next attempt after the cap is always
-//                  a real one, never a permanent give-up.
+//   Cap   120s  -- reached after 3 failures (30 -> 60 -> 120), so a real
+//                  outage settles into "try every 2 minutes" rather than every
+//                  5. Still bounds the load during a genuine outage, but
+//                  recovers within about one cycle of the server returning
+//                  instead of up to five. The cap bounds the WAIT, not the
+//                  attempt count -- the next attempt after it is always a real
+//                  one, never a permanent give-up.
+//                  Measured failure shape that justifies the shorter cap: over
+//                  an hour, failures came in two short clusters (3 then 2)
+//                  separated by 25 and 14 consecutive clean cycles. A long cap
+//                  is priced for a sustained outage; what actually happens is
+//                  brief blips, where a long cap is pure added staleness.
 constexpr unsigned long kServerBackoffBaseMs = 30000UL;
-constexpr unsigned long kServerBackoffCapMs = 300000UL;
+constexpr unsigned long kServerBackoffCapMs = 120000UL;
 
 // The retry interval that should be in effect after `consecutiveFailures`
 // server failures in a row. 0 failures -> 0 (nothing has gone wrong yet, so

@@ -20,19 +20,27 @@ int main() {
     // Doubling schedule: base 30s, x2 per additional failure.
     CHECK(serverBackoffMs(1) == 30000UL);
     CHECK(serverBackoffMs(2) == 60000UL);
+    // Cap: the 3rd failure lands exactly ON the 120s cap, and the 4th would
+    // double to 240s, which exceeds it, so it clamps instead.
     CHECK(serverBackoffMs(3) == 120000UL);
-    CHECK(serverBackoffMs(4) == 240000UL);
-
-    // Cap: failure 5 would double to 480s, which exceeds the 300s cap, so it
-    // clamps instead.
-    CHECK(serverBackoffMs(5) == 300000UL);
+    CHECK(serverBackoffMs(4) == 120000UL);
+    CHECK(serverBackoffMs(5) == 120000UL);
 
     // Once capped, stays capped -- including for a failure count far larger
     // than would ever occur in practice, which also proves the loop
     // terminates promptly rather than doubling all the way up.
-    CHECK(serverBackoffMs(6) == 300000UL);
-    CHECK(serverBackoffMs(20) == 300000UL);
-    CHECK(serverBackoffMs(1000000) == 300000UL);
+    CHECK(serverBackoffMs(6) == 120000UL);
+    CHECK(serverBackoffMs(20) == 120000UL);
+    CHECK(serverBackoffMs(1000000) == 120000UL);
+
+    // The cap must stay well inside a single fetch cycle's worth of staleness.
+    // It was lowered from 300s after an hour on real hardware showed the
+    // fallback this schedule was priced against (adsb.lol) succeeding 0 times
+    // in 46 cycles -- so a skipped cycle shows nothing new rather than falling
+    // back, and a long cap is pure added staleness. Asserted as a bound rather
+    // than restating the constant, so a future raise past 2 minutes has to be
+    // deliberate.
+    CHECK(serverBackoffMs(1000000) <= 120000UL);
 
     // shouldSkipServer() — no failure history means never skip, regardless of
     // the (meaningless, in this case) elapsed value.
@@ -49,12 +57,12 @@ int main() {
     CHECK(!shouldSkipServer(1, 30000UL));
     CHECK(!shouldSkipServer(1, 30001UL));
 
-    // Escalated (4th consecutive failure -> 240s) and capped (5th -> 300s)
+    // Escalated (2nd consecutive failure -> 60s) and capped (4th -> 120s)
     // windows follow the same strictly-less-than boundary rule.
-    CHECK(shouldSkipServer(4, 239999UL));
-    CHECK(!shouldSkipServer(4, 240000UL));
-    CHECK(shouldSkipServer(5, 299999UL));
-    CHECK(!shouldSkipServer(5, 300000UL));
+    CHECK(shouldSkipServer(2, 59999UL));
+    CHECK(!shouldSkipServer(2, 60000UL));
+    CHECK(shouldSkipServer(4, 119999UL));
+    CHECK(!shouldSkipServer(4, 120000UL));
 
     // Wrap-safety, demonstrated the way the real caller
     // (FlightDataFetcher::serverBackoffActive) computes elapsedMs: unsigned
