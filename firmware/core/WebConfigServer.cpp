@@ -126,7 +126,9 @@ void WebConfigServer::handleRoot()
 
 void WebConfigServer::handleGetSettings()
 {
-    _server.send(200, "application/json", g_settings.toJson());
+    // REDACTED projection: this endpoint is unauthenticated and reachable by any
+    // LAN peer. save() still persists the full document via toJson().
+    _server.send(200, "application/json", g_settings.toJsonPublic());
 }
 
 void WebConfigServer::handlePostSettings()

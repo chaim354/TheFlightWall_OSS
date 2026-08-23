@@ -75,6 +75,14 @@ static unsigned long g_lastLightMs = 0;
 static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
 static bool g_apMode = false;
 static unsigned long g_wifiDownSinceMs = 0; // for the runtime reconnect/AP-fallback watchdog
+// When the setup AP started, for the bounded-retry watchdog below. Zero means
+// "not counting" -- either we are not in AP mode, or there are no credentials to
+// retry with and the AP must stay up indefinitely.
+static unsigned long g_apSinceMs = 0;
+// How long the setup AP may hold a device that HAS credentials before rebooting
+// to retry STA. Long enough to finish provisioning by hand, short enough that a
+// router that came up late does not strand the panel for the evening.
+static const unsigned long kApRetryAfterMs = 10UL * 60UL * 1000UL;
 static unsigned long g_lastFetchMs = 0;
 static unsigned long g_lastRenderMs = 0;
 static bool g_firstFetchDone = false;
@@ -589,6 +597,14 @@ void loop()
     // silently swallowed until the next unrelated web save.
     if (g_web.consumeSettingsChanged() | g_console.consumeSettingsChanged())
     {
+        // Someone is actively provisioning: restart the AP retry window below.
+        // Deliberately keyed on a SETTINGS WRITE rather than on
+        // softAPgetStationNum(), because a phone that auto-rejoins a remembered
+        // open "FlightWall-Setup" holds the station count above zero forever --
+        // a guard meant to protect a setup session would have re-created the
+        // very stranding this is here to end.
+        if (g_apMode)
+            g_apSinceMs = millis();
         // Re-apply runtime-tunable settings immediately. Hardware/WiFi changes
         // take effect on next reboot.
         // Re-apply the zone: TZ lives in libc's environment, not in Settings, so a
@@ -632,6 +648,38 @@ void loop()
             else if (nowMs - g_wifiDownSinceMs > 60000UL)
             {
                 Serial.println("WiFi down >60s; restarting to re-provision");
+                delay(100);
+                ESP.restart();
+            }
+        }
+    }
+    else
+    {
+        // AP MODE IS NOT ABSORBING ANY MORE.
+        //
+        // g_apMode was set once and never cleared by anything, and it gates the
+        // whole self-heal block above -- so once the device fell back to the
+        // setup AP it stayed there until a human power-cycled it. Reaching that
+        // state needs no attacker and no misconfiguration: a power cut that
+        // restores mains to the ESP32 before the router finishes booting expires
+        // the 30s STA window, and that is enough. The device then holds working
+        // credentials while broadcasting an OPEN network with a wildcard captive
+        // portal that pushes the config page at any phone which joins.
+        //
+        // Only retry when there is something to retry WITH. With no credentials
+        // stored this is genuine first-time provisioning and the AP must stay up
+        // indefinitely -- rebooting would just loop.
+        if (!g_settings.hasWifi())
+        {
+            g_apSinceMs = 0;
+        }
+        else
+        {
+            if (g_apSinceMs == 0)
+                g_apSinceMs = nowMs;
+            else if (nowMs - g_apSinceMs > kApRetryAfterMs)
+            {
+                Serial.println("Setup AP up >10min with credentials stored; restarting to retry WiFi");
                 delay(100);
                 ESP.restart();
             }

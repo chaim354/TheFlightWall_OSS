@@ -176,16 +176,37 @@ bool Settings::save() const
 
 String Settings::toJson() const
 {
+    return serialize(false);
+}
+
+String Settings::toJsonPublic() const
+{
+    return serialize(true);
+}
+
+String Settings::serialize(bool redactSecrets) const
+{
     JsonDocument doc;
 
     JsonObject net = doc.createNestedObject("network");
     net["wifiSsid"] = wifiSsid;
-    net["wifiPassword"] = wifiPassword;
+    if (redactSecrets)
+        net["wifiPasswordSet"] = wifiPassword.length() > 0;
+    else
+        net["wifiPassword"] = wifiPassword;
 
     JsonObject api = doc.createNestedObject("api");
     api["openSkyClientId"] = openSkyClientId;
-    api["openSkyClientSecret"] = openSkyClientSecret;
-    api["aeroApiKey"] = aeroApiKey;
+    if (redactSecrets)
+    {
+        api["openSkyClientSecretSet"] = openSkyClientSecret.length() > 0;
+        api["aeroApiKeySet"] = aeroApiKey.length() > 0;
+    }
+    else
+    {
+        api["openSkyClientSecret"] = openSkyClientSecret;
+        api["aeroApiKey"] = aeroApiKey;
+    }
     api["positionSource"] = positionSourceToString(positionSource);
     api["serverUrl"] = serverUrl;
     api["enrichmentSource"] = (enrichmentSource == EnrichmentSource::AeroApi) ? "aeroapi"
@@ -286,7 +307,20 @@ bool Settings::fromJson(const String &in)
         JsonObject net = doc["network"];
         if (net.containsKey("wifiSsid"))
             wifiSsid = net["wifiSsid"].as<String>();
-        if (net.containsKey("wifiPassword"))
+        // An EMPTY secret means "unchanged", not "clear it".
+        //
+        // Since GET no longer returns these, a client cannot echo them back --
+        // so an empty string here is a page that had nothing to send, not a
+        // deliberate wipe. Without this guard, a browser holding a CACHED older
+        // index.html against new firmware would read the (now absent) password,
+        // fall back to "", post it, and strand the device in the open setup AP
+        // with its credentials gone. That makes the firmware/UI upload order
+        // irrelevant instead of load-bearing.
+        //
+        // Clearing a secret deliberately is still possible over the serial
+        // console (`set`), which requires physical possession, and `erase`
+        // resets everything.
+        if (net.containsKey("wifiPassword") && net["wifiPassword"].as<String>().length())
             wifiPassword = net["wifiPassword"].as<String>();
     }
 
@@ -295,9 +329,10 @@ bool Settings::fromJson(const String &in)
         JsonObject api = doc["api"];
         if (api.containsKey("openSkyClientId"))
             openSkyClientId = api["openSkyClientId"].as<String>();
-        if (api.containsKey("openSkyClientSecret"))
+        // Same "empty means unchanged" rule as wifiPassword above.
+        if (api.containsKey("openSkyClientSecret") && api["openSkyClientSecret"].as<String>().length())
             openSkyClientSecret = api["openSkyClientSecret"].as<String>();
-        if (api.containsKey("aeroApiKey"))
+        if (api.containsKey("aeroApiKey") && api["aeroApiKey"].as<String>().length())
             aeroApiKey = api["aeroApiKey"].as<String>();
         if (api.containsKey("positionSource"))
             positionSource = positionSourceFromString(api["positionSource"].as<String>());

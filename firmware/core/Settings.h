@@ -202,8 +202,29 @@ struct Settings
     bool save() const;     // write /settings.json
     void seedDefaults();   // populate from compile-time config/*.h
 
-    String toJson() const;            // serialize for the web UI / persistence
+    // FULL serialization, secrets included. This is the PERSISTENCE format --
+    // save() writes it to /settings.json -- and it must stay complete.
+    String toJson() const;
+
+    // The same document with the three secrets REDACTED: wifiPassword,
+    // openSkyClientSecret and aeroApiKey are replaced by `<name>Set` booleans.
+    //
+    // A sibling rather than a flag inside toJson(), because toJson() is
+    // simultaneously the wire format and the persistence format -- one
+    // serializer, two audiences with incompatible requirements. Masking inside
+    // it would write masked values to flash.
+    //
+    // GET /api/settings served the full document, unauthenticated, to any LAN
+    // peer. The UI does not need the values back: it assigns them into
+    // type="password" inputs and nothing displays, validates, compares or
+    // computes on them. The booleans are enough to show whether each is set.
+    String toJsonPublic() const;
     bool fromJson(const String &in);  // apply an incoming JSON document
+
+private:
+    String serialize(bool redactSecrets) const;
+
+public:
 
     bool hasWifi() const { return wifiSsid.length() > 0; }
 };

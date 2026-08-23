@@ -91,9 +91,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * exactly like the bug under test.
  */
 const SETTINGS = {
-  network: { wifiSsid: 'HomeWiFi', wifiPassword: 'hunter2' },
+  // Redacted projection, matching Settings::toJsonPublic(): secrets are
+  // replaced by <name>Set booleans. GET /api/settings is unauthenticated.
+  network: { wifiSsid: 'HomeWiFi', wifiPasswordSet: true },
   api: {
-    openSkyClientId: 'osky-id', openSkyClientSecret: 'osky-secret', aeroApiKey: 'aero-key',
+    openSkyClientId: 'osky-id', openSkyClientSecretSet: true, aeroApiKeySet: false,
     positionSource: 'server', serverUrl: 'https://flightwall.example',
     enrichmentSource: 'adsbdb', enrichmentFallbackToAeroApi: false,
   },

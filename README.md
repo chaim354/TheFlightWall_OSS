@@ -163,6 +163,13 @@ Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <ads
 
 Settings are stored on the device (LittleFS) and survive reboots — no re-flashing needed to change anything except the data pin.
 
+> **On credentials.** WiFi and API secrets are stored on the device and are **not**
+> returned by `GET /api/settings` — that endpoint is unauthenticated and reachable by
+> any peer on your LAN, so it reports only whether each secret is set. Leave a secret
+> field blank when saving to keep the stored value. Reading one back requires the
+> serial console, which needs physical possession. Note that a LAN peer can still
+> restart the device and change its settings; the config UI has no authentication.
+
 ## Airline logos
 
 The wall renders a **Mini-style flight card**: an airline logo tile on the left, then the flight number, route, aircraft, and your chosen metrics on the right. Logos are 32×32 tiles stored on the device at `firmware/data/logos/<ICAO>.rgb565` (keyed by the airline's ICAO code, e.g. `UAL.rgb565`).

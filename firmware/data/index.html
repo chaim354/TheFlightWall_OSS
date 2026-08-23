@@ -314,6 +314,12 @@ const $ = id => document.getElementById(id);
 // serverUrl field is the one setting that lets this device fetch from a
 // host the user chooses rather than a fixed, built-in one.
 function esc(s){ const d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
+// A stored secret shows as an empty box that says it is set. Blank on save
+// means "leave it alone" -- the device treats an empty secret as unchanged.
+function secretField(id,isSet){
+  const el=$(id); el.value='';
+  el.placeholder = isSet ? 'stored — leave blank to keep' : 'not set';
+}
 function rgbToHex(r,g,b){return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
@@ -341,10 +347,15 @@ function toggleServerUrl(){
 async function loadSettings(){
   const s = await (await fetch('/api/settings')).json();
   $('wifiSsid').value = s.network.wifiSsid || '';
-  $('wifiPassword').value = s.network.wifiPassword || '';
+  // Secrets are NOT returned by /api/settings any more -- it is unauthenticated
+  // and any LAN peer can read it. The device sends `<name>Set` booleans instead,
+  // which is all this page ever needed: these are type="password" inputs that
+  // nothing displays, validates or computes on. Leave them empty and say whether
+  // one is stored; typing a value replaces it, leaving it blank keeps it.
+  secretField('wifiPassword', s.network.wifiPasswordSet);
   $('openSkyClientId').value = s.api.openSkyClientId || '';
-  $('openSkyClientSecret').value = s.api.openSkyClientSecret || '';
-  $('aeroApiKey').value = s.api.aeroApiKey || '';
+  secretField('openSkyClientSecret', s.api.openSkyClientSecretSet);
+  secretField('aeroApiKey', s.api.aeroApiKeySet);
   $('positionSource').value = s.api.positionSource || 'opensky';
   $('serverUrl').value = s.api.serverUrl || '';
   $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
@@ -411,12 +422,15 @@ async function loadSettings(){
   const b = $('saveBtn'); b.disabled = false; b.title = '';
 }
 
+// Omit an untouched secret entirely rather than sending "". fromJson skips
+// absent keys, so omission is the existing, tested way to say "unchanged".
+function secret(id){ const v=$(id).value; return v ? {[id]:v} : {}; }
 function collect(){
   const [r,g,b] = hexToRgb($('textColor').value);
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
-    network:{ wifiSsid:$('wifiSsid').value, wifiPassword:$('wifiPassword').value },
-    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    network:{ wifiSsid:$('wifiSsid').value, ...secret('wifiPassword') },
+    api:{ openSkyClientId:$('openSkyClientId').value, ...secret('openSkyClientSecret'), ...secret('aeroApiKey'), positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),

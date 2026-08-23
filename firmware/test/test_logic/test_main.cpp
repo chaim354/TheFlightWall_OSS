@@ -172,6 +172,67 @@ void test_server_url_trailing_slash_normalized()
     TEST_ASSERT_TRUE(g_settings.serverUrl == "https://example.com");
 }
 
+// ---- redacted settings projection ------------------------------------------
+
+// GET /api/settings is unauthenticated and reachable by any LAN peer; it used
+// to return the WiFi PSK, the OpenSky secret and the AeroAPI key in plaintext.
+void test_public_json_omits_secrets()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "hunter2";
+    g_settings.openSkyClientSecret = "osky-secret";
+    g_settings.aeroApiKey = "aero-key";
+
+    const String pub = g_settings.toJsonPublic();
+    TEST_ASSERT_TRUE(pub.indexOf("hunter2") < 0);
+    TEST_ASSERT_TRUE(pub.indexOf("osky-secret") < 0);
+    TEST_ASSERT_TRUE(pub.indexOf("aero-key") < 0);
+    // Replaced by booleans, which is all the UI needs.
+    TEST_ASSERT_TRUE(pub.indexOf("wifiPasswordSet") >= 0);
+    TEST_ASSERT_TRUE(pub.indexOf("openSkyClientSecretSet") >= 0);
+    TEST_ASSERT_TRUE(pub.indexOf("aeroApiKeySet") >= 0);
+    // Non-secret fields still travel.
+    TEST_ASSERT_TRUE(pub.indexOf("wifiSsid") >= 0);
+    TEST_ASSERT_TRUE(pub.indexOf("openSkyClientId") >= 0);
+}
+
+// The PERSISTENCE format must stay complete -- save() writes toJson(), and a
+// redacted file would lose the credentials on the next boot.
+void test_persisted_json_still_carries_secrets()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "hunter2";
+    const String full = g_settings.toJson();
+    TEST_ASSERT_TRUE(full.indexOf("hunter2") >= 0);
+}
+
+// An empty secret means "unchanged", never "clear". Without this, a browser
+// holding a cached OLD index.html against new firmware would post "" for a
+// password it could no longer read and strand the device in the open setup AP.
+void test_empty_secret_does_not_wipe_a_stored_one()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "hunter2";
+    g_settings.aeroApiKey = "aero-key";
+
+    TEST_ASSERT_TRUE(g_settings.fromJson(String(
+        "{\"network\":{\"wifiSsid\":\"Home\",\"wifiPassword\":\"\"},"
+        "\"api\":{\"aeroApiKey\":\"\"}}")));
+
+    TEST_ASSERT_TRUE(g_settings.wifiPassword == "hunter2");
+    TEST_ASSERT_TRUE(g_settings.aeroApiKey == "aero-key");
+    TEST_ASSERT_TRUE(g_settings.wifiSsid == "Home"); // non-secrets still apply
+}
+
+// A non-empty secret still replaces the stored one.
+void test_nonempty_secret_replaces()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "old";
+    TEST_ASSERT_TRUE(g_settings.fromJson(String("{\"network\":{\"wifiPassword\":\"new\"}}")));
+    TEST_ASSERT_TRUE(g_settings.wifiPassword == "new");
+}
+
 // ---- AirportInfo::displayCode ----------------------------------------------
 
 // The rule three consumers used to re-derive, one of them wrongly. The case
@@ -282,6 +343,10 @@ void setup()
     RUN_TEST(test_position_source_roundtrip);
     RUN_TEST(test_position_source_unknown_falls_back_to_opensky);
     RUN_TEST(test_server_url_trailing_slash_normalized);
+    RUN_TEST(test_public_json_omits_secrets);
+    RUN_TEST(test_persisted_json_still_carries_secrets);
+    RUN_TEST(test_empty_secret_does_not_wipe_a_stored_one);
+    RUN_TEST(test_nonempty_secret_replaces);
     RUN_TEST(test_airport_display_code);
     RUN_TEST(test_seed_defaults_resets_every_field);
     RUN_TEST(test_seed_defaults_matches_config_constants);
