@@ -9,7 +9,6 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
   - *Flights* — a user list of idents/callsigns/tails looked up directly via AeroAPI; metrics from `last_position`.
 - **Enrich flights** (airline / route / aircraft type) from a selectable source: **adsbdb.com** (free, no key — default), **AeroAPI** (paid; usable as primary or as a backup that only fires when adsbdb misses), or off. adsbdb provides the airline name and route, with a hexdb.io fallback; the aircraft field shows the ICAO type code. Results are cached per flight leg to minimize requests.
 - **Render** a Mini-style flight card — airline logo tile on the left, then a configurable set of fields (flight #, route, ETA, aircraft, altitude, speed, heading, vertical rate) on the right — on a **HUB75 RGB LED matrix**, cycling up to N flights. ETA only ever appears for FlightWall-server flights with a resolved destination. Logos load from `data/logos/<ICAO>.rgb565`; airlines without a tile get a brand-style code badge.
-- **Live web preview** — each frame is composed into an in-RAM `GFXcanvas16` and blitted to the panel; the same buffer is served at `/api/framebuffer` so the web UI mirrors the wall pixel-for-pixel.
 - **Brightness scheduling** — day/night brightness using NTP time.
 - **WiFi provisioning** — falls back to a `FlightWall-Setup` access point with a captive portal when no credentials are saved.
 
@@ -23,7 +22,7 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - **adapters/FlightWallServerFetcher**: One GET to a self-hosted FlightWall server; fills a display-ready `FlightInfo` list directly (route, airline name, ETA already computed), skipping Area-mode enrichment entirely. Falls back to `AdsbLolFetcher` for the cycle if the server is unreachable.
 - **adapters/AeroAPIFetcher**: Retrieves flight details + last-position metrics by ident via AeroAPI.
 - **adapters/AdsbdbFetcher**: Free enrichment via adsbdb.com (airline name + route by callsign, ICAO aircraft type by ICAO24), with a hexdb.io fallback.
-- **adapters/Hub75Display**: Composes each frame into a `GFXcanvas16`, blits to the HUB75 panel, and draws the Mini-style logo + layout card; cycles flights; runtime brightness/color/geometry; exposes the framebuffer for the web preview.
+- **adapters/Hub75Display**: Composes each frame into a `GFXcanvas16`, blits to the HUB75 panel, and draws the Mini-style logo + layout card; cycles flights; runtime brightness/color/geometry.
 - **config/**: Compile-time *default* values (used to seed runtime Settings on first boot).
 - **models/**: Lightweight structs for `StateVector`, `FlightInfo` (now incl. metrics), `AirportInfo`.
 - **utils/GeoUtils.h**: Haversine distance and bounding boxes.

@@ -40,7 +40,21 @@ Depends on the panel's pixel pitch. A 128×64 build from two 64×64 panels is ro
 This firmware drives a **HUB75 RGB LED matrix** (like the 128×64 used by the FlightWall Mini), via the [ESP32-HUB75-MatrixPanel-DMA](https://github.com/mrcodetastic/ESP32-HUB75-MatrixPanel-DMA) library. Default geometry is a 64×64 panel ×2 chained = **128×64**; set your panel width/height and chain length from the web UI.
 
 ### HUB75 → ESP32 pin map
-The data pins are the only compile-time hardware setting — edit them in [`firmware/config/HardwareConfiguration.h`](firmware/config/HardwareConfiguration.h) to match your wiring:
+The data pins are the only compile-time hardware setting — edit them in [`firmware/config/HardwareConfiguration.h`](firmware/config/HardwareConfiguration.h) to match your wiring.
+
+**Two maps, and they are not interchangeable.** The header picks one at compile time from the target; these tables are what it picks. On an ESP32-S3 the classic map's GPIOs are nonexistent (22–25), SPI flash (26–32) or octal PSRAM (33–37), so wiring a breakout from the wrong table cannot work.
+
+**ESP32-S3** (the recommended board — [`esp32s3`](firmware/platformio.ini) env):
+
+| HUB75 | GPIO | HUB75 | GPIO | HUB75 | GPIO |
+|---|---|---|---|---|---|
+| R1 | 4 | R2 | 7 | A | 10 |
+| G1 | 5 | G2 | 8 | B | 11 |
+| B1 | 6 | B2 | 9 | C | 12 |
+| CLK | 17 | LAT | 15 | D | 13 |
+| OE | 16 | | | E | 14 |
+
+**ESP32 (original)** — the `esp32dev` env:
 
 | HUB75 | GPIO | HUB75 | GPIO | HUB75 | GPIO |
 |---|---|---|---|---|---|
@@ -143,7 +157,7 @@ Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <ads
 - **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, which **fields** appear on each card (airline+flight, route, **ETA**, aircraft, altitude, speed, heading, vertical rate), and the **no-flights screen** (clock / aviation fun facts). ETA only ever renders for FlightWall-server flights with a resolved destination — blank otherwise, same as an unfilled route.
 - **Filters** — altitude band, hide aircraft on the ground, and an airline allow-list.
 - **Brightness schedule** — separate day/night brightness with configurable night hours, using a **POSIX timezone string** (e.g. `EST5EDT,M3.2.0,M11.1.0`) so daylight-saving transitions are handled automatically.
-- **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (34/35/36/39/33 — ADC2 can't be used with WiFi on), or an I²C **BH1750** lux sensor or **TCS3472** RGBC sensor on SDA=21/SCL=22. Threshold + hysteresis are tunable, and the web UI shows the live reading for calibration.
+- **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (ADC2 can't be used with WiFi on), or an I²C **BH1750** lux sensor or **TCS3472** RGBC sensor. **The usable pins differ per board**, so the device reports its own: `/api/status` publishes the ADC1 range and the I²C pins, and the web UI fills them in for you — read them there rather than from any table. Threshold + hysteresis are tunable, and the UI shows the live reading for calibration.
 - **Hardware** — tile size and tile count, so you can match any panel layout (changes apply after a restart).
 - **Live status** — current connection, mode, and the flights currently on the wall, each with its **distance** (the list is ordered nearest-first).
 
