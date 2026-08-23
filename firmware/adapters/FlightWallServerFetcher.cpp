@@ -1,6 +1,6 @@
 #include "adapters/FlightWallServerFetcher.h"
 #include "core/Settings.h"
-#include "utils/ServerJson.h"
+#include "utils/JsonOptional.h"
 
 // Distance arrives in the unit we requested. We request imperial, so dst is in
 // NAUTICAL MILES, while FlightInfo::distance_km is kilometres by name and is
@@ -8,15 +8,6 @@
 // at roughly half its true distance -- plausible enough to pass a glance, and it
 // silently corrupts the nearest-first ordering the display depends on.
 static constexpr double kNmToKm = 1.852;
-
-// Optional numeric field -> value-or-NAN. ArduinoJson's `| 0` would turn a
-// missing altitude into sea level and a missing vertical rate into level flight.
-static double optNum(JsonObject o, const char *key)
-{
-    JsonVariant v = o[key];
-    const bool present = !v.isNull() && v.is<float>();
-    return optionalNumber(present, present ? v.as<double>() : NAN);
-}
 
 static String optStr(JsonObject o, const char *key)
 {

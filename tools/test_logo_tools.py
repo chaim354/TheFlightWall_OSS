@@ -105,5 +105,79 @@ class StarterDoesNotClobberArtwork(unittest.TestCase):
         self.assertEqual(os.path.getsize(self.existing), TILE_BYTES)
 
 
+class BothConvertersAgree(unittest.TestCase):
+    """F-TOOL01-B: two entry points, one image->tile transform.
+
+    convert_logo_folder.py's header claims "Output format matches
+    png_to_rgb565.py". That was true of the CONTAINER and false of the PIXELS:
+    it also carried a dark-on-transparent rescue (composite on white when the
+    image is nearly black) and a brightness normalisation that the single-file
+    converter did not.
+
+    The gap fails silently and looks like a firmware bug. A black wordmark
+    exported from SVG on a transparent background flattens onto black, giving an
+    all-black tile -- which still passes tileFor()'s `w>0 && h>0 && w<=64` test,
+    so drawLogoOrBadge takes the haveLogo branch and paints a black square. It
+    never reaches the accentColorFor code-badge fallback the user wanted.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def _dark_on_transparent(self):
+        """A near-black mark on a fully transparent field -- the common case."""
+        from PIL import Image
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        for y in range(20, 44):
+            for x in range(20, 44):
+                img.putpixel((x, y), (10, 10, 10, 255))
+        path = os.path.join(self.dir, "DARK.png")
+        img.save(path)
+        return path
+
+    @staticmethod
+    def _pixels(tile_path):
+        with open(tile_path, "rb") as f:
+            w, h = struct.unpack("<HH", f.read(4))
+            return [struct.unpack("<H", f.read(2))[0] for _ in range(w * h)]
+
+    @staticmethod
+    def _peak_channel(pixels):
+        """Brightest 8-bit channel value across the tile, from RGB565."""
+        peak = 0
+        for p in pixels:
+            r = ((p >> 11) & 0x1F) << 3
+            g = ((p >> 5) & 0x3F) << 2
+            b = (p & 0x1F) << 3
+            peak = max(peak, r, g, b)
+        return peak
+
+    def test_single_file_converter_emits_a_VISIBLE_tile(self):
+        # Not "not literally zero" -- (10,10,10) survives that trivially while
+        # being invisible on the panel. The threshold is the one the rescue
+        # itself uses: below 60, a tile is indistinguishable from the unlit
+        # panel and the user would have been better served by the code badge.
+        src = self._dark_on_transparent()
+        out = os.path.join(self.dir, "DARK.rgb565")
+        png_to_rgb565.main([src, out])
+        self.assertGreaterEqual(
+            self._peak_channel(self._pixels(out)), 60,
+            "dark-on-transparent produced a tile too dark to see on the panel")
+
+    def test_both_entry_points_produce_identical_pixels(self):
+        src = self._dark_on_transparent()
+        single = os.path.join(self.dir, "single.rgb565")
+        png_to_rgb565.main([src, single])
+
+        folder_out = os.path.join(self.dir, "out")
+        convert_logo_folder.main([self.dir, folder_out])
+        batch = os.path.join(folder_out, "DARK.rgb565")
+
+        self.assertEqual(self._pixels(single), self._pixels(batch),
+                         "the two converters disagree on pixels for one input")
+
+
 if __name__ == "__main__":
     unittest.main()

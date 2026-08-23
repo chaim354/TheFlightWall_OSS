@@ -171,7 +171,7 @@ The wall renders a **Mini-style flight card**: an airline logo tile on the left,
 - They're flashed as part of the LittleFS image (`pio run -t uploadfs`).
 
 ### Add or replace logos
-- **Use real artwork** (one airline) — convert a PNG you have rights to use, then re-flash the filesystem:
+- **Use real artwork** (one airline) — convert a PNG you have rights to use, then re-flash the filesystem. Both converters share one transform ([`tools/rgb565_tile.py`](tools/rgb565_tile.py)), so a single logo and a batch give identical pixels, and artwork too dark to see on an unlit panel is flattened onto white instead of black:
   ```bash
   pip install pillow
   python3 tools/png_to_rgb565.py my_airline.png firmware/data/logos/SWA.rgb565
