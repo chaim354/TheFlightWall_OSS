@@ -406,13 +406,13 @@ static void doFetchAndRender()
         if (g_consecutiveFailures < 255)
             g_consecutiveFailures++;
         Serial.printf("Fetch FAILED (%u consecutive) — keeping last flights\n", (unsigned)g_consecutiveFailures);
-        g_web.setLastFetchInfo((int)g_lastFlights.size(), "fetch failed - showing last known");
+        g_web.setLastNote("fetch failed - showing last known");
         // Deliberately NOT g_web.setServerStale(g_fetcher->lastFetchStale()) here:
         // a failed cycle's own stale flag is meaningless (fetchServerMode() only
         // sets it true on a SUCCESSFUL server response), and overwriting it would
-        // desync the pill from _lastFlightCount/_lastNote just above, which both
-        // deliberately keep describing the RETAINED g_lastFlights rather than this
-        // cycle's failed attempt. Leaving _serverStale untouched keeps it doing
+        // desync the pill from _lastNote just above, which deliberately keeps
+        // describing the RETAINED g_lastFlights rather than this cycle's failed
+        // attempt. Leaving _serverStale untouched keeps it doing
         // the same thing: still describing whichever cycle's data is on screen.
         const unsigned long staleMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
         if (g_lastGoodFetchMs != 0 && (millis() - g_lastGoodFetchMs) > staleMs && !g_lastFlights.empty())
@@ -453,7 +453,7 @@ static void doFetchAndRender()
         {
             Serial.printf("Empty result (%u of %u) — holding last flights\n",
                           (unsigned)g_consecutiveEmpty, (unsigned)kEmptyConfirmCycles);
-            g_web.setLastFetchInfo((int)g_lastFlights.size(), "empty result - holding last known");
+            g_web.setLastNote("empty result - holding last known");
             // Same reasoning as the !ok path above: g_lastFlights (and whatever
             // staleness applied to it) is unchanged this cycle, so _serverStale
             // is left alone rather than overwritten with this cycle's own value.
@@ -467,8 +467,12 @@ static void doFetchAndRender()
         g_consecutiveEmpty = 0;
     }
 
-    g_web.setLastFetchInfo((int)flights.size(),
-                           g_settings.mode == TrackingMode::Flights ? "flights mode" : "area mode");
+    // A FETCH OUTCOME, not an echo of `mode`. /api/status already emits `mode`
+    // live from g_settings one line above this in the payload, so echoing it
+    // here made the document contradict itself for a whole fetch interval after
+    // a mode switch -- and cost the field its only real use, which is saying
+    // what the last fetch actually did.
+    g_web.setLastNote("fetch ok");
     // Only reached when g_lastFlights is about to actually be REPLACED below --
     // the one point in this function where "this cycle's result" and "what's
     // now on screen" are the same thing, matching the precedent set by

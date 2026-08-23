@@ -35,7 +35,9 @@ public:
     // We store a pointer to the long-lived global flights vector and serialize
     // it on demand in handleGetFlights(), rather than re-serializing every fetch.
     void setFlights(const std::vector<FlightInfo> *flights) { _flights = flights; }
-    void setLastFetchInfo(int flightCount, const String &note);
+    // Note only. The flight COUNT is no longer pushed: it is derived from the
+    // same vector /api/flights serialises, so the two cannot disagree.
+    void setLastNote(const String &note);
     // FlightDataFetcher::lastFetchStale() from the most recent cycle: the
     // FlightWall server served schedule or position data from cache after a
     // provider failure. Flights still render normally either way -- this is
@@ -59,7 +61,6 @@ private:
     bool _apMode = false;
     String _ip;
     const std::vector<FlightInfo> *_flights = nullptr;
-    int _lastFlightCount = 0;
     String _lastNote;
     bool _serverStale = false;
     int _lightLevel = -1;

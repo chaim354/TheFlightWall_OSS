@@ -63,9 +63,8 @@ bool WebConfigServer::consumeRestartRequested()
     return false;
 }
 
-void WebConfigServer::setLastFetchInfo(int flightCount, const String &note)
+void WebConfigServer::setLastNote(const String &note)
 {
-    _lastFlightCount = flightCount;
     _lastNote = note;
 }
 
@@ -159,7 +158,15 @@ void WebConfigServer::handleGetStatus()
     doc["ip"] = _ip;
     doc["rssi"] = _apMode ? 0 : WiFi.RSSI();
     doc["mode"] = (g_settings.mode == TrackingMode::Flights) ? "flights" : "area";
-    doc["flightCount"] = _lastFlightCount;
+    // Derived, not cached. This was a pushed int, and it went stale in a way that
+    // mattered: main.cpp pushes the count on a failed fetch, then clears
+    // g_lastFlights when they age out, and nothing re-pushes -- so /api/status
+    // reported N flights while /api/flights returned []. With the backoff at its
+    // 300s cap that contradiction persisted for five minutes, on the only
+    // diagnostic channel a wall-mounted board has, at exactly the moment someone
+    // is looking at it. (It misled a live diagnosis on 2026-08-23.) Reading the
+    // same vector /api/flights serialises makes them agree by construction.
+    doc["flightCount"] = _flights ? (int)_flights->size() : 0;
     doc["note"] = _lastNote;
     // FlightWall-server-only: schedule or position data was served from cache
     // after a provider failure on the last cycle. Always false off the server
