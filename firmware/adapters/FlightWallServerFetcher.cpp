@@ -99,7 +99,6 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
                  "&lon=" + String(centerLon, 5) +
                  "&radius_km=" + String(radiusKm, 1) +
                  "&max=" + String((int)maxFlights) +
-                 "&units=imperial" +
                  "&exclude_ground=" + (g_settings.filters.excludeOnGround ? "1" : "0");
     if (g_settings.filters.minAltitudeFt > 0)
         url += "&min_alt_ft=" + String(g_settings.filters.minAltitudeFt);

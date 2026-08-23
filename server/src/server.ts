@@ -142,7 +142,9 @@ export interface RunningServer {
  */
 export function startServer(config: ServerConfig): Promise<RunningServer> {
   const storage = fileStorage(config.schedulePath);
-  const env: Env = { SCHEDULE: storage, BOARDS: config.boards, AERODATABOX_KEY: config.aerodataboxKey };
+  // Only what handleFlights reads. It used to be handed the board list and a
+  // paid-API secret it has no use for, on a per-request read-only path.
+  const env: Env = { SCHEDULE: storage };
   const boards = config.boards.split(',').map((s) => s.trim()).filter(Boolean);
 
   if (!config.aerodataboxKey) {

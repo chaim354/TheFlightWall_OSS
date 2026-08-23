@@ -40,7 +40,7 @@ class FakeKV {
 // also kvStorage's regression coverage, proving it behaves identically to
 // the raw-KV-in-Env code this replaced.
 function mkEnv(kv: FakeKV): Env {
-  return { SCHEDULE: kvStorage(kv as unknown as KVNamespace), BOARDS: 'KJFK,KLGA,KEWR,KBOS', AERODATABOX_KEY: 'unused-in-these-tests' };
+  return { SCHEDULE: kvStorage(kv as unknown as KVNamespace) };
 }
 
 async function seedSchedule(kv: FakeKV, rows: ScheduleRow[], builtAtMs: number): Promise<void> {
@@ -350,7 +350,7 @@ describe('handleFlights: schedule staleness', () => {
     } as unknown as KVNamespace;
     const res = await handleFlights(
       mkUrl({ lat: LAT, lon: LON }),
-      { SCHEDULE: kvStorage(throwingKv), BOARDS: 'KJFK', AERODATABOX_KEY: 'x' },
+      { SCHEDULE: kvStorage(throwingKv) },
       Date.now(),
     );
     expect(res.status).toBe(200);

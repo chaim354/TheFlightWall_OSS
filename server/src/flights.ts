@@ -14,8 +14,6 @@ import type { Flight, ScheduleRow } from './types';
  */
 export interface Env {
   SCHEDULE: ScheduleStorage;
-  BOARDS: string;
-  AERODATABOX_KEY: string;
 }
 
 /** Hard ceiling on `max`, so a caller cannot ask us to serialise the whole sky. */
@@ -58,7 +56,6 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
 
   const radiusKm = clamp(Number(q.get('radius_km')) || 40, 1, 400);
   const max = clamp(Math.trunc(Number(q.get('max'))) || 8, 1, MAX_FLIGHTS_CEILING);
-  const units = q.get('units') === 'metric' ? 'metric' : 'imperial';
   const excludeGround = q.get('exclude_ground') === '1';
   const minAlt = parseNum(q.get('min_alt_ft'));
   const maxAlt = parseNum(q.get('max_alt_ft'));
@@ -102,7 +99,7 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
       }
     }
 
-    const f = enrich(a, rows, { units, centerLat: lat, centerLon: lon }, nowMs);
+    const f = enrich(a, rows, { center: { lat, lon } }, nowMs);
     if (f) pairs.push({ a, f });
   }
 
