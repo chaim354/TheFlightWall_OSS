@@ -56,8 +56,21 @@ export function fileStorage(path: string): ScheduleStorage {
     async write(s: StoredSchedule): Promise<void> {
       await mkdir(dirname(path), { recursive: true });
       const tmp = `${path}.tmp-${randomUUID()}`;
-      await writeFile(tmp, JSON.stringify(s), 'utf8');
+      // The temp file is owned from the moment it can exist, not from the
+      // moment it is complete. writeFile used to sit outside this try, so a
+      // failure there -- ENOSPC, EDQUOT, EIO -- orphaned a partial file with no
+      // owner. Because the name carries a fresh UUID per attempt, orphans
+      // accumulated one per failure instead of overwriting, which on a full
+      // disk is a feedback loop: every refresh, forever, each one eating more
+      // of the space that caused it. Nothing sweeps *.tmp-* at startup.
+      //
+      // The UUID stays. Not for the in-process `refreshing` mutex, but because
+      // Kamal runs the old and new containers together during a deploy, both
+      // mounting this volume and both refreshing at boot -- and that
+      // cross-process race is benign precisely because each writes its own
+      // uniquely-named temp file and the rename is last-one-wins, never torn.
       try {
+        await writeFile(tmp, JSON.stringify(s), 'utf8');
         await rename(tmp, path);
       } catch (err) {
         await unlink(tmp).catch(() => {});

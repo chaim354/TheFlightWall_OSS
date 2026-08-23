@@ -85,8 +85,59 @@ export async function saveSchedule(storage: ScheduleStorage, rows: readonly Sche
   await storage.write(payload);
 }
 
+/**
+ * Does this parsed value actually have the shape consumers dereference?
+ *
+ * Both backends deserialize with an unchecked cast -- fileStorage's
+ * `JSON.parse(raw) as StoredSchedule` and kvStorage's `kv.get<StoredSchedule>`
+ * -- so `read()` promises `StoredSchedule | null` while the non-null branch may
+ * be any JSON value at all. fileStorage's comment promises corrupt files
+ * degrade to null, and that holds for syntactically bad JSON only.
+ *
+ * The damage from the gap is specific rather than theoretical. Given
+ * `{"index":{}}`, isStale computes `nowMs - undefined` = NaN, and
+ * `NaN > STALE_AFTER_MS` is FALSE -- so the table reports itself FRESH, forever.
+ * handleFlights then dereferences `stored.index.byCallsign` and throws a
+ * TypeError well past the `.catch()` attached to the read, which the Node path
+ * turns into a 500 on every request and the Worker path does not catch at all.
+ *
+ * Checks only the three fields consumers actually reach for, deliberately: row
+ * contents are not validated here. A row that is individually malformed is
+ * already handled downstream, and walking 4,000 of them on every load to prove
+ * it would cost more than the bug.
+ */
+function isStoredSchedule(v: unknown): v is StoredSchedule {
+  if (typeof v !== 'object' || v === null) return false;
+  const s = v as Partial<StoredSchedule>;
+  if (typeof s.builtAtMs !== 'number' || !Number.isFinite(s.builtAtMs)) return false;
+  const idx = s.index as Partial<ScheduleIndex> | undefined;
+  if (typeof idx !== 'object' || idx === null) return false;
+  if (typeof idx.byNumber !== 'object' || idx.byNumber === null) return false;
+  if (typeof idx.byCallsign !== 'object' || idx.byCallsign === null) return false;
+  return true;
+}
+
+/**
+ * Read the table, or null if there isn't a usable one.
+ *
+ * Narrowing here rather than inside either backend is what keeps the storage
+ * contract honest: a caller still cannot tell which implementation it has, and
+ * both get the same guard. It also means consumers need none of their own --
+ * refresh.ts used to hand-roll exactly this check before touching
+ * `index.byNumber` while flights.ts had nothing, which is why the two behaved
+ * completely differently on the same bad file.
+ */
 export async function loadSchedule(storage: ScheduleStorage): Promise<StoredSchedule | null> {
-  return await storage.read();
+  const raw = await storage.read();
+  if (raw === null) return null;
+  if (!isStoredSchedule(raw)) {
+    // Loud: this is a stored value that parsed but is not a table, which means
+    // a hand-edited file or a rollback across an index-shape change. Silently
+    // returning null would read as "no schedule yet" forever with no clue why.
+    console.error('schedule: stored value is not a usable table; ignoring it');
+    return null;
+  }
+  return raw;
 }
 
 export function isStale(s: StoredSchedule | null, nowMs: number): boolean {

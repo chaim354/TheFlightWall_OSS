@@ -1,6 +1,6 @@
 import { fetchBoard } from './aerodatabox';
 import { fetchBoard as fetchPanynj, PAGE_DELAY_MS } from './panynj';
-import { saveSchedule, type ScheduleStorage } from './store';
+import { loadSchedule, saveSchedule, type ScheduleStorage } from './store';
 import type { ScheduleRow } from '../types';
 
 /**
@@ -271,10 +271,11 @@ export function resetPanynjBackoff(): void {
  * table means this pass simply has nothing to merge onto.
  */
 async function storedRows(storage: ScheduleStorage): Promise<ScheduleRow[]> {
-  const stored = await storage.read().catch(() => null);
-  const byNumber = stored?.index?.byNumber;
-  if (!byNumber || typeof byNumber !== 'object') return [];
-  return Object.values(byNumber).flat();
+  // Was a hand-rolled shape check here; loadSchedule now owns that for both
+  // backends, so a table that parsed but is not usable arrives as null.
+  const stored = await loadSchedule(storage).catch(() => null);
+  if (!stored) return [];
+  return Object.values(stored.index.byNumber).flat();
 }
 
 /** Identity of a scheduled leg, for deduplicating across sources. */
