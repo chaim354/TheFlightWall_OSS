@@ -4,7 +4,7 @@ Convert a logo image (PNG/JPG/etc.) into the LED panel's .rgb565 tile format so
 you can ship real airline artwork on the wall.
 
 Usage:
-    python3 tools/png_to_rgb565.py united.png firmware/data/logos/UAL.rgb565 [--size 16]
+    python3 tools/png_to_rgb565.py united.png firmware/data/logos/UAL.rgb565 [--size 32]
 
 Requires Pillow:  pip install pillow
 
@@ -25,12 +25,16 @@ def rgb565(r, g, b):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
 
-def main():
+def build_parser():
     ap = argparse.ArgumentParser()
     ap.add_argument("input")
     ap.add_argument("output")
-    ap.add_argument("--size", type=int, default=16, help="square tile size (px)")
-    args = ap.parse_args()
+    ap.add_argument("--size", type=int, default=32, help="square tile size (px)")
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     img = Image.open(args.input).convert("RGBA")
     img = img.resize((args.size, args.size), Image.LANCZOS)

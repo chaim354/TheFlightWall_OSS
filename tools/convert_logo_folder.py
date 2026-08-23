@@ -6,7 +6,7 @@ For real logo artwork you have the rights to use: put one image per airline name
 by its ICAO code (e.g. UAL.png, DAL.png, BAW.svg-exported-png) in a folder, then:
 
     pip install pillow
-    python3 tools/convert_logo_folder.py ~/airline_logos firmware/data/logos --size 16
+    python3 tools/convert_logo_folder.py ~/airline_logos firmware/data/logos
 
 Each <ICAO>.<ext> becomes firmware/data/logos/<ICAO>.rgb565 (overwriting the
 bundled brand-badge tile). Re-flash the filesystem afterwards: `pio run -t uploadfs`.
@@ -63,13 +63,17 @@ def convert(src, dst, size, do_normalize=True):
                 f.write(struct.pack("<H", rgb565(r, g, b)))
 
 
-def main():
+def build_parser():
     ap = argparse.ArgumentParser()
     ap.add_argument("input_dir", help="folder of <ICAO>.<img> files")
     ap.add_argument("output_dir", help="firmware/data/logos")
-    ap.add_argument("--size", type=int, default=16, help="square tile size (px); use 32 for 128x64")
+    ap.add_argument("--size", type=int, default=32, help="square tile size (px)")
     ap.add_argument("--no-normalize", action="store_true", help="skip brightness normalization")
-    args = ap.parse_args()
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     os.makedirs(args.output_dir, exist_ok=True)
     n = 0

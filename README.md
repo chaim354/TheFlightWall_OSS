@@ -151,7 +151,7 @@ Settings are stored on the device (LittleFS) and survive reboots — no re-flash
 
 ## Airline logos
 
-The wall renders a **Mini-style flight card**: an airline logo tile on the left, then the flight number, route, aircraft, and your chosen metrics on the right. Logos are 16×16 tiles stored on the device at `firmware/data/logos/<ICAO>.rgb565` (keyed by the airline's ICAO code, e.g. `UAL.rgb565`).
+The wall renders a **Mini-style flight card**: an airline logo tile on the left, then the flight number, route, aircraft, and your chosen metrics on the right. Logos are 32×32 tiles stored on the device at `firmware/data/logos/<ICAO>.rgb565` (keyed by the airline's ICAO code, e.g. `UAL.rgb565`).
 
 - A bundled set of **150+ carriers worldwide** (passenger and cargo) ships in the repo as brand-colored code-badge tiles — the airline's 2-letter code on its brand color, not trademarked logo artwork. Airlines without a tile fall back to the same brand-style badge generated on the fly.
 - They're flashed as part of the LittleFS image (`pio run -t uploadfs`).
@@ -160,16 +160,16 @@ The wall renders a **Mini-style flight card**: an airline logo tile on the left,
 - **Use real artwork** (one airline) — convert a PNG you have rights to use, then re-flash the filesystem:
   ```bash
   pip install pillow
-  python3 tools/png_to_rgb565.py my_airline.png firmware/data/logos/SWA.rgb565 --size 16
+  python3 tools/png_to_rgb565.py my_airline.png firmware/data/logos/SWA.rgb565
   pio run -t uploadfs   # from the firmware/ folder
   ```
 - **Batch-convert a whole folder** of `<ICAO>.png` logos at once:
   ```bash
-  python3 tools/convert_logo_folder.py ~/airline_logos firmware/data/logos --size 16
+  python3 tools/convert_logo_folder.py ~/airline_logos firmware/data/logos
   ```
-- **Regenerate the bundled code-badge tiles** (no dependencies): edit the `AIRLINES` table in [`tools/gen_starter_logos.py`](tools/gen_starter_logos.py) and run `python3 tools/gen_starter_logos.py`.
+- **Regenerate the bundled code-badge tiles** (no dependencies): edit the `AIRLINES` table in [`tools/gen_starter_logos.py`](tools/gen_starter_logos.py) and run `python3 tools/gen_starter_logos.py`. Tiles that already exist are skipped, so your own artwork is safe; pass `--force` to overwrite them.
 
-Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64. **For a 128×64 panel use `--size 32`** (the big-panel layout draws a 32×32 logo); the renderer auto-fits whatever size you provide. The bundled brand badges are 16×16 and get upscaled when needed.
+Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64, and every tool here defaults to 32×32 — the size the bundled badges ship at and the size the 128×64 big-panel layout draws. Pass `--size` to the converters only if you want something else; the renderer auto-fits whatever size you provide, but it only ever upscales.
 
 ### Layouts by panel size
 The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft Spd:258mph` / `Trk:263deg <flight #>`, with IATA airport codes) — the second row shows the flight number or vertical rate depending on the toggle above, except that a resolved ETA (FlightWall server only) takes that slot instead, e.g. `Trk:263deg ETA:~1h05`; **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate a starter set of 16x16 airline "logo" tiles for the LED panel.
+Generate a starter set of 32x32 airline "logo" tiles for the LED panel.
 
 These are brand-colored tiles showing the airline's 2-char code in a tiny pixel
 font — the legible, recognizable mark used by most LED flight displays. They ship
@@ -10,13 +10,19 @@ real logo artwork any time with tools/png_to_rgb565.py (same output format).
 Output format (.rgb565), little-endian:
     uint16 width, uint16 height, then width*height * uint16 RGB565 pixels.
 
+Existing tiles are left alone: firmware/data/logos/ holds hand-placed artwork
+that is not in git, so a rerun must never clobber it. Pass --force to regenerate
+deliberately.
+
 Pure standard library — no Pillow required. Run from the repo root:
-    python3 tools/gen_starter_logos.py
+    python3 tools/gen_starter_logos.py            # fill in what is missing
+    python3 tools/gen_starter_logos.py --force    # regenerate every tile
 """
+import argparse
 import os
 import struct
 
-SIZE = 16
+SIZE = 32
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "firmware", "data", "logos")
 
 # 3x5 pixel font (top->bottom). Only the glyphs used by airline codes are needed,
@@ -150,7 +156,7 @@ AIRLINES = {
     "CMP": ("CM", "003DA5", "FFFFFF"),  # Copa
 }
 
-SCALE = 2  # 3x5 glyph -> 6x10
+SCALE = 4  # 3x5 glyph -> 12x20
 
 
 def hex_to_rgb(h):
@@ -195,11 +201,28 @@ def write_tile(path, px):
                 f.write(struct.pack("<H", rgb565(r, g, b)))
 
 
-def main():
+def build_parser():
+    ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite tiles that already exist (default: skip them)")
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
     os.makedirs(OUT_DIR, exist_ok=True)
+    written = skipped = 0
     for icao, (code, bg, fg) in AIRLINES.items():
-        write_tile(os.path.join(OUT_DIR, icao + ".rgb565"), render(code, bg, fg))
-    print(f"Wrote {len(AIRLINES)} logo tiles to {os.path.normpath(OUT_DIR)}")
+        path = os.path.join(OUT_DIR, icao + ".rgb565")
+        if os.path.exists(path) and not args.force:
+            skipped += 1
+            continue
+        write_tile(path, render(code, bg, fg))
+        written += 1
+    out = os.path.normpath(OUT_DIR)
+    print(f"Wrote {written} logo tiles to {out}")
+    if skipped:
+        print(f"Skipped {skipped} that already exist (--force to overwrite)")
 
 
 if __name__ == "__main__":
