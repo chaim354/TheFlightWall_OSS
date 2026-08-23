@@ -37,7 +37,6 @@ bool AdsbdbFetcher::fetchRoute(const String &callsign, FlightInfo &out)
     if (ident.length())
         out.ident = ident;
     out.ident_icao = jstr(fr, "callsign_icao");
-    out.ident_iata = jstr(fr, "callsign_iata");
 
     JsonObject al = fr["airline"].as<JsonObject>();
     if (!al.isNull())

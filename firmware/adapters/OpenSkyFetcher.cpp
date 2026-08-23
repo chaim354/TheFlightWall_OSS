@@ -288,7 +288,6 @@ void OpenSkyFetcher::parseStatesInto(Stream &stream, double centerLat, double ce
             s.heading = a[10].isNull() ? NAN : a[10].as<double>();
             s.vertical_rate = a[11].isNull() ? NAN : a[11].as<double>();
             s.geo_altitude = a[13].isNull() ? NAN : a[13].as<double>();
-            s.position_source = a[16].isNull() ? 0 : a[16].as<int>();
             s.category = a[17].isNull() ? 0 : a[17].as<int>(); // extended=1; 8 = rotorcraft
 
             if (!isnan(s.lat) && !isnan(s.lon))

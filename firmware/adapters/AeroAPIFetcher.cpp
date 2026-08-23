@@ -39,7 +39,6 @@ bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, const String &ic
     JsonObject f = flights[0].as<JsonObject>();
     outInfo.ident = safeGetString(f, "ident");
     outInfo.ident_icao = safeGetString(f, "ident_icao");
-    outInfo.ident_iata = safeGetString(f, "ident_iata");
     outInfo.operator_code = safeGetString(f, "operator");
     outInfo.operator_icao = safeGetString(f, "operator_icao");
     outInfo.operator_iata = safeGetString(f, "operator_iata");
@@ -67,17 +66,14 @@ bool AeroAPIFetcher::fetchFlightInfo(const String &flightIdent, const String &ic
         {
             // AeroAPI reports altitude in hundreds of feet.
             outInfo.altitude_ft = p["altitude"].as<double>() * 100.0;
-            outInfo.has_metrics = true;
         }
         if (!p["groundspeed"].isNull())
         {
             outInfo.groundspeed_kt = p["groundspeed"].as<double>();
-            outInfo.has_metrics = true;
         }
         if (!p["heading"].isNull())
         {
             outInfo.heading_deg = p["heading"].as<double>();
-            outInfo.has_metrics = true;
         }
         // altitude_change: "C" climbing, "D" descending, "-" level. No magnitude.
         if (!p["altitude_change"].isNull())

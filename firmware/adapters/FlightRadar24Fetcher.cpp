@@ -8,10 +8,11 @@ Responsibilities:
   code — written for OpenSky — needs no changes.
 - Carry FR24's inline route/aircraft/airline through the new StateVector fields.
   Only a row that includes a route skips the per-flight enrichment lookup entirely
-  (has_inline_enrichment in StateVector.h); type/airline ride along regardless and
+  (hasInlineRoute() in StateVector.h); type/airline ride along regardless and
   are layered onto that lookup's result in fetchAreaMode.
 Inputs: centerLat, centerLon, radiusKm.
-Outputs: outStateVectors within radius, with has_inline_enrichment set.
+Outputs: outStateVectors within radius, with origin_iata/dest_iata set when the
+  feed carried a route (hasInlineRoute() then reports true).
 
 feed.js row layout (index -> field), as of this writing:
   [0] icao24 hex   [1] lat        [2] lon         [3] track deg
@@ -235,7 +236,7 @@ void FlightRadar24Fetcher::parseFeedInto(JsonDocument &doc, double centerLat,
 
         // ---- Inline enrichment: the payoff of using FR24 as the source ----
         // These come free in the same response. A route here lets Area mode skip
-        // adsbdb entirely (has_inline_enrichment below); type/airline ride along
+        // adsbdb entirely (hasInlineRoute()); type/airline ride along
         // regardless and are overlaid onto adsbdb's result when a route is missing.
         s.origin_iata = a[11].isNull() ? String("") : String(a[11].as<const char *>());
         s.dest_iata = a[12].isNull() ? String("") : String(a[12].as<const char *>());
@@ -246,7 +247,6 @@ void FlightRadar24Fetcher::parseFeedInto(JsonDocument &doc, double centerLat,
         // just the aircraft type used to suppress the route lookup forever, so the
         // flight never got a route at all. Type and airline still ride along; they
         // are applied as an overlay in fetchAreaMode regardless of this flag.
-        s.has_inline_enrichment = s.origin_iata.length() || s.dest_iata.length();
 
         s.bearing_deg = computeBearingDeg(centerLat, centerLon, s.lat, s.lon);
 

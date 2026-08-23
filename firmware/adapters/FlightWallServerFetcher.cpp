@@ -174,7 +174,6 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         if (info.ident.length() == 0)
             continue; // a card with no identity is not worth a slot
 
-        info.ident_iata = optStr(f, "flt");
         info.airline_display_name_full = optStr(f, "al");
         info.aircraft_code = optStr(f, "ac");
         info.origin.code_iata = optStr(f, "from");
@@ -184,14 +183,12 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         info.groundspeed_kt = optNum(f, "spd");
         info.heading_deg = optNum(f, "hdg");
         info.vertical_rate_fpm = optNum(f, "vs");
-        info.bearing_deg = optNum(f, "brg");
 
         const double dstNm = optNum(f, "dst");
         info.distance_km = isnan(dstNm) ? NAN : dstNm * kNmToKm;
 
         info.eta_minutes = optNum(f, "eta_min");
         info.eta_text = optStr(f, "eta_text");
-        info.has_metrics = true;
 
         outFlights.push_back(info);
     }

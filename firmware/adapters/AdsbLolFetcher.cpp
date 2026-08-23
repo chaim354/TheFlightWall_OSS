@@ -176,7 +176,6 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
         // is keyed by ICAO24 (the airframe), the one enrichment field that was
         // already 100% reliable.
         s.aircraft_type = String(a["t"] | "");
-        s.registration = String(a["r"] | "");
 
         // adsb.lol encodes the ADS-B emitter category as a STRING ("A7" =
         // rotorcraft); OpenSky uses an integer (8 = rotorcraft) and
@@ -204,8 +203,7 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
                                       : dirDeg;
 
         // NOT set: this source carries no route, so enrichment must still run.
-        // has_inline_enrichment means "the feed carried a ROUTE".
-        s.has_inline_enrichment = false;
+        // hasInlineRoute() means "the feed carried a ROUTE".
 
         outStateVectors.push_back(s);
     }

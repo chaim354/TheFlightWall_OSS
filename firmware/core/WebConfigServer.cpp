@@ -6,6 +6,7 @@ Purpose: Implementation of the on-device configuration & control web server.
 #include "core/Settings.h"
 #include "config/HardwareConfiguration.h" // board-guarded pins reported in /api/status
 #include "adapters/GeoLocator.h"
+#include "utils/ServerJson.h" // renderable()
 
 #include <LittleFS.h>
 #include <WiFi.h>
@@ -216,7 +217,7 @@ String WebConfigServer::buildFlightsJson() const
             o["airline"] = f.airline_display_name_full.length() ? f.airline_display_name_full
                            : (f.operator_iata.length() ? f.operator_iata
                               : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
-            o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+            o["aircraft"] = f.aircraft_code;
             // Reading code_icao alone blanked this list for any source that supplies only
             // IATA — which is every flight under Flightradar24, whose feed carries IATA
             // origin/destination inline and no ICAO at all. The UI renders these as
@@ -228,26 +229,30 @@ String WebConfigServer::buildFlightsJson() const
             o["helicopter"] = f.is_helicopter;
             o["cargo"] = f.is_cargo;
             o["private"] = f.is_private;
-            if (f.has_metrics)
-            {
-                // Distance from the configured center — the key the list is already
-                // ordered by (FlightDataFetcher sorts candidates nearest-first). NAN in
-                // Flights mode, which has no center to measure from, so the guard omits
-                // the key there rather than emitting null.
-                if (!isnan(f.distance_km))
-                    o["distanceKm"] = round(f.distance_km * 10.0) / 10.0;
-                if (!isnan(f.altitude_ft))
-                    o["altitudeFt"] = (long)f.altitude_ft;
-                if (!isnan(f.groundspeed_kt))
-                    o["speedKt"] = (long)f.groundspeed_kt;
-                if (!isnan(f.heading_deg))
-                    o["headingDeg"] = (long)f.heading_deg;
-                if (!isnan(f.vertical_rate_fpm))
-                    o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
-            }
+            // Each field gates on its own value being present. There was an outer
+            // `if (f.has_metrics)` here, but every guard below already asks the only
+            // question that matters, so the gate could only ever suppress fields that
+            // WERE present -- which it did: AeroAPI set has_metrics for
+            // altitude/speed/heading and not for vertical rate, so a flight reporting
+            // only altitude_change had its rate omitted here while the panel drew CLB.
+            //
+            // Distance from the configured center — the key the list is already
+            // ordered by (FlightDataFetcher sorts candidates nearest-first). NAN in
+            // Flights mode, which has no center to measure from, so the guard omits
+            // the key there rather than emitting null.
+            if (renderable(f.distance_km))
+                o["distanceKm"] = round(f.distance_km * 10.0) / 10.0;
+            if (renderable(f.altitude_ft))
+                o["altitudeFt"] = (long)f.altitude_ft;
+            if (renderable(f.groundspeed_kt))
+                o["speedKt"] = (long)f.groundspeed_kt;
+            if (renderable(f.heading_deg))
+                o["headingDeg"] = (long)f.heading_deg;
+            if (renderable(f.vertical_rate_fpm))
+                o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
             // eta_text/eta_minutes come only from the FlightWall server (empty/NAN
             // for every OpenSky/adsb.lol flight and any server flight with no
-            // destination), so these are independent of has_metrics above -- the
+            // destination), so these are independent of the metrics above -- the
             // live list is the fastest way to see whether ETA is arriving at all
             // without staring at the panel. etaText is the server's pre-rounded
             // display string; etaMin is the unrounded minutes for debugging.

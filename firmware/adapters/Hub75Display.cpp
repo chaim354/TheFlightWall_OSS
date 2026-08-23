@@ -18,6 +18,7 @@ Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
 #include "esp_heap_caps.h"
 #include "config/HardwareConfiguration.h"
 #include "config/FunFacts.h"
+#include "utils/ServerJson.h" // renderable()
 #include "core/Settings.h"
 #include "utils/ClockFormat.h"
 
@@ -230,7 +231,7 @@ String Hub75Display::truncateToColumns(const String &text, int maxColumns)
 
 static String formatAltitude(double altFt)
 {
-    if (isnan(altFt))
+    if (!renderable(altFt))
         return String("");
     long ft = (long)(altFt + 0.5);
     if (ft >= 18000)
@@ -240,7 +241,7 @@ static String formatAltitude(double altFt)
 
 static String formatHeading(double deg)
 {
-    if (isnan(deg))
+    if (!renderable(deg))
         return String("");
     long d = ((long)(deg + 0.5)) % 360;
     if (d < 0)
@@ -252,7 +253,7 @@ static String formatHeading(double deg)
 
 static String formatVerticalRate(double fpm)
 {
-    if (isnan(fpm))
+    if (!renderable(fpm))
         return String("");
     if (fabs(fpm) <= 2.0) // direction-only indicator (Flights mode)
     {
@@ -306,7 +307,7 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
 
     if (L.showAircraft)
     {
-        String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+        String type = f.aircraft_code;
         if (type.length())
             outLines.push_back(type);
     }
@@ -318,7 +319,7 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
             outLines.push_back(a);
     }
 
-    if (L.showSpeed && !isnan(f.groundspeed_kt))
+    if (L.showSpeed && renderable(f.groundspeed_kt))
         outLines.push_back(String((long)(f.groundspeed_kt + 0.5)) + "kt");
 
     if (L.showHeading)
@@ -508,7 +509,7 @@ static String iataRoute(const FlightInfo &f)
 // reclaim width instead of truncating with an ellipsis).
 static String miniAlt(double ft, bool unit)
 {
-    if (isnan(ft))
+    if (!renderable(ft))
         return String("");
     if (ft >= 1000)
     {
@@ -521,14 +522,14 @@ static String miniAlt(double ft, bool unit)
 
 static String miniSpdMph(double kt, bool unit)
 {
-    if (isnan(kt))
+    if (!renderable(kt))
         return String("");
     return String((long)(kt * 1.15078 + 0.5)) + (unit ? "mph" : "");
 }
 
 static String miniTrk(double deg, bool unit)
 {
-    if (isnan(deg))
+    if (!renderable(deg))
         return String("");
     long d = ((long)(deg + 0.5)) % 360;
     if (d < 0)
@@ -538,7 +539,7 @@ static String miniTrk(double deg, bool unit)
 
 static String miniVr(double fpm, bool unit)
 {
-    if (isnan(fpm))
+    if (!renderable(fpm))
         return String("");
     long fps = (long)(fpm / 60.0 + (fpm >= 0 ? 0.5 : -0.5));
     return String(fps) + (unit ? "ft/s" : "");
@@ -620,7 +621,7 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
                      : (f.operator_iata.length() ? f.operator_iata
                         : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
     String route = iataRoute(f);
-    String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+    String type = f.aircraft_code;
     airline = airlineNameOverride(f.operator_icao, airline);
     if (!airline.length())
         airline = f.ident.length() ? f.ident : String("?");
