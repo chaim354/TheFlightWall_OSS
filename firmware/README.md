@@ -39,7 +39,7 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - Reachable on the network at `http://flightwall.local` (mDNS) once connected.
 
 ### Tests
-Two suites, and they run in different places.
+Three, and they run in different places.
 
 **Host tests — no board needed.** The pure-logic suites (`test/test_*.cpp`: parsers,
 classify, lru, buttons, clock, route, serverjson, serverbackoff) are standalone g++
@@ -55,6 +55,24 @@ is what keeps it out of the `pio test` binary — see the comment in `platformio
 Settings JSON parse/round-trip:
 - `pio test` — build, flash, and run on a connected ESP32 (reports over serial).
 - `pio test --without-uploading --without-testing` — compile-only check, no board needed.
+
+**Web UI — no board needed.** `data/index.html` is served from LittleFS, so the only
+way to exercise it used to be `pio run -t uploadfs`, which erases `/settings.json`.
+Instead, stub the device API and drive the real page in a browser:
+
+```bash
+node ../tools/webui_stub.mjs        # http://localhost:8099
+```
+
+Query-string knobs make the awkward states reachable — a slow or failing
+`/api/settings`, a hostile SSID, firmware without the heap-block fields — and
+`/__probe` reports what the page actually sent. The script header lists the knobs and
+carries a reproduction recipe for each of the four defects the 2026-08-23 audit found
+here, written as the assertion that fails on unfixed code.
+
+It refuses to start if its canned settings payload is missing any field
+`loadSettings()` reads: an incomplete stub makes the page throw partway and leaves
+Save disabled, which looks exactly like the bug you would be testing for.
 
 ### Notes
 - OpenSky OAuth is required for `states/all`. Token auto-refreshes with a safety skew.
