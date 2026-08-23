@@ -222,11 +222,29 @@ struct Settings
     bool fromJson(const String &in);  // apply an incoming JSON document
 
 private:
+    // mutable: save() is const, and this is bookkeeping about persistence
+    // rather than part of the settings themselves.
+    mutable bool _dirty = false;
     String serialize(bool redactSecrets) const;
 
 public:
 
     bool hasWifi() const { return wifiSsid.length() > 0; }
+
+    // DEFERRED-WRITE BOOKKEEPING.
+    //
+    // Button-driven changes are coalesced rather than written on every press: a
+    // brightness ramp touches this struct on every rung and save() rewrites the
+    // whole file, so main.cpp debounces ~10s. The flag lives HERE rather than
+    // beside that timer because the thing that has to consult it -- "am I about
+    // to reboot with an unsaved change?" -- happens in three translation units,
+    // and two of them cannot see main.cpp's statics. Both restart paths used to
+    // simply drop the pending write: press the mode button, hit Restart in the
+    // web UI within ten seconds, and noFlightsMode reverted.
+    //
+    // main.cpp still owns WHEN to coalesce; this owns WHETHER anything is owed.
+    void markDirty() { _dirty = true; }
+    bool dirty() const { return _dirty; }
 };
 
 extern Settings g_settings;

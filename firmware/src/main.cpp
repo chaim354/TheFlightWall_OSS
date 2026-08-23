@@ -316,6 +316,19 @@ static void applyBrightness()
 static void markSettingsDirty()
 {
     g_settingsDirtyMs = millis();
+    g_settings.markDirty();
+}
+
+// Settle any pending button-driven write NOW. Called on the debounce and before
+// every reboot: both restart paths used to drop it, so pressing the mode button
+// and hitting Restart within ten seconds reverted the change. (A watchdog panic
+// still drops it -- that is inherent to deferring, and out of scope.)
+static void flushSettingsIfDirty()
+{
+    if (!g_settings.dirty())
+        return;
+    g_settingsDirtyMs = 0;
+    g_settings.save();
 }
 
 static void setManualBrightness(uint8_t v)
@@ -578,15 +591,13 @@ void loop()
     // a ramp touches g_settings.brightness on every rung and save() rewrites the whole
     // file, so this coalesces a hold into one write instead of ~15.
     if (g_settingsDirtyMs != 0 && millis() - g_settingsDirtyMs >= 10000)
-    {
-        g_settingsDirtyMs = 0;
-        g_settings.save();
-    }
+        flushSettingsIfDirty();
     g_web.handle();
 
     if (g_web.consumeRestartRequested())
     {
         Serial.println("Restart requested via web UI");
+        flushSettingsIfDirty();
         delay(200);
         ESP.restart();
     }
@@ -648,6 +659,7 @@ void loop()
             else if (nowMs - g_wifiDownSinceMs > 60000UL)
             {
                 Serial.println("WiFi down >60s; restarting to re-provision");
+                flushSettingsIfDirty();
                 delay(100);
                 ESP.restart();
             }
@@ -680,6 +692,7 @@ void loop()
             else if (nowMs - g_apSinceMs > kApRetryAfterMs)
             {
                 Serial.println("Setup AP up >10min with credentials stored; restarting to retry WiFi");
+                flushSettingsIfDirty();
                 delay(100);
                 ESP.restart();
             }

@@ -3,8 +3,7 @@ Purpose: Render flight info on a HUB75 RGB LED matrix.
 Responsibilities:
 - Initialize the panel from runtime Settings (geometry/brightness) and the
   compile-time HUB75 pin map (HardwareConfiguration).
-- Compose each frame into an in-RAM GFXcanvas16, then blit it to the panel; the
-  same canvas backs framebuffer() for the web preview.
+- Compose each frame into an in-RAM GFXcanvas16, then blit it to the panel.
 - Render a Mini-style flight card (airline logo tile + flight #, route, aircraft,
   and the configured metrics), cycling through multiple flights.
 Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
@@ -176,19 +175,6 @@ void Hub75Display::drawToastIfActive()
     _canvas->fillRect(0, y, _matrixWidth, h, 0);
     _canvas->drawFastHLine(0, y, _matrixWidth, 0x39E7); // dim rule to lift it off the card
     drawTextLine(2, y + 2, _toastText, 0xFFFF);
-}
-
-const uint16_t *Hub75Display::framebuffer(uint16_t &w, uint16_t &h) const
-{
-    if (!_canvas)
-    {
-        w = 0;
-        h = 0;
-        return nullptr;
-    }
-    w = _matrixWidth;
-    h = _matrixHeight;
-    return _canvas->getBuffer();
 }
 
 void Hub75Display::setBrightness(uint8_t brightness)

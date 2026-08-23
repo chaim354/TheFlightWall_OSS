@@ -49,14 +49,18 @@ static LightSensorType lightSensorTypeFromName(const char *name)
 // an arbitrary source.
 static const char *positionSourceToString(PositionSource s)
 {
+    // No `default:` -- it would suppress -Wswitch for the whole switch, which is
+    // exactly the compile-time protection lightSensorTypeName's comment claims
+    // for this pattern (and gets, because it has no default). The fallback lives
+    // below the switch instead, so adding an enumerator warns here.
     switch (s)
     {
     case PositionSource::FlightRadar24:    return "fr24";
     case PositionSource::AdsbLol:          return "adsblol";
     case PositionSource::FlightWallServer: return "server";
-    case PositionSource::OpenSky:
-    default:                               return "opensky";
+    case PositionSource::OpenSky:          return "opensky";
     }
+    return "opensky";
 }
 
 static PositionSource positionSourceFromString(const String &s)
@@ -139,6 +143,9 @@ bool Settings::load()
 
 bool Settings::save() const
 {
+    _dirty = false; // whoever saves settles the pending write, whatever prompted it
+
+
     // Write to a temp file, verify it landed whole, THEN rename over the live file.
     // A truncate-then-write here (the previous behavior) meant a power cut mid-save
     // left a partial /settings.json — losing the WiFi password and API keys and

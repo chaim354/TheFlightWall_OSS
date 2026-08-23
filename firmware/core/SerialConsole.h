@@ -54,6 +54,9 @@ public:
 
 private:
     String _buf;
+    // Set when input exceeded the line cap, so the truncated remainder is
+    // discarded with an explanation instead of being parsed as if complete.
+    bool _bufOverflow = false;
     bool _settingsChanged = false;
     const LightSensor *_light = nullptr;
     bool _watchLight = false;
