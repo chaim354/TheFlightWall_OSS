@@ -377,10 +377,9 @@ static void logHeap(const char *tag)
 static void doFetchAndRender()
 {
     logHeap("cycle-start");
-    std::vector<StateVector> states;
     std::vector<FlightInfo> flights;
     bool ok = false;
-    size_t enriched = g_fetcher->fetchFlights(states, flights, ok);
+    size_t enriched = g_fetcher->fetchFlights(flights, ok);
     if (!ok)
     {
         if (g_consecutiveFailures < 255)

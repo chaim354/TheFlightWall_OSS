@@ -251,18 +251,27 @@ static String formatHeading(double deg)
     return String(buf);
 }
 
+// AeroAPI's Flights-mode feed reports a DIRECTION rather than a rate: a
+// documented +/-1.0 sentinel meaning "climbing" / "descending", not one foot per
+// minute. Both vertical-rate formatters have to know that, so the rule lives in
+// one place rather than in whichever of them happens to remember it.
+static bool isDirectionOnlyRate(double fpm) { return fabs(fpm) <= 2.0; }
+
+static String directionOnlyRate(double fpm)
+{
+    if (fpm > 0)
+        return String("CLB");
+    if (fpm < 0)
+        return String("DES");
+    return String("LVL");
+}
+
 static String formatVerticalRate(double fpm)
 {
     if (!renderable(fpm))
         return String("");
-    if (fabs(fpm) <= 2.0) // direction-only indicator (Flights mode)
-    {
-        if (fpm > 0)
-            return String("CLB");
-        if (fpm < 0)
-            return String("DES");
-        return String("LVL");
-    }
+    if (isDirectionOnlyRate(fpm))
+        return directionOnlyRate(fpm);
     long v = (long)(fpm + (fpm >= 0 ? 0.5 : -0.5));
     return String(v > 0 ? "+" : "") + String(v) + "fpm";
 }
@@ -541,6 +550,13 @@ static String miniVr(double fpm, bool unit)
 {
     if (!renderable(fpm))
         return String("");
+    // Without this the sentinel divided by 60 and rounded to zero, so the mini
+    // layout printed "0ft/s" -- LEVEL -- for an aircraft AeroAPI had reported as
+    // climbing or descending, while formatVerticalRate on every other layout
+    // showed CLB/DES for the same flight. Same defect as AirportInfo's display
+    // code: one rule, two encodings, one of them wrong.
+    if (isDirectionOnlyRate(fpm))
+        return directionOnlyRate(fpm);
     long fps = (long)(fpm / 60.0 + (fpm >= 0 ? 0.5 : -0.5));
     return String(fps) + (unit ? "ft/s" : "");
 }

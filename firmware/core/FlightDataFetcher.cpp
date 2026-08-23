@@ -195,11 +195,10 @@ void FlightDataFetcher::applyLocalClassification(std::vector<FlightInfo> &flight
                  flights.end());
 }
 
-size_t FlightDataFetcher::fetchFlights(std::vector<StateVector> &outStates,
-                                       std::vector<FlightInfo> &outFlights,
-                                       bool &ok)
+size_t FlightDataFetcher::fetchFlights(std::vector<FlightInfo> &outFlights, bool &ok)
 {
-    outStates.clear();
+    // Scratch for whichever mode runs; no caller has ever read it.
+    std::vector<StateVector> outStates;
     outFlights.clear();
     ok = false;
     _cycleStartMs = millis(); // starts the enrichment budget (see kEnrichBudgetMs)
