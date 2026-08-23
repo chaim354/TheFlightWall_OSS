@@ -171,6 +171,77 @@ void test_server_url_trailing_slash_normalized()
     TEST_ASSERT_TRUE(g_settings.serverUrl == "https://example.com");
 }
 
+// ---- seedDefaults ---------------------------------------------------------
+
+// The `erase` command's contract. seedDefaults() used to be a hand-maintained
+// second copy of ~30 field assignments, and it had silently omitted serverUrl
+// and positionSource -- so "reset to defaults" left a bad server URL in place
+// and wrote it back, useless exactly when a bad server URL is what you are
+// escaping. Dirty EVERY field this test can reach, then assert the reset really
+// resets, rather than spot-checking the ones that happened to be listed.
+void test_seed_defaults_resets_every_field()
+{
+    g_settings.seedDefaults();
+
+    // The two the old implementation forgot.
+    g_settings.serverUrl = "https://stale.example";
+    g_settings.positionSource = PositionSource::FlightWallServer;
+    // A spread across every other group, including nested structs.
+    g_settings.centerLat = 1.0;
+    g_settings.centerLon = 2.0;
+    g_settings.brightness = 99;
+    g_settings.maxFlights = 3;
+    g_settings.mode = TrackingMode::Flights;
+    g_settings.lightSensorEnabled = false;
+    g_settings.buttonsEnabled = false;
+    g_settings.panelChain = 7;
+    g_settings.layout.showRoute = false;
+    g_settings.filters.excludeOnGround = false;
+    g_settings.schedule.timezone = "PST8PDT";
+    g_settings.trackedFlights.push_back("DAL1");
+
+    g_settings.seedDefaults();
+
+    TEST_ASSERT_TRUE(g_settings.serverUrl == "");
+    TEST_ASSERT_EQUAL((int)PositionSource::OpenSky, (int)g_settings.positionSource);
+    TEST_ASSERT_EQUAL((int)TrackingMode::Area, (int)g_settings.mode);
+    TEST_ASSERT_TRUE(g_settings.lightSensorEnabled);
+    TEST_ASSERT_TRUE(g_settings.buttonsEnabled);
+    TEST_ASSERT_TRUE(g_settings.layout.showRoute);
+    TEST_ASSERT_TRUE(g_settings.filters.excludeOnGround);
+    TEST_ASSERT_TRUE(g_settings.schedule.timezone == "UTC0");
+    TEST_ASSERT_EQUAL(0, (int)g_settings.trackedFlights.size());
+}
+
+// A default-constructed Settings and seedDefaults() must agree with the config
+// headers, which is what the two lists failed at: Settings.h said San Francisco
+// while UserConfiguration.h said JFK, and UserConfiguration.h's own comment
+// ("They must agree") was the only thing asserting it.
+void test_seed_defaults_matches_config_constants()
+{
+    g_settings.seedDefaults();
+
+    TEST_ASSERT_EQUAL_DOUBLE(UserConfiguration::CENTER_LAT, g_settings.centerLat);
+    TEST_ASSERT_EQUAL_DOUBLE(UserConfiguration::CENTER_LON, g_settings.centerLon);
+    TEST_ASSERT_EQUAL_DOUBLE(UserConfiguration::RADIUS_KM, g_settings.radiusKm);
+    TEST_ASSERT_EQUAL(UserConfiguration::DISPLAY_BRIGHTNESS, g_settings.brightness);
+    TEST_ASSERT_EQUAL(UserConfiguration::MAX_FLIGHTS, g_settings.maxFlights);
+    TEST_ASSERT_EQUAL(UserConfiguration::TEXT_COLOR_R, g_settings.textColorR);
+    TEST_ASSERT_EQUAL(TimingConfiguration::DISPLAY_CYCLE_SECONDS, g_settings.cycleSeconds);
+    TEST_ASSERT_EQUAL(TimingConfiguration::FETCH_INTERVAL_SECONDS, g_settings.fetchIntervalSeconds);
+    TEST_ASSERT_EQUAL(HardwareConfiguration::PANEL_RES_X, g_settings.panelResX);
+    TEST_ASSERT_EQUAL(HardwareConfiguration::PANEL_RES_Y, g_settings.panelResY);
+    TEST_ASSERT_EQUAL(HardwareConfiguration::PANEL_CHAIN, g_settings.panelChain);
+
+    // And a fresh instance must equal a reset one on the same fields -- the two
+    // paths that used to disagree.
+    Settings fresh;
+    TEST_ASSERT_EQUAL_DOUBLE(fresh.centerLat, g_settings.centerLat);
+    TEST_ASSERT_EQUAL_DOUBLE(fresh.centerLon, g_settings.centerLon);
+    TEST_ASSERT_EQUAL((int)fresh.positionSource, (int)g_settings.positionSource);
+    TEST_ASSERT_TRUE(fresh.serverUrl == g_settings.serverUrl);
+}
+
 // ---- runner ---------------------------------------------------------------
 
 void setup()
@@ -185,6 +256,8 @@ void setup()
     RUN_TEST(test_position_source_roundtrip);
     RUN_TEST(test_position_source_unknown_falls_back_to_opensky);
     RUN_TEST(test_server_url_trailing_slash_normalized);
+    RUN_TEST(test_seed_defaults_resets_every_field);
+    RUN_TEST(test_seed_defaults_matches_config_constants);
     UNITY_END();
 }
 

@@ -73,52 +73,32 @@ static const char *kSettingsPath = "/settings.json";
 
 void Settings::seedDefaults()
 {
+    // Reset to the in-class initialisers -- Settings.h is the single source of
+    // truth for every default -- then overlay the five values only Secrets.h can
+    // supply. A field added to the struct is now in the reset path automatically;
+    // the omission class is unrepresentable rather than merely absent today.
+    //
+    // This replaces a hand-maintained second copy of ~30 defaults that had
+    // already failed twice: it never assigned serverUrl or positionSource at all,
+    // so the documented `erase` ("reset to defaults") left a bad server URL in
+    // place and wrote it back -- useless precisely when a bad server URL is what
+    // you are trying to escape -- and its centerLat/centerLon disagreed with
+    // Settings.h's, so which "default location" you got depended on which of the
+    // begin() paths had run.
+    //
+    // Move-assignment: Settings declares no destructor, copy, assignment or
+    // virtuals, so this is the implicit move. ~240 bytes of stack for the
+    // temporary and a few small allocations, two of which the old code already
+    // made via `layout = DisplayLayout()`. Runs at most once per boot.
+    *this = Settings();
+
+    // The only values a header initialiser cannot express.
     wifiSsid = WiFiConfiguration::WIFI_SSID;
     wifiPassword = WiFiConfiguration::WIFI_PASSWORD;
 
     openSkyClientId = APIConfiguration::OPENSKY_CLIENT_ID;
     openSkyClientSecret = APIConfiguration::OPENSKY_CLIENT_SECRET;
     aeroApiKey = APIConfiguration::AEROAPI_KEY;
-
-    enrichmentSource = EnrichmentSource::Adsbdb;
-    enrichmentCacheSeconds = 600;
-    enrichmentFallbackToAeroApi = true;
-
-    mode = TrackingMode::Area;
-    centerLat = UserConfiguration::CENTER_LAT;
-    centerLon = UserConfiguration::CENTER_LON;
-    radiusKm = UserConfiguration::RADIUS_KM;
-    autoLocateOnBoot = false;
-    trackedFlights.clear();
-
-    brightness = UserConfiguration::DISPLAY_BRIGHTNESS;
-    textColorR = UserConfiguration::TEXT_COLOR_R;
-    textColorG = UserConfiguration::TEXT_COLOR_G;
-    textColorB = UserConfiguration::TEXT_COLOR_B;
-    maxFlights = UserConfiguration::MAX_FLIGHTS;
-    cycleSeconds = TimingConfiguration::DISPLAY_CYCLE_SECONDS;
-    fetchIntervalSeconds = TimingConfiguration::FETCH_INTERVAL_SECONDS;
-
-    layout = DisplayLayout();
-    filters = AircraftFilters();
-    schedule = BrightnessSchedule();
-
-    buttonsEnabled = true;
-    lightSensorEnabled = true;
-    lightSensorType = LightSensorType::TCS3472;
-    lightSensorPin = HardwareConfiguration::LIGHT_ANALOG_PIN;
-    lightDarkThreshold = 500;
-    lightHysteresis = 150;
-    lightSensorDimInstead = false;
-    lightDimBrightness = 3;
-
-    panelResX = HardwareConfiguration::PANEL_RES_X;
-    panelResY = HardwareConfiguration::PANEL_RES_Y;
-    panelChain = HardwareConfiguration::PANEL_CHAIN;
-    panelClkPhase = false;
-    panelI2sSpeedMhz = 8;
-    panelLatchBlanking = 1;
-    panelDriverChip = "shift";
 }
 
 bool Settings::begin()
