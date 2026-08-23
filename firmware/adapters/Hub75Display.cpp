@@ -392,6 +392,29 @@ const Hub75Display::LogoTile *Hub75Display::tileFor(const String &key)
     return _logoCache.put(key, std::move(tile));
 }
 
+// The key the accent colour is hashed from.
+//
+// Two call sites used to derive this differently for the same flight: the badge
+// fill hashed operator_icao else the uppercased FIRST TWO CHARS of
+// iata/icao/operator_code, while the side-by-side separator hashed operator_icao
+// else the FULL operator_code. accentColorFor is FNV-1a, so for any flight
+// WITHOUT an operator_icao -- GA and private traffic, which is most of what has
+// no ICAO operator -- the badge and the separator came out completely unrelated
+// hues on the same card.
+//
+// Unified on the full string rather than the two-char prefix: more input means
+// fewer carriers colliding onto one colour. operator_iata is the last resort
+// rather than the second, so the key is never the empty string (which would
+// hash every operator-less flight to one shared colour).
+static String operatorAccentKey(const FlightInfo &f)
+{
+    if (f.operator_icao.length())
+        return f.operator_icao;
+    if (f.operator_code.length())
+        return f.operator_code;
+    return f.operator_iata;
+}
+
 uint16_t Hub75Display::accentColorFor(const String &code)
 {
     uint32_t hash = 2166136261UL; // FNV-1a
@@ -455,11 +478,15 @@ void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, in
         return;
     }
 
+    // The two-character badge TEXT keeps its own iata-first chain -- that is what
+    // reads best in a 2-glyph box -- but the COLOUR is keyed independently, and
+    // on the full string. They were entangled before, which is how the badge and
+    // the separator ended up hashing different things.
     String code = f.operator_iata.length() ? f.operator_iata
                   : (f.operator_icao.length() ? f.operator_icao : f.operator_code);
     code = code.substring(0, 2);
     code.toUpperCase();
-    String key = f.operator_icao.length() ? f.operator_icao : code;
+    const String key = operatorAccentKey(f);
 
     const uint8_t ts = (h >= 24) ? 2 : 1; // larger code text in a tall box
     _canvas->fillRect(x, y, w, h, accentColorFor(key));
@@ -770,8 +797,7 @@ void Hub75Display::displaySideBySideCard(const FlightInfo &f)
     drawLogoOrBadge(f, boxX, boxY, boxW, boxH);
 
     const int16_t sepX = boxX + boxW + 1;
-    _canvas->drawLine(sepX, 1, sepX, _matrixHeight - 2,
-                      accentColorFor(f.operator_icao.length() ? f.operator_icao : f.operator_code));
+    _canvas->drawLine(sepX, 1, sepX, _matrixHeight - 2, accentColorFor(operatorAccentKey(f)));
 
     const int16_t tx = sepX + 2;
     const int maxCols = (_matrixWidth - tx - 1) / 6;
