@@ -3,13 +3,15 @@
 **Companion to** `2026-08-23-priority-list.md` (item **G1**), which is derived from
 `2026-08-23-simplification-audit.md`. Dated record, accurate as of 2026-08-23.
 
-Seven open questions. **None is engineering-blocked** — each is a product, roadmap or
+Eight open questions. **None is engineering-blocked** — each is a product, roadmap or
 budget call that only the maintainer can make, and between them they gate roughly a fifth
 of the audit's ledger (most of Tier 4 and Tier 5). The audit's `C-20` found that four of
 these had been filed as *accepted findings* when they are really open questions; this memo
 is the correction.
 
 Answer whenever — nothing in Tiers 1–3 waits on them.
+
+> **Q9 was raised while implementing Tier 2** and is listed after the original eight.
 
 > **Q8 is already answered and closed.** *"Adopt skip-if-exists in the logo generators?"* —
 > **yes, with `--force`**, shipped in `5b18438`. Left here so the count matches the audit.
@@ -175,6 +177,37 @@ already in Tier 4.
 
 ---
 
+## Q9 — Should partial board coverage block the write? *(raised during Tier 2)*
+**Finding:** F-SRV10-C · **Gates:** nothing — the visible half already shipped · **Needs production data**
+
+Not one of the original eight. It came up implementing F-SRV10-C in `88741e2`.
+
+If one board yields no rows while the others contribute, the table is written a
+quarter short with a fresh `builtAtMs` and reads as perfectly healthy. Every plausible
+cause is a defect — a payload-shape change `parseFids` returned `[]` for, a board ICAO
+`getAirportCoord` does not know, a board throttled into an empty body — because a 12 h
+FIDS window at KJFK/KLGA/KEWR/KBOS is never legitimately empty.
+
+**Shipped:** barren boards are now tracked separately from "boards that answered" and
+named on the operator's channel. The failure is no longer invisible.
+
+**Not shipped, and deliberately:** whether a coverage floor should also *block* the
+write. The trade is real in both directions — storing partial coverage beats discarding
+it, but a complete 2 h-old table beats a fresh table missing a quarter of its rows.
+
+- **(a) Report only** — where it stands now. ← *safe default*
+- **(b) N-of-M floor** — refuse the write below some fraction. Needs a number, and
+  picking one without knowing how often this fires is guessing.
+- **(c) Compare against the previous table** — keep the old one if row count collapses.
+  Self-calibrating, but needs a read-before-write in `refreshSchedule` (which currently
+  does not read at all) and could misfire on a genuinely quiet window.
+
+**Recommendation: leave it at (a) until the new log line has fired in production at
+least once.** Then you'll know whether this is a once-a-year event or a weekly one,
+which is exactly the fact that decides between (b) and (c).
+
+---
+
 ## Summary
 
 | # | Question | Finding | Gates | My default if you don't answer |
@@ -186,6 +219,7 @@ already in Tier 4.
 | 5 | Worker keeps refreshing? | F-SRV01-A | Tier 5 | (b) keep 6 h, add the cross-reference comment |
 | 6 | Ground sentinel: fix or document? | F-SRV07-A | Tier 5 | (a) fix both sides on the next flash trip |
 | 7 | Accept the KV migration? | F-SRV15-A | last/never | defer; take F-SRV03-C instead |
+| 9 | Coverage floor block the write? | F-SRV10-C | nothing | (a) report only, until it fires once in production |
 
 **G2 (the other half of Gate 0) is yours to run:** one `-DCORE_DEBUG_LEVEL=4` build of
 *unmodified* HEAD, on a trip you're making anyway. It simultaneously settles F-FW09-A's
