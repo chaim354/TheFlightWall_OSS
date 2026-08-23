@@ -184,8 +184,12 @@ void WebConfigServer::handleGetStatus()
     // S3, which has no GPIO 22 and whose ADC1 is 1-10 rather than 32-39.
     doc["i2cSda"] = HardwareConfiguration::I2C_SDA;
     doc["i2cScl"] = HardwareConfiguration::I2C_SCL;
-    doc["adc1Min"] = HardwareConfiguration::ADC1_PIN_MIN;
-    doc["adc1Max"] = HardwareConfiguration::ADC1_PIN_MAX;
+    // The USABLE window, not the chip's full ADC1 range. index.html renders these
+    // verbatim as "Analog pin (ADC1: <min>-<max>)", so publishing the raw range
+    // advertised seven HUB75 data lines as valid choices on the S3 -- and
+    // Settings.cpp accepts whatever is POSTed without validating it.
+    doc["adc1Min"] = HardwareConfiguration::ADC1_FREE_MIN;
+    doc["adc1Max"] = HardwareConfiguration::ADC1_FREE_MAX;
     doc["buttonAPin"] = HardwareConfiguration::BUTTON_A_PIN;
     doc["buttonBPin"] = HardwareConfiguration::BUTTON_B_PIN;
     String out;

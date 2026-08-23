@@ -54,13 +54,17 @@ static bool tcsRead8(uint8_t reg, uint8_t &out)
     return true;
 }
 
-// True only for an ADC1 pin on THIS target. ADC2 is unusable while WiFi is up, and on
-// the S3 the classic 32-39 range lands on SPI flash / octal PSRAM — so an unchecked
-// pin from the web UI could point analogRead() at a live PSRAM line. Range-checking
-// keeps a bad setting inert instead of hazardous.
+// True only for a USABLE ADC1 pin on THIS target. ADC2 is unusable while WiFi is up,
+// and on the S3 the classic 32-39 range lands on SPI flash / octal PSRAM — so an
+// unchecked pin from the web UI could point analogRead() at a live PSRAM line.
+//
+// Checks the FREE window, not the chip's full ADC1 range. That distinction is the
+// fix: on the S3, ADC1 is 1-10 while HUB75 owns 4-17, so seven of the ten values
+// this used to accept were live panel data lines. The guard was protecting PSRAM
+// and not the panel's own signals.
 static bool isValidAdc1Pin(uint8_t pin)
 {
-    return pin >= HardwareConfiguration::ADC1_PIN_MIN && pin <= HardwareConfiguration::ADC1_PIN_MAX;
+    return pin >= HardwareConfiguration::ADC1_FREE_MIN && pin <= HardwareConfiguration::ADC1_FREE_MAX;
 }
 
 void LightSensor::begin()
@@ -143,8 +147,8 @@ void LightSensor::begin()
             Serial.printf("LightSensor: pin %u is not ADC1 on this board (valid %u-%u); "
                           "analog sensor disabled\n",
                           (unsigned)_pin,
-                          (unsigned)HardwareConfiguration::ADC1_PIN_MIN,
-                          (unsigned)HardwareConfiguration::ADC1_PIN_MAX);
+                          (unsigned)HardwareConfiguration::ADC1_FREE_MIN,
+                          (unsigned)HardwareConfiguration::ADC1_FREE_MAX);
             break;
         }
         // ADC1 only (WiFi disables ADC2). 11dB attenuation -> ~full 3.3V range.

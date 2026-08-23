@@ -91,6 +91,79 @@ namespace HardwareConfiguration
     static const uint8_t ADC1_PIN_MAX = 39;
 #endif
 
+    // ---- Cross-peripheral pin ownership ---------------------------------------
+    //
+    // This file has already shipped one silent double-booking: GPIO 21 was a
+    // button AND I2C_SDA on the classic ESP32, forty lines apart in this same
+    // file, and "the bug survived: it worked on the board being tested". Nothing
+    // detected it -- Buttons::begin() calls pinMode() with no cross-check,
+    // LightSensor::begin() calls Wire.begin() with no cross-check, and main.cpp
+    // runs them in that order, so a re-introduced collision would have
+    // pinMode(INPUT_PULLUP) silently clobber a pin Wire had just configured.
+    // Only a prose comment stood between here and a repeat.
+    //
+    // The asserts below cost nothing at runtime (static_assert emits no code) and
+    // turn that class of mistake into a build error. Deliberately NOT asserting
+    // pairwise uniqueness within the 14 HUB75 signals: a duplicate there fails
+    // loudly on the panel, which is the opposite of the silent cross-peripheral
+    // case that actually shipped.
+
+    /** True if `pin` is one of the panel's 14 lines. Single return: C++11 constexpr. */
+    constexpr bool isHub75Pin(int pin)
+    {
+        return pin == HUB75_R1 || pin == HUB75_G1 || pin == HUB75_B1 ||
+               pin == HUB75_R2 || pin == HUB75_G2 || pin == HUB75_B2 ||
+               pin == HUB75_A || pin == HUB75_B || pin == HUB75_C ||
+               pin == HUB75_D || pin == HUB75_E || pin == HUB75_LAT ||
+               pin == HUB75_OE || pin == HUB75_CLK;
+    }
+
+    /** True if no pin in [lo, hi] belongs to the panel. Recursive: C++11 constexpr. */
+    constexpr bool rangeIsHub75Free(int lo, int hi)
+    {
+        return lo > hi ? true : (!isHub75Pin(lo) && rangeIsHub75Free(lo + 1, hi));
+    }
+
+    // THE USABLE ADC1 WINDOW, which is not the same thing as the chip's ADC1
+    // range. On the S3, ADC1 is 1-10 while HUB75 owns 4-17, so seven of the ten
+    // "valid" values are live panel data lines (R1 G1 B1 R2 G2 B2 A). The comment
+    // above already worked this out -- "HUB75 already owns 4-17, leaving 1/2/3" --
+    // and then ADC1_PIN_MAX said 10 anyway, while /api/status published that range
+    // and the web UI rendered it as "Analog pin (ADC1: 1-10)". isValidAdc1Pin()
+    // range-checked against it, so a pin the UI advertised was accepted and
+    // analogRead() was pointed at an RGB line. On the classic ESP32 the same
+    // collision is one pin wide: HUB75_E is 32, the bottom of ADC1's 32-39.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    static const uint8_t ADC1_FREE_MIN = 1;
+    static const uint8_t ADC1_FREE_MAX = 3;
+#else
+    static const uint8_t ADC1_FREE_MIN = 33;
+    static const uint8_t ADC1_FREE_MAX = 39;
+#endif
+
+    static_assert(ADC1_FREE_MIN >= ADC1_PIN_MIN && ADC1_FREE_MAX <= ADC1_PIN_MAX,
+                  "the usable ADC1 window must lie inside the chip's ADC1 range");
+    static_assert(ADC1_FREE_MIN <= ADC1_FREE_MAX,
+                  "the usable ADC1 window is empty; the analog sensor cannot be used on this board");
+    static_assert(rangeIsHub75Free(ADC1_FREE_MIN, ADC1_FREE_MAX),
+                  "a pin in the advertised ADC1 window is a HUB75 line");
+
+    static_assert(!isHub75Pin(I2C_SDA), "I2C_SDA collides with a HUB75 line");
+    static_assert(!isHub75Pin(I2C_SCL), "I2C_SCL collides with a HUB75 line");
+    static_assert(I2C_SDA != I2C_SCL, "I2C_SDA and I2C_SCL are the same pin");
+
+    static_assert(!isHub75Pin(BUTTON_A_PIN), "BUTTON_A_PIN collides with a HUB75 line");
+    static_assert(!isHub75Pin(BUTTON_B_PIN), "BUTTON_B_PIN collides with a HUB75 line");
+    static_assert(BUTTON_A_PIN != BUTTON_B_PIN, "both buttons are on the same pin");
+    static_assert(BUTTON_A_PIN != I2C_SDA && BUTTON_A_PIN != I2C_SCL,
+                  "BUTTON_A_PIN collides with I2C -- this exact bug already shipped once");
+    static_assert(BUTTON_B_PIN != I2C_SDA && BUTTON_B_PIN != I2C_SCL,
+                  "BUTTON_B_PIN collides with I2C -- this exact bug already shipped once");
+
+    static_assert(!isHub75Pin(LIGHT_ANALOG_PIN), "the default light-sensor pin is a HUB75 line");
+    static_assert(LIGHT_ANALOG_PIN >= ADC1_FREE_MIN && LIGHT_ANALOG_PIN <= ADC1_FREE_MAX,
+                  "the default light-sensor pin is outside the usable ADC1 window");
+
     // Default panel geometry (overridable at runtime from the web UI / Settings).
     static const uint16_t PANEL_RES_X = 64; // pixels wide per panel module
     static const uint16_t PANEL_RES_Y = 64; // pixels high per panel module
