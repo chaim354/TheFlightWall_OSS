@@ -44,6 +44,7 @@ Run loop:
 #include "adapters/Hub75Display.h"
 #include "adapters/LightSensor.h"
 #include "adapters/Buttons.h"
+#include "utils/FetchCadence.h"
 #include "utils/BrightnessLadder.h"
 #include "adapters/GeoLocator.h"
 
@@ -91,7 +92,6 @@ static uint8_t g_consecutiveEmpty = 0;         // successful fetches that return
 // disabled) a throttled source flips the wall between flights and noFlightsMode every
 // cycle. Deliberately NOT routed through g_consecutiveFailures: that would back the
 // poll interval out to 5 minutes over a quiet sky and delay the first real arrival.
-static const uint8_t kEmptyConfirmCycles = 2;
 
 static const char *kSetupApSsid = "FlightWall-Setup";
 
@@ -645,43 +645,14 @@ void loop()
         return;
     }
 
-    unsigned long intervalMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL;
-    if (g_consecutiveFailures > 0)
-    {
-        // Exponential backoff on consecutive failures: 2x per failure, capped at 5 min.
-        // Protects the OpenSky daily credit budget when the API or WiFi is down.
-        uint8_t shift = g_consecutiveFailures > 4 ? 4 : g_consecutiveFailures;
-        unsigned long backoff = intervalMs << shift;
-        const unsigned long kMaxBackoffMs = 300000UL;
-        intervalMs = backoff > kMaxBackoffMs ? kMaxBackoffMs : backoff;
-    }
-    else if (g_consecutiveEmpty >= kEmptyConfirmCycles)
-    {
-        // Sustained empties get their own, gentler ladder. This covers the case the
-        // branch above cannot see: a source that is rate-limiting us purely with
-        // well-formed empty replies never sets ok=false, so g_consecutiveFailures stays
-        // 0 and we would otherwise keep polling at the base rate indefinitely — which is
-        // precisely the behaviour that sustains a rate limit.
-        //
-        // Capped at 2 minutes rather than the 5 above, because unlike a failure an empty
-        // result may simply be a quiet sky, and a 5-minute hole there would delay the
-        // first real arrival for no reason. Self-correcting either way: fewer requests
-        // let the limit lapse, flights come back, the counter resets, and the interval
-        // returns to whatever the user configured without anyone touching a setting.
-        // Engages on the SECOND consecutive empty, not the third. FR24's limiting
-        // alternates rather than clustering: measured over 13 minutes at a 50% throttle
-        // rate, the longest run of consecutive empties was two, so a ladder that waited
-        // for three stayed dormant through the entire window it was written for. Biasing
-        // the shift by one means the pair that actually occurs is enough to slow us down.
-        // The cost is that two quiet cycles over a genuinely empty sky now stretch the
-        // interval too — bounded by the 2-minute cap below, and cleared by the first
-        // cycle that returns any flight.
-        const uint8_t extra = (uint8_t)(g_consecutiveEmpty - kEmptyConfirmCycles + 1);
-        const uint8_t shift = extra > 2 ? 2 : extra;
-        unsigned long backoff = intervalMs << shift;
-        const unsigned long kMaxEmptyBackoffMs = 120000UL;
-        intervalMs = backoff > kMaxEmptyBackoffMs ? kMaxEmptyBackoffMs : backoff;
-    }
+    // Both pressure signals, combined by max() rather than precedence -- see
+    // utils/FetchCadence.h for why that distinction is load-bearing and for the
+    // measurements behind each ladder's cap.
+    const unsigned long intervalMs = fetchIntervalMs(
+        (unsigned long)g_settings.fetchIntervalSeconds * 1000UL,
+        g_consecutiveFailures,
+        g_consecutiveEmpty);
+
     const unsigned long now = millis();
     if (!g_firstFetchDone || (now - g_lastFetchMs >= intervalMs))
     {
