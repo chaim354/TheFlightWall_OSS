@@ -24,7 +24,13 @@ const SOURCE_URL = 'https://davidmegginson.github.io/ourairports-data/airports.c
 const INCLUDE_TYPES = new Set(['large_airport', 'medium_airport']);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_OUT = path.join(__dirname, '..', 'src', 'schedule', 'airports.ts');
+// The DATA module only. src/schedule/airports.ts is hand-owned and must
+// never be this script's target: it holds getAirportCoord,
+// getAirportCoordByIata and the lazy IATA index, none of which the
+// template below reproduces. Pointing this at airports.ts is what made
+// `npm run gen:airports` delete them (F-SRV13-A). Asserted in
+// test/airports.test.ts.
+const DEFAULT_OUT = path.join(__dirname, '..', 'src', 'schedule', 'airports.data.ts');
 
 function parseArgs(argv) {
   let input = null;
@@ -155,6 +161,15 @@ function renderModule(table, meta) {
 // (from server/; see that script for the fetch/filter/key logic this
 // header describes.)
 //
+// This module is DATA ONLY, and that split is load-bearing. The lookup
+// functions live next door in ./airports.ts, which is hand-owned and which
+// the generator never writes. They shared one file until 2026-08-23, and
+// the generator's template did not reproduce the hand-written half -- so
+// \`npm run gen:airports\` silently deleted getAirportCoordByIata and the
+// lazy IATA index, taking the Port Authority provider's only route to
+// coordinates with them. Regenerating is now a data-only diff by
+// construction; it cannot remove logic. Keep it that way.
+//
 // Airport coordinate table: ICAO -> {iata, lat, lon}. Supplies BOTH the
 // near end (this Worker's own boards: KJFK/KLGA/KEWR/KBOS) and the far end
 // of every FIDS leg -- one unified table, not two. A FIDS row never carries
@@ -205,29 +220,12 @@ function renderModule(table, meta) {
 // Values are stored as [iata, lat, lon] tuples rather than {iata, lat, lon}
 // objects -- repeating three field-name strings across ${count.toLocaleString('en-US')} entries costs
 // roughly 90 KB of pure key-label bytes for no informational gain over a
-// documented, fixed order. Use getAirportCoord() below for named-field
-// access; nothing outside this file should reach into the tuple table
-// directly.
+// documented, fixed order. Use getAirportCoord() from ./airports.ts for
+// named-field access; nothing outside this pair should reach into the
+// tuple table directly.
 
-/** IATA code and coordinates for one airport. */
-export type AirportCoord = { iata: string; lat: number; lon: number };
-
-const AIRPORT_TUPLES: Readonly<Record<string, readonly [iata: string, lat: number, lon: number]>> =
+export const AIRPORT_TUPLES: Readonly<Record<string, readonly [iata: string, lat: number, lon: number]>> =
 ${compact} as const;
-
-/**
- * Look up an airport's IATA code and coordinates by ICAO code (case
- * insensitive). Returns undefined -- never throws -- for an ICAO code not in
- * the table, which is the expected, common case for an airport this table's
- * source simply does not cover (e.g. most small_airport-type fields, or a
- * real-world airport OurAirports has not catalogued). A caller degrading
- * that to "cannot check this leg" rather than trusting it unchecked is the
- * point -- see src/join.ts's excessFor and src/schedule/aerodatabox.ts.
- */
-export function getAirportCoord(icao: string): AirportCoord | undefined {
-  const t = AIRPORT_TUPLES[icao.toUpperCase()];
-  return t ? { iata: t[0], lat: t[1], lon: t[2] } : undefined;
-}
 `;
 }
 
@@ -274,7 +272,21 @@ async function main() {
   console.log(`Wrote ${out} (${count.toLocaleString('en-US')} airports, ${(bytes / 1024).toFixed(1)} KB).`);
 }
 
-main().catch((err) => {
-  console.error('gen-airports failed:', err.message);
-  process.exitCode = 1;
-});
+// Exported so test/airports.test.ts can re-render the committed table and
+// assert it matches byte-for-byte. That check is the one that would have
+// caught F-SRV13-A: the template and its output had silently disagreed since
+// 2026-08-21, and nothing compared them.
+export { renderModule, buildTable, parseCsv };
+
+// Only run when invoked as a script, so importing for that test does not
+// trigger a network fetch.
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error('gen-airports failed:', err.message);
+    process.exitCode = 1;
+  });
+}

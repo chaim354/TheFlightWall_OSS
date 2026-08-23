@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { getAirportCoord, getAirportCoordByIata } from '../src/schedule/airports';
+import { AIRPORT_TUPLES } from '../src/schedule/airports.data';
 
 describe('getAirportCoord', () => {
   it('resolves a known major airport with coordinates matching reality', () => {
@@ -66,12 +67,11 @@ describe('getAirportCoordByIata', () => {
     // entries / 4,565 distinct IATA codes / 0 collisions -- but that is a
     // property of THIS filtered table, not of IATA codes generally, so a
     // future regeneration that admitted a duplicate would start silently
-    // resolving one airport's code to another's coordinates. Re-derived from
-    // the generated source rather than hardcoded.
-    const src = readFileSync(new URL('../src/schedule/airports.ts', import.meta.url), 'utf8');
-    const start = src.indexOf('{"', src.indexOf('AIRPORT_TUPLES'));
-    const semi = src.indexOf(';', start);
-    const tuples = JSON.parse(src.slice(start, src.lastIndexOf('}', semi) + 1)) as Record<string, [string, number, number]>;
+    // resolving one airport's code to another's coordinates. Read from the
+    // exported table rather than hardcoded -- and rather than scraping the
+    // generated source as text, which is what this had to do while the data
+    // and the logic shared one file (F-SRV13-A).
+    const tuples = AIRPORT_TUPLES;
 
     const seen = new Map<string, string>();
     const collisions: string[] = [];
@@ -127,5 +127,59 @@ describe('airport table covers every far-end airport in the captured fixture', (
   it('resolves every distinct far-end ICAO the fixture contains', () => {
     const missing = [...farIcaos].filter((icao) => getAirportCoord(icao) === undefined).sort();
     expect(missing).toEqual([]);
+  });
+});
+
+describe('generated/hand-written ownership boundary', () => {
+  // F-SRV13-A: `npm run gen:airports` is a first-class package script, and it
+  // used to write straight over src/schedule/airports.ts -- deleting
+  // getAirportCoordByIata and the lazy IATA index, 42 lines the generator's
+  // template never emitted, and with them the Port Authority provider's only
+  // route to coordinates. The data now lives in its own module so regenerating
+  // is a data-only diff that CANNOT remove logic. These assertions fail if the
+  // two are ever merged back together.
+  const genSrc = readFileSync(new URL('../tools/gen-airports.js', import.meta.url), 'utf8');
+
+  function generatedFileName(): string {
+    const m = genSrc.match(/DEFAULT_OUT\s*=\s*path\.join\([^)]*?'([\w.-]+\.ts)'\s*\)/);
+    expect(m, 'could not find DEFAULT_OUT in tools/gen-airports.js').not.toBeNull();
+    return m![1]!;
+  }
+
+  it('does not write to the module that defines the lookup functions', () => {
+    expect(generatedFileName()).not.toBe('airports.ts');
+  });
+
+  it('emits data only -- no functions to lose on the next regeneration', () => {
+    const generated = readFileSync(
+      new URL(`../src/schedule/${generatedFileName()}`, import.meta.url), 'utf8');
+    expect(generated).not.toMatch(/\bfunction\b/);
+    expect(generated).toMatch(/export const AIRPORT_TUPLES/);
+  });
+
+  it('re-renders the committed data module byte-for-byte', async () => {
+    // The check that would have caught F-SRV13-A: the template and its output
+    // disagreed for two days with nothing comparing them. Catches STRUCTURAL
+    // divergence -- header text, key order, encoding, and anything hand-added
+    // to the generated file that the template does not emit (which is exactly
+    // how the 42 lines of lookup logic came to be deleted on every run).
+    // It cannot catch an edited coordinate VALUE, because the committed table
+    // is this test's own input; the reference-point assertions at the top of
+    // this file are what guard values, and they do catch that.
+    const { renderModule } = await import('../tools/gen-airports.js');
+    const committed = readFileSync(
+      new URL(`../src/schedule/${generatedFileName()}`, import.meta.url), 'utf8');
+
+    const date = committed.match(/Generated: (\d{4}-\d{2}-\d{2})\./)?.[1];
+    expect(date, 'no generation date in the committed header').toBeDefined();
+
+    expect(renderModule(AIRPORT_TUPLES, { date: date! })).toBe(committed);
+  });
+
+  it('keeps both lookups in the hand-owned module', () => {
+    const handOwned = readFileSync(
+      new URL('../src/schedule/airports.ts', import.meta.url), 'utf8');
+    expect(handOwned).toMatch(/export function getAirportCoord\b/);
+    expect(handOwned).toMatch(/export function getAirportCoordByIata\b/);
   });
 });
