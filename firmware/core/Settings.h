@@ -141,7 +141,7 @@ struct Settings
     uint8_t textColorR = 255;
     uint8_t textColorG = 255;
     uint8_t textColorB = 255;
-    uint8_t maxFlights = 8;        // up to N aircraft kept/cycled
+    uint8_t maxFlights = 12;       // up to N aircraft kept/cycled (must match UserConfiguration::MAX_FLIGHTS)
     uint32_t cycleSeconds = 3;     // seconds per flight when cycling
     uint32_t fetchIntervalSeconds = 30;
 
