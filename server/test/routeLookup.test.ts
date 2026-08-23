@@ -201,3 +201,101 @@ describe('resolveGatedRoute', () => {
     expect(calls).toBe(1);
   });
 });
+
+describe('lookupRoute: a non-answer is not a negative answer', () => {
+  // F-SRV08-A. getText returned the same null for 404, 429, 502, a timeout and
+  // a DNS failure, and cacheSet derived the TTL from the payload alone -- so a
+  // single 3s timeout (the default, which flights.ts uses by passing no opts)
+  // blanked that callsign's route for THIRTY MINUTES. On a module that exists
+  // as the last resort for flights that would otherwise render blank, for an
+  // aircraft typically overhead a few minutes. An IP-level block or a 429
+  // poisoned every callsign asked during it.
+  //
+  // The 30-minute rationale in the module is written entirely about the
+  // definitively-ANSWERED case ("most callsigns these databases do not know are
+  // ones they will never know"). It was never written for a timeout. The
+  // firmware's equivalent cache already uses a failure TTL 30x shorter.
+
+  const FAIL_TTL_MS = 60_000;
+
+  const countingFetch = (make: () => unknown) => {
+    const state = { calls: 0 };
+    const impl = (async () => { state.calls++; return make(); }) as unknown as typeof fetch;
+    return { state, impl };
+  };
+
+  it('retries within a minute after a timeout, not after half an hour', async () => {
+    const { state, impl } = countingFetch(() => { throw new Error('The operation was aborted'); });
+
+    await lookupRoute('AAL777', NOW, { fetchImpl: impl });
+    const afterFirst = state.calls;
+
+    // Still inside the negative TTL a definitive 404 would have earned.
+    await lookupRoute('AAL777', NOW + FAIL_TTL_MS + 1000, { fetchImpl: impl });
+    expect(state.calls).toBeGreaterThan(afterFirst);
+  });
+
+  it('treats a 429 as unreachable, not as "this route does not exist"', async () => {
+    const { state, impl } = countingFetch(() => ({ ok: false, status: 429, text: async () => '' }));
+
+    await lookupRoute('AAL778', NOW, { fetchImpl: impl });
+    const afterFirst = state.calls;
+    await lookupRoute('AAL778', NOW + FAIL_TTL_MS + 1000, { fetchImpl: impl });
+    expect(state.calls).toBeGreaterThan(afterFirst);
+  });
+
+  it('treats a 502 as unreachable too', async () => {
+    const { state, impl } = countingFetch(() => ({ ok: false, status: 502, text: async () => '' }));
+
+    await lookupRoute('AAL779', NOW, { fetchImpl: impl });
+    const afterFirst = state.calls;
+    await lookupRoute('AAL779', NOW + FAIL_TTL_MS + 1000, { fetchImpl: impl });
+    expect(state.calls).toBeGreaterThan(afterFirst);
+  });
+
+  it('still remembers a definitive 404 for the full half hour', async () => {
+    // The asymmetry is deliberate and must survive: a callsign these databases
+    // genuinely do not know is one they will probably never know, and re-asking
+    // every cycle would spend the whole budget on GA and military traffic.
+    const { state, impl } = countingFetch(() => notFound());
+
+    await lookupRoute('AAL780', NOW, { fetchImpl: impl });
+    const afterFirst = state.calls;
+    await lookupRoute('AAL780', NOW + FAIL_TTL_MS + 1000, { fetchImpl: impl });
+    expect(state.calls).toBe(afterFirst); // still cached, unlike the cases above
+  });
+
+  it('counts a 200 with an unparseable body as answered', async () => {
+    // A reply IS an answer, even one we could not use -- so it earns the long
+    // negative TTL, not the short retry.
+    const { state, impl } = countingFetch(() => okResponse('<html>nope</html>'));
+
+    await lookupRoute('AAL781', NOW, { fetchImpl: impl });
+    const afterFirst = state.calls;
+    await lookupRoute('AAL781', NOW + FAIL_TTL_MS + 1000, { fetchImpl: impl });
+    expect(state.calls).toBe(afterFirst);
+  });
+
+  it('does not let a good route be replaced by a short-lived non-answer', async () => {
+    // On expiry of a good 6h entry, cacheGet has already deleted it -- so a
+    // failed refetch used to install a 30-minute negative over known-good data.
+    let mode: 'ok' | 'down' = 'ok';
+    const impl = (async () => {
+      if (mode === 'down') throw new Error('ECONNRESET');
+      return okResponse(JSON.stringify(adsbdbLaxJfk));
+    }) as unknown as typeof fetch;
+
+    expect(await lookupRoute('AAL118', NOW, { fetchImpl: impl })).not.toBeNull();
+
+    const afterExpiry = NOW + 6 * 60 * 60 * 1000 + 1000;
+    mode = 'down';
+    expect(await lookupRoute('AAL118', afterExpiry, { fetchImpl: impl })).toBeNull();
+
+    // Back up a minute later: the route must be resolvable again, not blanked
+    // for another 29 minutes.
+    mode = 'ok';
+    const back = await lookupRoute('AAL118', afterExpiry + FAIL_TTL_MS + 1000, { fetchImpl: impl });
+    expect(back).not.toBeNull();
+    expect(back!.destIata).toBe('JFK');
+  });
+});
