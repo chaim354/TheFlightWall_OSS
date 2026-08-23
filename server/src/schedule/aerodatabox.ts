@@ -147,8 +147,10 @@ function collect(
     if (!parsed) continue; // no derivable flight number -- cannot index this row
 
     const airline = m?.airline as Record<string, unknown> | undefined;
+    // No emptiness check: splitCarrierNumber returns null rather than an empty
+    // carrier on both of its branches, so parsed.carrier is always non-empty and
+    // this expression cannot be.
     const carrier = str(airline?.iata) || parsed.carrier;
-    if (!carrier) continue;
 
     // The far end is whichever side ("departure" for an arrivals-array row,
     // "arrival" for a departures-array row) carries the `airport` object.

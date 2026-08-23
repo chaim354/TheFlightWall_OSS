@@ -80,8 +80,19 @@ export function lookupByCallsign(idx: ScheduleIndex, callsign: string): Schedule
   return idx.byCallsign[callsign.trim().toUpperCase()] ?? [];
 }
 
-export async function saveSchedule(storage: ScheduleStorage, rows: readonly ScheduleRow[], nowMs: number): Promise<void> {
-  const payload: StoredSchedule = { builtAtMs: nowMs, index: indexRows(rows) };
+/** Every row in the table, flattened back out of the index it was built into. */
+export function allRows(idx: ScheduleIndex): ScheduleRow[] {
+  return Object.values(idx.byNumber).flat();
+}
+
+/**
+ * `builtAtMs`, not `nowMs`: it is when the CONTENT was fetched, which equals now
+ * only for a full replace. A merge keeps rows the current pass did not re-fetch,
+ * and stamping those with now claims a freshness they do not have -- see
+ * refresh.ts's merge path, which passes the older of the two.
+ */
+export async function saveSchedule(storage: ScheduleStorage, rows: readonly ScheduleRow[], builtAtMs: number): Promise<void> {
+  const payload: StoredSchedule = { builtAtMs, index: indexRows(rows) };
   await storage.write(payload);
 }
 

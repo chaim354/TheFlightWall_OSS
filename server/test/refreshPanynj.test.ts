@@ -322,3 +322,41 @@ describe('refreshSchedule tags its rows so the merge can identify them', () => {
     spy.mockRestore();
   });
 });
+
+describe('builtAtMs after a merge onto a seeded table', () => {
+  // F-SRV09-B. saveSchedule stamped `nowMs` unconditionally, which is true for a
+  // full replace and false for a merge: the `kept` layer is the AeroDataBox rows
+  // this pass did NOT re-fetch, and re-stamping them claims a freshness they do
+  // not have.
+  //
+  // isStale is a pure time comparison over that one number, so if refreshSchedule
+  // started failing every pass (expired key, exhausted quota) while refreshPanynj
+  // kept succeeding on its shorter cadence, isStale could NEVER fire no matter
+  // how old the AeroDataBox layer got -- and that layer is the only source of BOS
+  // coverage, operating callsigns and far-end arrival times.
+  //
+  // No test asserted builtAtMs after a merge onto a SEEDED table before this;
+  // the existing case passes either way because its store is empty.
+
+  it('keeps the older layer\'s timestamp rather than re-stamping it', async () => {
+    const storage = new FakeStorage();
+    seed(storage, [{ ...base({ callsign: 'EDV5075' }), src: 'adb' }]);
+    storage.value!.builtAtMs = 1000; // the AeroDataBox layer was fetched long ago
+    allBoardsReturn([base({ number: '9999', schedArrEpoch: 200 })]);
+
+    await refreshPanynj(storage, 500000, 0);
+
+    // The kept rows are still from t=1000, so the table is only as fresh as its
+    // oldest surviving layer.
+    expect(storage.value!.builtAtMs).toBe(1000);
+  });
+
+  it('stamps now when nothing was kept, so a first write is not born stale', async () => {
+    const storage = new FakeStorage();
+    allBoardsReturn([base({ schedArrEpoch: 200 })]);
+
+    await refreshPanynj(storage, 500000, 0);
+
+    expect(storage.value!.builtAtMs).toBe(500000);
+  });
+});

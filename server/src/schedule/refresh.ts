@@ -1,6 +1,6 @@
 import { fetchBoard } from './aerodatabox';
 import { fetchBoard as fetchPanynj, PAGE_DELAY_MS } from './panynj';
-import { loadSchedule, saveSchedule, type ScheduleStorage } from './store';
+import { allRows, loadSchedule, saveSchedule, type ScheduleStorage } from './store';
 import type { ScheduleRow } from '../types';
 
 /**
@@ -203,9 +203,22 @@ export async function refreshPanynj(
     return;
   }
 
-  const kept = (await storedRows(storage)).filter((r) => r.src !== 'pa');
+  const prior = await storedRows(storage);
+  const kept = prior.rows.filter((r) => r.src !== 'pa');
+
+  // The table is only as fresh as its OLDEST surviving layer. `kept` is the
+  // AeroDataBox layer, which this pass did not re-fetch, so stamping it with now
+  // would claim a freshness it does not have -- and isStale is a pure comparison
+  // over this one number, so a Port Authority pass succeeding on its shorter
+  // cadence while refreshSchedule failed every time would have kept the table
+  // reporting itself fresh forever, however old the AeroDataBox rows got.
+  //
+  // Guarded on something actually having been kept: a first-ever write onto an
+  // empty store must stamp now, or it is born stale.
+  const builtAtMs = kept.length && prior.builtAtMs !== null ? Math.min(prior.builtAtMs, nowMs) : nowMs;
+
   const merged = mergeByFlight(fresh, kept);
-  await saveSchedule(storage, merged, nowMs);
+  await saveSchedule(storage, merged, builtAtMs);
   console.log(
     `schedule: ${merged.length} rows (${fresh.length} panynj from ${ok}/${attempted} boards, ${kept.length} kept)`,
   );
@@ -270,12 +283,14 @@ export function resetPanynjBackoff(): void {
  * Degrades to an empty list rather than throwing: a missing or unreadable
  * table means this pass simply has nothing to merge onto.
  */
-async function storedRows(storage: ScheduleStorage): Promise<ScheduleRow[]> {
+async function storedRows(storage: ScheduleStorage): Promise<{ rows: ScheduleRow[]; builtAtMs: number | null }> {
   // Was a hand-rolled shape check here; loadSchedule now owns that for both
-  // backends, so a table that parsed but is not usable arrives as null.
+  // backends, so a table that parsed but is not usable arrives as null. Returns
+  // the stamp as well as the rows -- the merge below needs to know how old what
+  // it is keeping actually is.
   const stored = await loadSchedule(storage).catch(() => null);
-  if (!stored) return [];
-  return Object.values(stored.index.byNumber).flat();
+  if (!stored) return { rows: [], builtAtMs: null };
+  return { rows: allRows(stored.index), builtAtMs: stored.builtAtMs };
 }
 
 /** Identity of a scheduled leg, for deduplicating across sources. */

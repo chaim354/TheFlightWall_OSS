@@ -135,7 +135,9 @@ async function fillMissingRoutes(
   pairs: readonly { a: { lat: number; lon: number; callsign: string }; f: Flight }[],
   nowMs: number,
 ): Promise<void> {
-  const missing = pairs.filter((p) => !p.f.from && !p.f.to && p.a.callsign.trim());
+  // No callsign check: enrich() returns null for an empty one, so every pair
+  // here already has a non-empty callsign by construction.
+  const missing = pairs.filter((p) => !p.f.from && !p.f.to);
   if (missing.length === 0) return;
 
   await Promise.all(

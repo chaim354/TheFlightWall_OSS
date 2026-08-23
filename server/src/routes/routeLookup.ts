@@ -173,8 +173,9 @@ export function parseHexdb(text: unknown): RouteFix | null {
  *
  * The whole reason these sources are usable. Returns the route unchanged when
  * it survives, null when it does not, so a caller cannot accidentally use an
- * ungated result -- there is no code path that produces a RouteFix without
- * passing through here.
+ * ungated result. No PRODUCTION path skips it -- flights.ts imports only
+ * resolveGatedRoute -- but lookupRoute is exported and returns an ungated
+ * RouteFix, so this is a convention the module surface does not enforce.
  */
 export function gateRoute(fix: RouteFix, lat: number, lon: number): RouteFix | null {
   const excess = corridorExcessKm(lat, lon, fix.origLat, fix.origLon, fix.destLat, fix.destLon);
