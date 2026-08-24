@@ -196,7 +196,15 @@ inline IdleDecision decideIdle(uint8_t effectiveBrightness,
         d.forceFetch = true;
         // lastGoodFetchMs == 0 means "no good fetch ever", which is not the same
         // as "ancient" -- there is nothing on screen to discard.
-        d.discardFlights = (lastGoodFetchMs != 0) && ((nowMs - lastGoodFetchMs) > staleWindowMs);
+        //
+        // Truncate to uint32_t before subtracting. On the device `unsigned long`
+        // is already 32 bits so this is a no-op, but the HOST test binary builds
+        // it as 64 bits, where a millis()-wrapped pair does not wrap at all and
+        // subtracts to a huge (wrong) elapsed time instead of the small one it
+        // actually represents mod 2^32. Same seam test_serverbackoff.cpp already
+        // documents; pinning the width makes both builds agree.
+        const uint32_t elapsedMs = (uint32_t)nowMs - (uint32_t)lastGoodFetchMs;
+        d.discardFlights = (lastGoodFetchMs != 0) && (elapsedMs > staleWindowMs);
     }
 
     return d;
