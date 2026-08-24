@@ -42,6 +42,28 @@ describe('trackedCards', () => {
     expect(cards[0]!.lat).not.toBeNull();
   });
 
+  it('keeps a fix LIVE across one missed poll', () => {
+    // The freshness window must exceed the poll interval in server.ts
+    // (TRACKED_TICK_MS, currently 300s) with margin. When the two were equal,
+    // any late tick or single failed poll relabelled a perfectly good fix as
+    // an estimate -- the card would oscillate live/estimated while nothing was
+    // actually wrong. A fix one whole poll old is still the best thing we know.
+    const now = dep + 3600_000;
+    const oneMissedPoll = 300_000 + 30_000;
+    const cards = trackedCards(
+      [airborne({ lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now - oneMissedPoll })], now);
+    expect(cards[0]!.pos_src).toBe('live');
+  });
+
+  it('falls back to estimated once a fix is older than two polls', () => {
+    // Two consecutive misses is a real loss of coverage, not a timing wobble,
+    // and THAT is when the honest answer becomes "we are projecting".
+    const now = dep + 3600_000;
+    const cards = trackedCards(
+      [airborne({ lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now - 12 * 60_000 })], now);
+    expect(cards[0]!.pos_src).toBe('estimated');
+  });
+
   it('emits nothing for states that are not airborne', () => {
     for (const state of ['pending', 'resolved', 'landed', 'unresolved', 'expired'] as const) {
       expect(trackedCards([airborne({ state })], dep + 3600_000)).toEqual([]);
