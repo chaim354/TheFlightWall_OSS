@@ -113,6 +113,36 @@ describe('decideTracked - airborne', () => {
   });
 });
 
+describe('decideTracked - airborne is bounded on every path', () => {
+  const dep = DAY_START + 18 * HOUR;
+  const flying = (over: Partial<TrackedEntry> = {}) =>
+    entry({ state: 'airborne', schedDepEpoch: dep / 1000, icao24: '406947', reresolved: true, ...over });
+
+  it('keeps polling an evening long-haul across UTC midnight', () => {
+    // Regression. An 18:00Z departure with a 7h flight lands at 01:00Z the NEXT
+    // day, so a backstop keyed on the entry date's midnight would drop it in
+    // mid-air. For a worldwide tracker that is the normal case, not an edge one.
+    const arr = dep + 7 * HOUR; // 01:00Z next day, past dayStart + 24h
+    const e = flying({ schedArrEpoch: arr / 1000 });
+    expect(decideTracked(e, DAY_START + 24 * HOUR + 1)).toEqual({ state: 'airborne', action: 'poll' });
+    expect(decideTracked(e, arr + 30 * 60_000)).toEqual({ state: 'landed', action: 'none' });
+  });
+
+  it('lands an entry with NO arrival time after a maximum airborne duration', () => {
+    // Without this, an entry resolved with a departure but no arrival polls
+    // OpenSky forever. Nothing else bounds it -- and unbounded polling is the
+    // exact quota drain the guards exist to prevent.
+    const e = flying({ schedArrEpoch: null });
+    expect(decideTracked(e, dep + 19 * HOUR)).toEqual({ state: 'airborne', action: 'poll' });
+    expect(decideTracked(e, dep + 20 * HOUR)).toEqual({ state: 'landed', action: 'none' });
+  });
+
+  it('expires an airborne entry that has no usable times at all', () => {
+    const e = flying({ schedDepEpoch: null, schedArrEpoch: null });
+    expect(decideTracked(e, DAY_START + 2 * DAY)).toEqual({ state: 'expired', action: 'drop' });
+  });
+});
+
 describe('decideTracked - terminal states expire', () => {
   it('drops a landed entry two hours later', () => {
     const e = entry({ state: 'landed', stateAtMs: DAY_START });

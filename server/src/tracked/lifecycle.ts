@@ -7,6 +7,13 @@ const ARRIVAL_GRACE_MS = 30 * 60_000;
 /** Terminal-state expiry timers. */
 const EXPIRE_AFTER_LANDED_MS = 2 * 60 * 60_000;
 const EXPIRE_AFTER_UNRESOLVED_MS = 24 * 60 * 60_000;
+/**
+ * Absolute cap on how long an entry may stay airborne when we have a departure
+ * time but no arrival time. The longest scheduled commercial flight is about
+ * 19h, so 20h cannot cut a real journey short while still bounding an entry
+ * that would otherwise poll OpenSky forever.
+ */
+const MAX_AIRBORNE_MS = 20 * 60 * 60_000;
 /** Backstop for an entry stuck in a non-terminal state by a bug. */
 const EXPIRE_AFTER_DATE_MS = 24 * 60 * 60_000;
 
@@ -63,7 +70,15 @@ export function decideTracked(
   // once landed), and a late-departing long-haul flight can legitimately
   // still be airborne more than a day after its date's UTC midnight.
   const dayStart = startOfUtcDay(e.date);
-  if (e.state !== 'airborne' && !Number.isNaN(dayStart) && nowMs >= dayStart + EXPIRE_AFTER_DATE_MS) {
+  // Exempt `airborne` from the DATE backstop only when it has flight times of
+  // its own to be bounded by. An 18:00Z departure on a 7h leg lands at 01:00Z
+  // the next day, so a backstop keyed on the entry date's midnight would drop
+  // it in mid-air -- the normal case for a worldwide tracker, not an edge one.
+  // With no times at all there is nothing else to bound it, so the backstop
+  // must still apply or the entry polls forever.
+  const airborneHasTimes =
+    e.state === 'airborne' && (e.schedDepEpoch !== null || e.schedArrEpoch !== null);
+  if (!airborneHasTimes && !Number.isNaN(dayStart) && nowMs >= dayStart + EXPIRE_AFTER_DATE_MS) {
     return { state: 'expired', action: 'drop' };
   }
 
@@ -93,8 +108,15 @@ export function decideTracked(
   }
 
   // airborne
+  // Bounded on three paths, because each alone leaves a hole: the on-ground
+  // observation when ADS-B gives us one; scheduled arrival plus grace when we
+  // have an arrival time; and departure plus MAX_AIRBORNE_MS when we do not.
+  // The date backstop above covers the remaining case of no times at all.
   if (onGround === true) return { state: 'landed', action: 'none' };
   if (arrMs !== null && nowMs >= arrMs + ARRIVAL_GRACE_MS) {
+    return { state: 'landed', action: 'none' };
+  }
+  if (arrMs === null && depMs !== null && nowMs >= depMs + MAX_AIRBORNE_MS) {
     return { state: 'landed', action: 'none' };
   }
   return { state: 'airborne', action: 'poll' };
