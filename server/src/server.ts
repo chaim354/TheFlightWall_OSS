@@ -3,6 +3,7 @@ import { handleFlights, type Env } from './flights';
 import { fileStorage } from './schedule/fileStorage';
 import { refreshSchedule, refreshPanynj, BOARD_FETCH_DELAY_MS } from './schedule/refresh';
 import { PAGE_DELAY_MS } from './schedule/panynj';
+import { parseQuietHours, inQuietHours, shouldRefresh, type QuietWindow } from './schedule/quietHours';
 
 /** Everything server.ts needs, read from process.env with a default for
  * every var except the API key -- there is no sensible default for that. */
@@ -13,6 +14,18 @@ export interface ServerConfig {
   schedulePath: string;
   /** How often to refresh the schedule table after the initial boot fetch. */
   refreshIntervalMs: number;
+  /**
+   * Hours during which the schedule refresh is skipped, as "START-END" local
+   * hours, or null to always refresh.
+   *
+   * Defaults to 00:00-06:00: the panel's night schedule ends at 07:00, and this
+   * must end at least one refresh interval BEFORE that so a refresh lands while
+   * it is still dark and the table is centred on the morning. See
+   * src/schedule/quietHours.ts.
+   */
+  quietHours: QuietWindow | null;
+  /** IANA zone the quiet-hours window is interpreted in. */
+  quietHoursTimeZone: string;
   /**
    * How often to re-merge the free Port Authority boards on top of it.
    *
@@ -87,6 +100,10 @@ const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
  */
 const PANYNJ_DISABLED = 0;
 
+// 00:00-06:00. All four boards are NYC-area, so local time is America/New_York.
+const DEFAULT_QUIET_HOURS = '0-6';
+const DEFAULT_QUIET_TZ = 'America/New_York';
+
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     port: Number(env.PORT) || DEFAULT_PORT,
@@ -94,6 +111,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     boards: env.BOARDS ?? DEFAULT_BOARDS,
     schedulePath: env.SCHEDULE_PATH ?? DEFAULT_SCHEDULE_PATH,
     refreshIntervalMs: TWO_HOURS_MS,
+    quietHours: parseQuietHours(env.REFRESH_QUIET_HOURS ?? DEFAULT_QUIET_HOURS),
+    quietHoursTimeZone: env.REFRESH_QUIET_TZ ?? DEFAULT_QUIET_TZ,
     boardFetchDelayMs: BOARD_FETCH_DELAY_MS,
     panynjIntervalMs: PANYNJ_DISABLED,
     panynjPageDelayMs: PAGE_DELAY_MS,
@@ -212,8 +231,45 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
     await runPanynj();
   };
 
-  void runBoth(); // once at boot
-  const timer = setInterval(() => void runBoth(), config.refreshIntervalMs);
+  // Checked every 5 minutes rather than every refreshIntervalMs. setInterval has
+  // arbitrary phase, so keying the refresh off it alone would mean the first run
+  // after quiet hours end could be nearly a full interval late -- leaving the
+  // table centred on the previous evening exactly when the panel wakes.
+  const REFRESH_CHECK_MS = 5 * 60 * 1000;
+  let lastRefreshMs: number | null = null;
+  let wasQuiet = false;
+
+  const localHour = (): number =>
+    Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: config.quietHoursTimeZone,
+        hour: 'numeric',
+        hour12: false,
+      }).format(new Date()),
+    ) % 24;
+
+  const refreshTick = async (): Promise<void> => {
+    const quiet = config.quietHours !== null && inQuietHours(localHour(), config.quietHours);
+    const go = shouldRefresh({
+      nowMs: Date.now(),
+      lastRefreshMs,
+      intervalMs: config.refreshIntervalMs,
+      quiet,
+      wasQuiet,
+    });
+    if (quiet && !wasQuiet) {
+      // Logged, not silent: a refresh that stops happening must say so, or it is
+      // indistinguishable from an upstream outage.
+      console.log(`schedule: entering quiet hours (${config.quietHours!.startHour}-${config.quietHours!.endHour} ${config.quietHoursTimeZone}); refresh paused`);
+    }
+    wasQuiet = quiet;
+    if (!go) return;
+    lastRefreshMs = Date.now();
+    await runBoth();
+  };
+
+  void refreshTick(); // once at boot
+  const timer = setInterval(() => void refreshTick(), REFRESH_CHECK_MS);
   const panynjTimer = panynjEnabled
     ? setInterval(() => void runPanynj(), config.panynjIntervalMs)
     : undefined;

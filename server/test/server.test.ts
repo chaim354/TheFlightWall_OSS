@@ -70,6 +70,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
     const base = `http://127.0.0.1:${running.port}`;
@@ -106,6 +108,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
     const res = await fetch(`http://127.0.0.1:${running.port}/v1/flights?lat=40.7&lon=-73.9`);
@@ -125,6 +129,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
     // The boot refresh is fire-and-forget (does not block server start), so
@@ -143,6 +149,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0,
     });
     // A second server bound to the exact same (now-taken) port must fail
@@ -160,6 +168,8 @@ describe('startServer', () => {
         panynjIntervalMs: 0, // no network from tests
         panynjPageDelayMs: 0,
         refreshIntervalMs: 24 * 60 * 60 * 1000,
+        quietHours: null, // no quiet-hours gating in these tests
+        quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
         boardFetchDelayMs: 0,
       }),
     ).rejects.toThrow();
