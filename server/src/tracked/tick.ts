@@ -1,0 +1,126 @@
+import { decideTracked } from './lifecycle';
+import type { TrackedEntry } from './types';
+import type { TrackedStorage } from './store';
+import type { ResolveResult } from './resolve';
+import type { PositionResult } from './opensky';
+
+/**
+ * Ceiling on AeroDataBox resolutions per day for this feature.
+ *
+ * 50, not a rounder number, because it must exceed what a legitimately full
+ * store needs: MAX_ENTRIES (20) x 2 calls per journey is 40 in the worst case
+ * where every entry resolves the same day, and a lower ceiling would deadlock
+ * the cap against itself. It still leaves roughly 14 calls/day of the measured
+ * spare untouched.
+ */
+export const DAILY_RESOLVE_CEILING = 50;
+
+/** Transport retries before an entry is declared unresolved. */
+const MAX_ATTEMPTS = 3;
+
+export interface TrackedDeps {
+  resolve(number: string, date: string): Promise<ResolveResult>;
+  position(icao24: string): Promise<PositionResult>;
+  resolvesUsedToday: number;
+}
+
+/**
+ * One pass over every entry: ask the pure state machine what to do, then do it.
+ *
+ * All the branching lives in lifecycle.ts; this unit only performs actions and
+ * writes results back. Keeping the split means the interesting rules are
+ * testable without a network, and this file stays small enough to audit for the
+ * one thing that matters on an unauthenticated feature -- that no path can call
+ * AeroDataBox more than the ceiling allows.
+ */
+export async function runTrackedTick(
+  storage: TrackedStorage,
+  nowMs: number,
+  deps: TrackedDeps,
+): Promise<void> {
+  const entries = await storage.read();
+  if (entries.length === 0) return;
+
+  let resolvesUsed = deps.resolvesUsedToday;
+  const next: TrackedEntry[] = [];
+  let changed = false;
+
+  for (const e of entries) {
+    const before = e.state;
+    const d = decideTracked(e, nowMs);
+
+    if (d.action === 'drop') {
+      changed = true;
+      continue;
+    }
+
+    let updated: TrackedEntry = d.state === before ? e : { ...e, state: d.state, stateAtMs: nowMs };
+    if (d.state !== before) changed = true;
+
+    if (d.action === 'resolve' || d.action === 'reresolve') {
+      if (resolvesUsed >= DAILY_RESOLVE_CEILING) {
+        console.error(
+          `tracked: daily resolve ceiling (${DAILY_RESOLVE_CEILING}) reached; ${e.number} ${e.date} waits`,
+        );
+        next.push(updated);
+        continue;
+      }
+      resolvesUsed++;
+      const r = await deps.resolve(e.number, e.date);
+      changed = true;
+
+      if (r.ok) {
+        updated = {
+          ...updated,
+          ...r.flight,
+          state: 'resolved',
+          stateAtMs: nowMs,
+          attempts: 0,
+          reresolved: d.action === 'reresolve' ? true : updated.reresolved,
+          reason: null,
+        };
+      } else if (!r.retryable || updated.attempts >= MAX_ATTEMPTS) {
+        // Terminal. A permanent miss is terminal immediately (attempts is
+        // still 0 the first time through, but !r.retryable alone decides it).
+        // A transport failure is terminal once MAX_ATTEMPTS prior failures are
+        // already on record -- i.e. this call is the one after the budget was
+        // spent -- so a single bad entry costs a bounded number of calls
+        // rather than a retry loop forever. Comparing against the count
+        // BEFORE this failure (not attempts + 1) matters: it is what lets the
+        // entry actually use all MAX_ATTEMPTS retries before giving up,
+        // instead of stopping one call short.
+        updated = {
+          ...updated,
+          state: 'unresolved',
+          stateAtMs: nowMs,
+          attempts: updated.attempts + 1,
+          reason: r.reason,
+        };
+      } else {
+        updated = { ...updated, attempts: updated.attempts + 1 };
+      }
+    } else if (d.action === 'poll' && updated.icao24) {
+      const p = await deps.position(updated.icao24);
+      changed = true;
+      if (p.ok && p.position) {
+        // Re-run the machine with the observation, so an early arrival lands
+        // the flight now instead of burning credits until schedule+grace.
+        const withObs = decideTracked(updated, nowMs, p.position.onGround);
+        updated = {
+          ...updated,
+          state: withObs.state,
+          stateAtMs: withObs.state === updated.state ? updated.stateAtMs : nowMs,
+          lastLat: p.position.lat,
+          lastLon: p.position.lon,
+          lastPosAtMs: nowMs,
+        };
+      }
+      // p.position === null is the ocean gap: leave the entry airborne and let
+      // the serving layer dead-reckon. Not an error, and not a landing.
+    }
+
+    next.push(updated);
+  }
+
+  if (changed) await storage.write(next);
+}
