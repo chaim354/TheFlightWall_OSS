@@ -65,13 +65,15 @@ All read from the environment, with defaults for everything except the key:
 | `REFRESH_QUIET_HOURS` | `0-6`                     | Local-hour window `START-END` (end exclusive) during which the AeroDataBox schedule refresh is skipped. `off` disables it (always refresh); malformed values are also treated as `off` rather than guessed at, since a typo that became an all-day window would stop refreshes and look like an upstream outage. |
 | `REFRESH_QUIET_TZ` | `America/New_York`           | IANA zone the window above is read in. |
 
-**The quiet-hours window must end at least one refresh interval before your
-panel wakes.** `server.ts`'s refresh covers roughly +/-6h centred on the
-moment the schedule table was built, and that coverage is spent by the end of
-each cycle -- a table built at 23:00 covers ~17:00-05:00, so a panel waking at
-07:00 against it has no rows for morning departures. The `0-6` default
-assumes a panel whose night schedule ends at 07:00; change both together, or
-mornings will be left without schedule data.
+**The quiet-hours window must end before your panel wakes.** `server.ts`'s
+refresh covers roughly +/-6h centred on the moment the schedule table was
+built, and that coverage is spent by the end of each cycle -- a table built at
+23:00 covers ~17:00-05:00, so a panel waking at 07:00 against it has no rows
+for morning departures. Leaving the window forces a refresh within 5 minutes
+regardless of the 2h cadence, so the margin you need is minutes; the hour the
+`0-6` default leaves before a 07:00 wake is generous, not the minimum. What
+breaks is ending the window at or after the wake time. The default assumes a
+panel whose night schedule ends at 07:00 -- change both together.
 
 ## Docker
 

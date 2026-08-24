@@ -151,3 +151,53 @@ outside quiet hours, and the disabled case.
 - No AeroDataBox refresh between 00:00 and 06:00; one within 5 minutes of 06:00,
   i.e. a warm table an hour before the panel wakes at 07:00.
 - Both envs build, host tests pass, server suite passes.
+
+---
+
+## Implementation notes (2026-08-24)
+
+Written after the feature shipped. Where the built behaviour differs from the
+design above, the built behaviour is what is true.
+
+**The wake shows the no-flights card, not the loading screen.** "Waking" and
+"Success criteria" above both promise a loading screen. `clearStaleFlights()`
+calls `displayFlights({})`, which reaches `displayNoFlights()` -- dots, clock,
+fun fact. So for the length of one fetch the panel asserts "the sky is empty"
+rather than "we don't know yet", which is a weaker version of the
+plausible-looking-wrong-value objection this design used to reject showing a
+stale set. It was left alone because the wake path forces a fetch on the same
+pass, making the window sub-second, and because the failure path has always
+landed on the same card -- changing it would change behaviour on a shared path
+late in the branch. Worth revisiting if the loading card is ever wanted here.
+
+**The window need not end a full refresh interval before the panel wakes.**
+The design says it must. That is stricter than the truth and the shipped
+default violates it: `0-6` against a 07:00 wake leaves one hour, not the two of
+a refresh interval. The real requirement is smaller, because leaving the window
+forces a refresh within `REFRESH_CHECK_MS` (5 minutes) regardless of cadence --
+that is the entire reason `shouldRefresh` exists. What actually breaks is a
+window ending at or after the wake time. Corrected in the README, `deploy.yml`
+and the `ServerConfig` doc.
+
+**A cold start refreshes even inside the window.** Not considered in the design.
+`shouldRefresh` checks `lastRefreshMs === null` before `quiet`, because the
+table lives in memory and `lastRefreshMs` starts null on every boot -- a process
+starting at 01:00 with nothing loaded would otherwise serve routeless flights
+until 06:00, which is what happens on a first deploy or after the named volume
+in `config/deploy.yml` is lost. Quiet hours drop redundant refreshes, and the
+one that populates an empty table is the opposite of redundant.
+
+**The Worker is still ungated, and that is now load-bearing on the budget.**
+"Not doing" scopes out the Worker's 6-hourly cron deliberately. Its schedule is
+UTC, so one of its four daily ticks lands at 02:00 America/New_York, squarely
+inside the default window. Noted in `wrangler.toml` with the revised shared-key
+arithmetic, since quiet hours change what that budget comparison is measuring.
+
+**The device gate is not dormant on shipped defaults.** `nightBrightness = 5`
+and `schedule.enabled = false` mean the night schedule never triggers it, but
+`lightSensorEnabled = true` with `lightSensorDimInstead = false` blanks the
+panel whenever the ambient sensor reads dark, and the button off-toggle reaches
+0 too. Given HANDOFF's mis-sited TCS3472 reading ~24 in a lit room against a
+500-count threshold, a sensor in the wrong place now halts fetching as well as
+blanking. The risk table above anticipated this; the mitigation it names
+(`/api/status` keeps serving and reports `lightLevel`/`lightDark`) is in place.

@@ -13,15 +13,23 @@ compatibility_date = "2026-08-20"
 # both the old cadence and the refuted explanation.
 #
 # LEFT AT SIX HOURS DELIBERATELY, not by oversight. If this Worker and the Node
-# deployment share one AeroDataBox key, the combined spend is 3,840 of the
-# 6,000-unit monthly tier (4 boards x 2 units x [4/day here + 12/day there] x
+# deployment share one AeroDataBox key, the combined spend is 3,120 of the
+# 6,000-unit monthly tier (4 boards x 2 units x [4/day here + 9/day there] x
 # 30) -- while server.ts computes its budget believing it is the only refresher
-# at 2,880. Matching it at two hours would put the pair at 5,760, which
-# server.ts already rejects as leaving no margin for a retry storm. So the
-# asymmetry is the affordable option, not the tidy one.
+# at 2,160. Matching it at two hours would put the pair at 5,040, leaving under
+# 1,000 units of margin for a retry storm. So the asymmetry is the affordable
+# option, not the tidy one.
+#
+# The 9/day is the Node side AFTER quiet hours (REFRESH_QUIET_HOURS, default
+# 00:00-06:00). This Worker has NO equivalent gate: its cron is UTC, so
+# 00:00 UTC lands at 20:00 and 06:00 UTC at 02:00 America/New_York -- one of
+# the four daily ticks fires squarely inside the Node deployment's quiet
+# window. That is deliberate (this Worker serves whatever devices point at it,
+# on no known schedule), but it means quiet hours do NOT make the pair cheaper
+# by a full quarter.
 #
 # If the two deployments use DIFFERENT keys the constraint disappears and this
-# can move to two hours; check whether monthly units track ~3,840 or ~2,880.
+# can move to two hours; check whether monthly units track ~3,120 or ~2,160.
 #
 # Deleting [triggers] entirely is NOT a cleanup: this Worker's KV table would
 # then never refresh and /v1/flights would permanently serve routeless flights

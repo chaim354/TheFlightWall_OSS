@@ -19,9 +19,11 @@ export interface ServerConfig {
    * hours, or null to always refresh.
    *
    * Defaults to 00:00-06:00: the panel's night schedule ends at 07:00, and this
-   * must end at least one refresh interval BEFORE that so a refresh lands while
-   * it is still dark and the table is centred on the morning. See
-   * src/schedule/quietHours.ts.
+   * must end BEFORE that so a refresh lands while it is still dark and the
+   * table is centred on the morning. Leaving the window forces a refresh within
+   * REFRESH_CHECK_MS (5 minutes), so the margin needed is minutes, not a whole
+   * refresh interval -- the hour the default leaves is generous, not required.
+   * See src/schedule/quietHours.ts.
    */
   quietHours: QuietWindow | null;
   /** IANA zone the quiet-hours window is interpreted in. */
@@ -71,7 +73,9 @@ const DEFAULT_SCHEDULE_PATH = './data/schedule.json';
  *
  * Cost, against the $5/mo Pro tier's 6,000 units/month (see
  * fixtures/README.md for how the 2-units-per-call tier was measured):
- *   4 boards x 2 units x 12/day x 30 = 2,880 units/month
+ *   4 boards x 2 units x 9/day x 30 = 2,160 units/month
+ * (9, not 12: quiet hours skip the 00:00, 02:00 and 04:00 refreshes and add one
+ * forced refresh when the window ends -- see DEFAULT_QUIET_HOURS below)
  * versus 960 at six-hourly. Three times the spend, no change in dollars, and
  * still ~2x headroom. Hourly would be 5,760 -- inside the tier but with no
  * margin for a retry storm, so two hours is the defensible point.

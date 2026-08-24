@@ -175,7 +175,7 @@ struct IdleDecision
  * All time arguments are millis() values; subtraction is unsigned so the 49.7-day
  * wrap is handled without a special case.
  */
-inline IdleDecision decideIdle(uint8_t effectiveBrightness,
+inline IdleDecision decideIdle(int effectiveBrightness,
                                bool wasSuppressed,
                                unsigned long lastGoodFetchMs,
                                unsigned long nowMs,
@@ -768,3 +768,28 @@ Not part of the plan's tasks — these are actions for the maintainer.
   after up to 30s.
 - To verify the server change: check the log for the `entering quiet hours` line
   at 00:00 local, and a refresh within 5 minutes of 06:00.
+
+---
+
+## Corrections applied during execution
+
+This plan was written before the code existed and three things in it turned out
+to be wrong. Recorded here rather than silently rewritten, so the plan still
+matches what a reader would find in git.
+
+1. **`decideIdle` took `uint8_t effectiveBrightness`.** Corrected to `int`
+   above. `g_appliedBrightness` uses `-1` as "not applied yet", and narrowing
+   that to `uint8_t` maps it to 255, while clamping it to 0 would mark the pass
+   suppressed and make the NEXT pass discard held flights and blank the wall.
+   `main.cpp` resolves the sentinel to a lit value before the call.
+
+2. **`IdleDecision` carried a `nowSuppressed` field**, still referenced by the
+   Task 1 test block and the Task 1 implementation in this document. It was
+   dropped during review as redundant: `suppressFetch` IS what the caller stores
+   as the next pass's `wasSuppressed`. One bit, not two.
+
+3. **The helper relied on 32-bit `millis()` wraparound**, which does not happen
+   on the host where the tests run -- `unsigned long` is 64-bit there, so the
+   wrap case the plan intended to cover silently could not fail. The shipped
+   helper takes `uint32_t` explicitly and subtracts in that width, following
+   the precedent in `test/test_serverbackoff.cpp`.

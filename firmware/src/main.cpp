@@ -341,7 +341,12 @@ static unsigned long staleWindowMs()
     return (unsigned long)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
 }
 
-// Drop what's on screen and fall back to the loading card.
+// Drop what's on screen. NOTE this lands on the NO-FLIGHTS card (displayFlights
+// with an empty vector takes Hub75Display's SIZE_MAX branch to displayNoFlights:
+// dots, clock, fun fact), not the loading card -- so for as long as it is up it
+// asserts "the sky is empty" rather than "we don't know yet". Tolerable on both
+// callers because neither leaves it up long: the failure path only reaches here
+// after a >3-minute streak, and the wake path forces a fetch on the same pass.
 static void clearStaleFlights(const char *why)
 {
     Serial.println(why);
@@ -505,11 +510,25 @@ static void doFetchAndRender()
 //
 // g_appliedBrightness is applyBrightness()'s resolved output -- base setting,
 // night schedule, ambient sensor, button ramp and the off toggle all folded in
-// -- so this covers every reason the panel is off. It engages only once
-// someone turns the night schedule ON and brings nightBrightness down to 0;
-// both are OFF by default (Settings.h: schedule.enabled = false,
-// nightBrightness = 5), so this is dormant out of the box. At that
-// configuration the shipped 22:00-07:00 window is 9h * 3600s / 30s-interval =
+// -- so this covers every reason the panel is off.
+//
+// It is NOT dormant on shipped defaults, and an earlier version of this comment
+// claiming otherwise was wrong. The night schedule does default off (Settings.h:
+// schedule.enabled = false, nightBrightness = 5), but two other paths reach 0
+// without anyone touching it:
+//   - the ambient sensor: lightSensorEnabled = true and lightSensorDimInstead =
+//     false by default, so isDark() blanks the panel outright;
+//   - the off toggle: g_panelOff, reachable from button A with buttonsEnabled
+//     = true by default.
+// The sensor is the one to watch. HANDOFF records a mis-sited TCS3472 reading
+// ~24 in a lit room against a 500-count threshold, which means a sensor in the
+// wrong PLACE now halts fetching as well as blanking the panel. That is why the
+// web API keeps serving through suppression and reports lightLevel/lightDark
+// alongside the "panel dark - fetch paused" note set below: the cause has to
+// stay visible, or this is indistinguishable from a hung device.
+//
+// With the night schedule ON at nightBrightness 0, the 22:00-07:00 window is
+// 9h * 3600s / 30s-interval =
 // 1080 fetches a night rendering to nothing, each a TLS handshake on a link
 // that is measurably fragile: the HUB75 I2S clock degrades WiFi, and 8 MHz
 // with a reseated ribbon is the usable floor.
@@ -539,11 +558,25 @@ static bool fetchSuppressedWhileDark()
     if (idle.discardFlights && !g_lastFlights.empty())
     {
         // Woke to a set older than the stale window. Clearing shows the
-        // loading screen for a second rather than aircraft that have landed.
+        // no-flights card for the length of one fetch (see clearStaleFlights --
+        // it is not the loading card) rather than aircraft that have landed.
         clearStaleFlights("Woke with stale flights; clearing and refetching");
     }
     if (idle.forceFetch)
-        g_lastFetchMs = 0; // fetch on this pass rather than waiting out the interval
+    {
+        // Fetch on this pass rather than waiting out the interval. Load-bearing
+        // only for a SHORT dark period: after a real night g_lastFetchMs is
+        // already hours stale, because the gate below skips the very block that
+        // updates it, so the interval has long since elapsed and this changes
+        // nothing. What it actually covers is a brief blank -- a button toggle,
+        // or the ambient reading crossing its hysteresis band -- where the held
+        // flights are still inside the stale window and nothing was discarded.
+        // It does bypass the failure/empty ladders for that one fetch. Bounded
+        // on both sides: the toggle is a deliberate press where refreshing at
+        // once is the point, and LightSensor's hysteresis band is precisely what
+        // stops the sensor flapping across the threshold.
+        g_lastFetchMs = 0;
+    }
 
     if (idle.suppressFetch && !wasSuppressed)
     {
