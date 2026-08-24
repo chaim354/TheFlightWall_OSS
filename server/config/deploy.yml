@@ -62,6 +62,11 @@ proxy:
 env:
   clear:
     BOARDS: "KJFK,KLGA,KEWR,KBOS"
+    # Skip the AeroDataBox refresh 00:00-06:00 local. Must end at least one
+    # refresh interval before the panel wakes (its night schedule ends 07:00) --
+    # see server/README.md. Set to "off" to always refresh.
+    REFRESH_QUIET_HOURS: "0-6"
+    REFRESH_QUIET_TZ: "America/New_York"
   secret:
     - AERODATABOX_KEY
 
