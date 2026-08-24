@@ -13,6 +13,17 @@ REST API:
   GET  /api/flights    -> currently displayed flights JSON (set by main loop)
   GET  /api/wifiscan   -> nearby WiFi networks JSON
   POST /api/restart    -> reboot the device
+
+Plus a deliberately dumb pair of routes for first-time provisioning:
+  GET  /setup          -> ~1KB no-JavaScript WiFi form
+  POST /setup          -> apply credentials from that form, then reboot
+
+These exist because `/` cannot be relied on in the one situation it matters
+most. The single-page UI is ~11KB gzipped and does everything through
+fetch(), and the browser that opens on joining an open network is a
+restricted captive-portal WebView that may limit scripting and can close
+mid-flow -- over an AP link on a radio the panel is already degrading. In AP
+mode the captive-portal redirect therefore points at /setup, not /.
 */
 #pragma once
 
@@ -79,5 +90,8 @@ private:
     void handleWifiScan();
     void handleRestart();
     void handleRoot();
+    void handleSetupPage(const char *banner);
+    void handleSetupGet();
+    void handleSetupPost();
     void handleNotFound();
 };
