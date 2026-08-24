@@ -751,7 +751,8 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     auto buildRow2 = [&](bool unit)
     {
         std::vector<String> cands;
-        if (L.showEta && f.eta_text.length())
+        const bool haveEta = L.showEta && f.eta_text.length();
+        if (haveEta)
             cands.push_back("ETA:" + f.eta_text);
         if (L.flightNumberOverVr)
         {
@@ -759,7 +760,15 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
             if (flt.length())
                 cands.push_back(flt);
         }
-        if (L.showHeading)
+        // Heading is a FALLBACK for the ETA, not an addition to it -- offered
+        // only when there is no ETA to show. Leaving this to the width budget
+        // instead would be subtly wrong: a short ETA and a short callsign
+        // ("ETA:~1h AA1", 11 of 21 columns) leave room for "Trk:230", so
+        // heading would appear on some cards and not others for no reason a
+        // viewer could see. "Where is it pointing" is the consolation for not
+        // knowing "when does it arrive", and once the arrival IS known the
+        // heading is the less interesting of the two.
+        if (L.showHeading && !haveEta)
         {
             const String t = miniTrk(f.heading_deg, unit);
             if (t.length())
