@@ -79,12 +79,21 @@ them. Measure first.
 
 - [ ] **Step 1: Capture one real by-number response**
 
-Use a flight that is definitely operating today. Replace `<KEY>` with the value
-from `server/.kamal/secrets`.
+Use a flight that is definitely operating today.
+
+**Do NOT grep the key out of `server/.kamal/secrets`.** That file uses 1Password
+indirection (`AERODATABOX_KEY=$(op ...)`), so a grep/cut yields the literal
+command string, and sending it produces a 403 `"You are not subscribed to this
+API."` that looks exactly like a plan/subscription problem and is not. Source
+the file so the substitution runs:
 
 ```bash
-curl -s -H "x-magicapi-key: <KEY>" \
-  "https://prod.api.market/api/v1/aedbx/aerodatabox/flights/number/BA181/$(date -u +%Y-%m-%d)" \
+cd server && set -a && . ./.kamal/secrets && set +a
+```
+
+```bash
+curl -s -H "x-rapidapi-key: $AERODATABOX_KEY" -H "x-rapidapi-host: aerodatabox.p.rapidapi.com" \
+  "https://aerodatabox.p.rapidapi.com/flights/number/BA181/$(date -u +%Y-%m-%d)" \
   | tee server/fixtures/aerodatabox-bynumber.json | python3 -m json.tool | head -60
 ```
 
@@ -945,7 +954,8 @@ Expected: FAIL — cannot resolve `../../src/tracked/resolve`.
 ```typescript
 import type { LatLon, ResolvedFlight } from './types';
 
-const BASE = 'https://prod.api.market/api/v1/aedbx/aerodatabox';
+const API_HOST = 'aerodatabox.p.rapidapi.com';
+const BASE = `https://${API_HOST}`;
 
 export type ResolveResult =
   | { ok: true; flight: ResolvedFlight }
@@ -1026,7 +1036,7 @@ export async function resolveFlight(
   const url = `${BASE}/flights/number/${encodeURIComponent(number)}/${encodeURIComponent(date)}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: { 'x-magicapi-key': apiKey } });
+    res = await fetch(url, { headers: { 'x-rapidapi-key': apiKey, 'x-rapidapi-host': API_HOST } });
   } catch (e) {
     return { ok: false, retryable: true, reason: e instanceof Error ? e.message : String(e) };
   }
