@@ -123,7 +123,7 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
   // AFTER prepending so a tracked flight can never be pushed off the end by
   // ordinary traffic -- being crowded out by a jet that happens to be closer is
   // exactly the failure this feature exists to prevent.
-  const pinned = env.TRACKED ? trackedCards(await env.TRACKED.read(), nowMs) : [];
+  const pinned = env.TRACKED ? trackedCards(await env.TRACKED.read(), nowMs, { lat, lon }) : [];
   const merged = [...pinned, ...flights].slice(0, max);
 
   return json({ ok: true, ts, stale, flights: merged });

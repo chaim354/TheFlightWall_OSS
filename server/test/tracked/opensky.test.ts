@@ -40,6 +40,35 @@ describe('parseStates', () => {
   it('reports on-ground when the flag is set', () => {
     expect(parseStates({ states: [state({ 8: true })] })!.onGround).toBe(true);
   });
+
+  it('extracts velocity and vertical_rate, converted from m/s and rounded', () => {
+    // index 9 velocity (m/s -> kt, x1.943844), index 11 vertical_rate
+    // (m/s -> ft/min, x196.8504). These used to be dropped entirely, which
+    // is half of why a pinned card rendered with no speed/vs on the wall.
+    // Rounded to whole units, same as altitudeFt just above: 100 * 1.943844
+    // = 194.3844 -> 194kt; 5 * 196.8504 = 984.252 -> 984fpm.
+    const p = parseStates({ states: [state({ 9: 100, 11: 5 })] });
+    expect(p).not.toBeNull();
+    expect(p!.groundspeedKt).toBe(194);
+    expect(p!.verticalRateFpm).toBe(984);
+  });
+
+  it('converts a negative vertical_rate (descending) the same way', () => {
+    // -10 * 196.8504 = -1968.504 -> -1969fpm.
+    const p = parseStates({ states: [state({ 11: -10 })] });
+    expect(p!.verticalRateFpm).toBe(-1969);
+  });
+
+  it('leaves groundspeedKt/verticalRateFpm null when OpenSky omits them, never 0', () => {
+    // Same null-handling discipline as lat/lon/altitude above: a receiver
+    // can see an aircraft without a full state vector, and coercing an
+    // absent value to 0 would read as "stationary" or "level flight",
+    // which is a plausible-looking-wrong-value, not an honest unknown.
+    const p = parseStates({ states: [state({ 9: null, 11: null })] });
+    expect(p).not.toBeNull();
+    expect(p!.groundspeedKt).toBeNull();
+    expect(p!.verticalRateFpm).toBeNull();
+  });
 });
 
 // fetchPosition now authenticates via OAuth2 client-credentials (a bearer

@@ -8,9 +8,11 @@ const DAY_START = Date.UTC(2026, 8, 14);
 const entry = (over: Partial<TrackedEntry> = {}): TrackedEntry => ({
   id: 'e1', number: 'BA181', date: '2026-09-14', state: 'pending', reason: null,
   attempts: 0, stateAtMs: 0, reresolved: false, icao24: null, reg: null,
-  origIata: null, destIata: null, orig: null, dest: null,
+  aircraftModel: null, origIata: null, destIata: null, orig: null, dest: null,
   schedDepEpoch: null, schedArrEpoch: null,
-  lastLat: null, lastLon: null, lastPosAtMs: null, ...over,
+  lastLat: null, lastLon: null, lastPosAtMs: null,
+  lastAltFt: null, lastGroundspeedKt: null, lastHeadingDeg: null, lastVerticalRateFpm: null,
+  ...over,
 });
 
 function memStore(initial: TrackedEntry[]): TrackedStorage & { current: TrackedEntry[] } {
