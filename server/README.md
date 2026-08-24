@@ -99,8 +99,9 @@ never starts and the routes 404, so the feature is inert rather than broken.
 Basic -- Basic returns 200 with real data while being served from the anonymous
 400/day tier instead of the authenticated 4000/day one, a tenfold error that
 produces no error. A single-`icao24` query costs FOUR credits, so the real budget
-is ~1000 queries/day. The 120s tick is sized for four concurrent eight-hour
-flights (960 queries). Raise the interval before tracking more than that; see
+is ~1000 queries/day. The 300s tick is sized so roughly ten concurrent
+eight-hour flights (960 queries) fit -- i.e. the 20-entry cap binds before the
+OpenSky budget does. Raise the interval before tracking more than that; see
 `docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md`.
 
 ## Docker
