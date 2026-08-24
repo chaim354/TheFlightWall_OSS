@@ -172,7 +172,9 @@
     <div class="row">
       <div><label>Brightness (0–255)</label><input id="brightness" type="number" min="0" max="255" /></div>
       <div><label>Text color</label><input id="textColor" type="color" /></div>
+      <div><label>Seconds per flight</label><input id="cycleSeconds" type="number" min="1" /></div>
     </div>
+    <small class="help">Seconds per flight is how long each card holds the panel before the carousel moves on. How many flights it cycles through is <b>Max flights</b>, under Advanced.</small>
     <div class="row">
       <div><label>When no flights</label>
         <select id="noFlightsMode">
@@ -238,10 +240,9 @@
     <div class="sec">Flight list</div>
     <div class="row">
       <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
-      <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
       <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
     </div>
-    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit.</small>
+    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit. Seconds per flight now lives under Display.</small>
 
     <div class="sec">Light sensor (auto-off in the dark)</div>
     <span class="check" style="margin-top:0"><input type="checkbox" id="lightSensorEnabled"><label>Enable ambient light sensor</label></span>
