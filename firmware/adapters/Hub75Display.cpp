@@ -9,6 +9,7 @@ Responsibilities:
 Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
 */
 #include "adapters/Hub75Display.h"
+#include "utils/MetricRow.h"
 
 #include <Adafruit_GFX.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
@@ -726,58 +727,51 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
         }
         return r;
     };
-    // ETA takes the trailing slot on row 2 ahead of the flight-number/Vr
-    // choice below, INSTEAD of appending as a third item -- Trk plus a
-    // typical 7-8 char ADS-B callsign already uses 18-19 of botCols'
-    // 21 columns at 128px, so adding "ETA:~1h05" (9 chars) alongside both
-    // would overflow by a wide margin in the ordinary case, not just a
-    // pathological one. Worst realistic case with the mutually-exclusive
-    // choice below, botCols=21 at 128px:
-    //   unit=true:  "Trk:230deg"(10) + " " + "ETA:LANDING"(11) = 22 -- over by 1,
-    //               falls through to the unit=false rebuild below
-    //   unit=false: "Trk:230"(7)     + " " + "ETA:LANDING"(11) = 19 -- fits
-    // "LANDING" is eta_text's longest realistic value (formatEta() also
-    // emits "~Nm" <=4 chars and "~HhMM" <=6 chars for any plausible flight
-    // time); eta_text has no unit suffix to drop, so unit only affects Trk's
-    // "deg" here, same as it always did. eta_text is empty for every
-    // OpenSky/adsb.lol flight and any server flight with no destination, so
-    // this preempts the flight number only for server-sourced flights that
-    // resolved a route -- exactly the flights for which "when does it land"
-    // is the more useful of the two.
+    // Row 2 is filled from an ORDERED candidate list against the column
+    // budget, not from a chain of mutually-exclusive branches.
     //
-    // This mutual-exclusion trick works for THREE candidates (ETA, flight
-    // number, Vr) sharing one slot; the arithmetic above is hand-verified
-    // for exactly that shape. A fourth candidate wanting this row is the
-    // moment to stop extending this if/else-if chain and instead fill the
-    // row from an ordered (label, value, priority) list against the column
-    // budget -- the same "reconsider the structure, not another conditional"
-    // point FlightDataFetcher.cpp's fetchFlights() notes for its own dispatch.
+    // It used to be a chain: Trk, then exactly ONE of ETA / flight number / Vr.
+    // The width reasoning behind that was sound -- "Trk:230deg"(10) plus
+    // "ETA:LANDING"(11) is 22 against botCols' 21 at 128px, so all three really
+    // cannot share the row -- but the cost was that a card showing "lands in
+    // 7h10" could never also say WHICH flight lands then, and that is the pair
+    // a viewer most wants together. The old comment here anticipated this and
+    // named the fix; joinWithinColumns() is it.
+    //
+    // Order below IS priority. ETA and the flight number lead because they
+    // answer "what is this and when does it get there"; heading and vertical
+    // rate are ambient detail that can be dropped when the row is tight. At
+    // 128px the leading pair costs at most "ETA:LANDING"(11) + " " +
+    // "SWA1234"(7) = 19 of 21, so Trk correctly gives way -- while a wider
+    // panel has room for it and will show it.
+    //
+    // A candidate that does not fit is skipped rather than truncated, and
+    // skipping it does not block a shorter later one, so Trk giving way to
+    // "Vr:0" is expected behaviour.
     auto buildRow2 = [&](bool unit)
     {
-        String r;
+        std::vector<String> cands;
+        if (L.showEta && f.eta_text.length())
+            cands.push_back("ETA:" + f.eta_text);
+        if (L.flightNumberOverVr)
+        {
+            const String flt = f.ident.length() ? f.ident : f.ident_icao;
+            if (flt.length())
+                cands.push_back(flt);
+        }
         if (L.showHeading)
         {
-            String t = miniTrk(f.heading_deg, unit);
+            const String t = miniTrk(f.heading_deg, unit);
             if (t.length())
-                r = "Trk:" + t;
+                cands.push_back("Trk:" + t);
         }
-        if (L.showEta && f.eta_text.length())
+        if (L.showVerticalRate)
         {
-            r += (r.length() ? " " : "") + String("ETA:") + f.eta_text;
-        }
-        else if (L.flightNumberOverVr)
-        {
-            String flt = f.ident.length() ? f.ident : f.ident_icao;
-            if (flt.length())
-                r += (r.length() ? " " : "") + flt;
-        }
-        else if (L.showVerticalRate)
-        {
-            String v = miniVr(f.vertical_rate_fpm, unit);
+            const String v = miniVr(f.vertical_rate_fpm, unit);
             if (v.length())
-                r += (r.length() ? " " : "") + String("Vr:") + v;
+                cands.push_back("Vr:" + v);
         }
-        return r;
+        return joinWithinColumns(cands, botCols);
     };
 
     String row1 = buildRow1(true);
