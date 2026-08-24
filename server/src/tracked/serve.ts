@@ -1,8 +1,22 @@
 import { deadReckonAt } from './deadReckon';
 import type { TrackedEntry } from './types';
 
-/** A fix older than this is not worth serving as current. */
-const FIX_FRESH_MS = 5 * 60_000;
+/**
+ * How long a fix stays servable as "live".
+ *
+ * MUST EXCEED the poll interval in server.ts (`TRACKED_TICK_MS`, currently
+ * 300s) with margin, and the two are coupled even though they live in
+ * different files. When they were equal, a fix reached this boundary exactly as
+ * the next poll was due, so any late tick or single failed poll relabelled a
+ * perfectly good position as an estimate and the card oscillated between the
+ * two while nothing was actually wrong.
+ *
+ * 11 minutes is a little over TWO polls: one miss is a timing wobble and the
+ * last fix is still the best thing we know, while two consecutive misses are a
+ * real loss of ADS-B coverage -- which is precisely when "we are projecting"
+ * becomes the honest answer. If you change TRACKED_TICK_MS, change this too.
+ */
+const FIX_FRESH_MS = 11 * 60_000;
 
 export interface TrackedCard {
   cs: string;
