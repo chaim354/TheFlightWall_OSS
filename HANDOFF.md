@@ -253,6 +253,74 @@ Two traps that made this look dead:
   rebooted the device rather than attaching to it, and you are reading a boot burst,
   not steady state. This also makes a DTR A/B look decisive when it is not.
 
+### ⚠️ The biggest open item is in §5, not here
+
+**131 trademarked logo tiles are committed and public.** Commit `22cb724`
+(2026-07-20) added exactly the 131 files §5's policy says must never be
+committed, and it is an ancestor of `origin/main` on the public fork -- so they
+have been published since July. Undoing it means rewriting already-pushed
+history across at least three remote branches, or making the fork private, or
+deciding the exposure is acceptable. All three are the maintainer's call and
+none should be done by an agent unprompted. Full detail and the corroborating
+counts are in §5.
+
+### Tracked flights — open items (2026-08-24)
+
+**`/v1/tracked` IS PUBLICLY WRITABLE.** Deliberate, not an oversight -- the
+maintainer chose to ship it unauthenticated for now, and this records that as a
+decision. `flightwall.tinkerex.com` is public, so anyone who finds the URL can add
+entries (spending metered AeroDataBox and OpenSky quota) and read which flights,
+and so which people, are being followed. FOUR guards bound the damage and are
+load-bearing rather than defensive polish -- do not relax any of them without
+adding auth first:
+
+- at most 20 stored entries
+- dates restricted to today-1 .. today+14
+- at most 50 AeroDataBox resolutions/day for this feature
+- automatic expiry (2h after landing, 24h after an unresolved miss)
+
+Adding a shared-secret header is a one-line middleware over `routes.ts`; the
+guards stay useful either way and the seam was left clean on purpose.
+
+**Two paths are still verified only by unit tests.** Everything up to and
+including a live OpenSky fix was confirmed in production against a real
+transatlantic flight (DL182, JFK->FCO). NOT confirmed on hardware:
+
+- **Dead-reckoning across an ADS-B coverage gap.** Community ADS-B has large
+  oceanic holes, so a transatlantic flight should switch to an estimated
+  position mid-crossing and the panel marker should render HOLLOW instead of
+  filled. The test flight was deleted while still over land. Track a transatlantic
+  departure and leave it running to exercise this.
+- **The heading fallback.** Heading shows only on a card with NO ETA; every
+  flight overhead during testing resolved a route, so it never triggered. GA and
+  N-number traffic typically lack ETAs and should surface it.
+
+**The OpenSky secret is the only plaintext credential in `.kamal/secrets`.** The
+other four resolve through 1Password (`$(op ...)`); `OPENSKY_CLIENT_ID` and
+`OPENSKY_CLIENT_SECRET` are literals. The file is gitignored and untracked, so
+this is not an exposure, but it breaks the convention -- move them into op when
+convenient. Note the original `credentials (1).json` may still be in
+`~/Downloads`.
+
+**No schema migration for stored entries.** A `TrackedEntry` written before a
+field existed simply lacks it, and nothing backfills. This bit once already:
+entries resolved before `aircraftModel` was added served a card with no aircraft
+type until they were deleted and re-added, because that field is only ever set at
+resolve time. Harmless while the store holds at most 20 short-lived entries --
+delete and re-add is the fix -- but do not assume an old entry has new fields.
+
+**Latent, not currently broken:** `normaliseNumber` in
+`src/tracked/routes.ts` uses `^[A-Z0-9]{2,3}\d{1,4}$`, whose `{2,3}` is greedy --
+on "BA181" it consumes "BA1" and leaves "81". That is harmless there because the
+function never uses the captured split, only whether a letter is present. The
+SAME shape in the card builder DID break airline lookup and was fixed by taking
+the trailing digit run first. If anyone refactors `normaliseNumber` to use its
+groups, this is waiting.
+
+**The pin marker does not cover `displayTextOnlyCard`.** That layout (panels
+under 16px tall) never calls `drawLogoOrBadge`, where the marker lives. Not a
+gap for the 128x64 wall device, which takes the `displayMiniCard` branch.
+
 ---
 
 ## 4. This session's commits (newest first)
