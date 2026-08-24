@@ -371,12 +371,25 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
     ? setInterval(() => void runPanynj(), config.panynjIntervalMs)
     : undefined;
 
-  // 120s, not 60s. MEASURED: a single-icao24 query costs FOUR credits against
-  // an authenticated allowance of 4000/day, so the real budget is 1000 queries
-  // a day -- and 60s would spend 1920 of them on four concurrent eight-hour
-  // flights. At 120s the same four cost 960 and fit. See
-  // docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md.
-  const TRACKED_TICK_MS = 120_000;
+  // 300s. MEASURED: a single-icao24 query costs FOUR credits against an
+  // authenticated allowance of 4000/day, so the real budget is 1000 queries a
+  // day. At 300s an eight-hour flight costs 96 of them, so roughly TEN can be
+  // tracked concurrently (960) -- comfortably more than the 20-entry cap would
+  // ever have airborne at once. The earlier 60s and 120s values supported two
+  // and four respectively; 300s is what makes the entry cap, rather than the
+  // OpenSky budget, the binding constraint, which is the right way round.
+  //
+  // The cost is position freshness: at ~500kt an aircraft moves ~40nm between
+  // polls. That is immaterial here because the panel renders a CARD -- ident,
+  // route, ETA -- not a moving map, and the schedule fields that drive the card
+  // do not change between polls at all. Revisit only if this ever feeds
+  // something positional.
+  //
+  // Note this interval also paces RESOLUTION, so a newly added entry waits up
+  // to 5 minutes before its aircraft is looked up. Acceptable: entries are
+  // added hours ahead of departure, not seconds.
+  // See docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md.
+  const TRACKED_TICK_MS = 300_000;
   let resolvesUsedToday = 0;
   let resolveDay = new Date().getUTCDate();
 

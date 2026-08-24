@@ -118,10 +118,17 @@ budget is therefore **1,000 queries/day, not 4,000**:
 concurrent_flights x airborne_hours x 3600 / cadence_seconds  <=  1000
 ```
 
-| Cadence | 1 flight x 8h | 2 x 8h | 4 x 8h |
+| Cadence | 1 flight x 8h | 4 x 8h | 10 x 8h |
 |---|---|---|---|
-| 60s (the plan's original) | 480 | 960 | 1920 **over** |
-| **120s (adopted)** | 240 | 480 | **960 fits** |
+| 60s (the plan's original) | 480 | 1920 **over** | -- |
+| 120s (first correction) | 240 | 960 | 2400 **over** |
+| **300s (adopted 2026-08-24)** | **96** | **384** | **960 fits** |
+
+Settled at **300s**. It is what makes the 20-entry cap, rather than the OpenSky
+budget, the binding constraint -- which is the right way round, since the cap is
+a deliberate policy and the budget is an accident of pricing. The cost is
+position freshness (~40nm of travel between polls at 500kt), which is immaterial
+while the panel renders a card rather than a moving map.
 
 So the spec's claim of "4-6 concurrent long-hauls" at 60s was wrong on two
 counts at once -- the tier was 10x smaller than assumed AND each query costs 4x
