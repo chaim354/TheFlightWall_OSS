@@ -282,6 +282,15 @@ adding auth first:
 Adding a shared-secret header is a one-line middleware over `routes.ts`; the
 guards stay useful either way and the seam was left clean on purpose.
 
+**As of 2026-08-24 that surface includes a PAGE, at `GET /`** (`src/tracked/page.ts`,
+served by `server.ts`). It is a browser UI for the same three routes -- add, list,
+remove -- and it is unauthenticated for the same reason they are. It grants no
+capability a `curl` did not already have, but it does mean the root of a public
+server now advertises the feature to anyone who loads it, where previously they
+had to know the endpoint existed. If auth is ever added, the page needs it in the
+same change, not after: an authenticated API behind an open page is the worst of
+both, since the page would simply fail in the browser with no way to sign in.
+
 **Two paths are still verified only by unit tests.** Everything up to and
 including a live OpenSky fix was confirmed in production against a real
 transatlantic flight (DL182, JFK->FCO). NOT confirmed on hardware:

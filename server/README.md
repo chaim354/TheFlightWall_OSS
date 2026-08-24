@@ -77,13 +77,23 @@ panel whose night schedule ends at 07:00 -- change both together.
 
 ### Tracked flights
 
-`POST /v1/tracked` with `{"number":"BA181","date":"2026-09-14"}` adds one
-journey. `GET /v1/tracked` lists them; `DELETE /v1/tracked/{id}` removes one.
-The flight is resolved to its aircraft via AeroDataBox, then followed live via
-OpenSky and pinned to the top of the panel until it lands.
+**`GET /` is the page for this.** Open the server in a browser: it lists what is
+being watched -- state, route, aircraft, and whether the wall is drawing a live
+fix or a dead-reckoned estimate right now -- with a form to add a flight and a
+button to remove one. It is one self-contained HTML string bundled into
+`dist/server.js` (`src/tracked/page.ts`), because the runtime image ships no
+other files. On a server with no OpenSky credentials the page still loads and
+says which two environment variables are missing, rather than 404ing.
 
-**This endpoint is UNAUTHENTICATED by deliberate choice.** Anyone who knows the
-URL can add entries and read which flights are being followed. Four guards bound
+Underneath, `POST /v1/tracked` with `{"number":"BA181","date":"2026-09-14"}`
+adds one journey. `GET /v1/tracked` lists them; `DELETE /v1/tracked/{id}`
+removes one. The flight is resolved to its aircraft via AeroDataBox, then
+followed live via OpenSky and pinned to the top of the panel until it lands.
+
+**This endpoint is UNAUTHENTICATED by deliberate choice, and so is the page.**
+Anyone who knows the URL can add entries and read which flights are being
+followed. Serving the page adds discoverability, not capability -- it can do
+nothing a `curl` could not already do. Four guards bound
 what that costs, and they are load-bearing rather than cosmetic -- do not relax
 any of them without adding auth first:
 

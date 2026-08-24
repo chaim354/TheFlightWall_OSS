@@ -19,7 +19,7 @@ import type { TrackedEntry } from './types';
  * real loss of ADS-B coverage -- which is precisely when "we are projecting"
  * becomes the honest answer. If you change TRACKED_TICK_MS, change this too.
  */
-const FIX_FRESH_MS = 11 * 60_000;
+export const FIX_FRESH_MS = 11 * 60_000;
 
 /**
  * A pinned card, alongside an ordinary area card (see src/types.ts's Flight,
