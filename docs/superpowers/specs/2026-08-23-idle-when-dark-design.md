@@ -70,7 +70,11 @@ silent failure.
 The decision is pure over `(effectiveBrightness, wasSuppressed, lastGoodFetchMs,
 nowMs, staleWindowMs)`. Extract to a header-only helper beside
 `utils/FetchCadence.h`, with host tests: stays suppressed while dark, forces a
-fetch on wake, clears only when genuinely stale, does not touch failure counters.
+fetch on wake, and clears only when genuinely stale.
+
+The "must not touch the backoff counters" constraint cannot be covered there --
+the helper is pure and has no access to them, so only the wiring can violate it.
+That is verified by inspection at the call site instead.
 
 ## Server
 
