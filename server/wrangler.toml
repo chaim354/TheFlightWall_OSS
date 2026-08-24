@@ -2,8 +2,38 @@ name = "flightwall-server"
 main = "src/index.ts"
 compatibility_date = "2026-08-20"
 
-# Schedule refresh. Route data is stable day-to-day (measured 94-100%), so this
-# is about picking up the next day's board, not about freshness within a pass.
+# Schedule refresh, six-hourly.
+#
+# READ src/server.ts's TWO_HOURS_MS comment before changing this. That rationale
+# supersedes the one this block used to carry ("about picking up the next day's
+# board, not about freshness within a pass"): the +/-6h window is spent by the
+# end of each six-hourly cycle, route fill decayed measurably across every one,
+# and late-populated rows were missed entirely. The Node deployment moved to two
+# hours in 1ce76ac for that reason; this file was not in that commit and kept
+# both the old cadence and the refuted explanation.
+#
+# LEFT AT SIX HOURS DELIBERATELY, not by oversight. If this Worker and the Node
+# deployment share one AeroDataBox key, the combined spend is 3,120 of the
+# 6,000-unit monthly tier (4 boards x 2 units x [4/day here + 9/day there] x
+# 30) -- while server.ts computes its budget believing it is the only refresher
+# at 2,160. Matching it at two hours would put the pair at 5,040, leaving under
+# 1,000 units of margin for a retry storm. So the asymmetry is the affordable
+# option, not the tidy one.
+#
+# The 9/day is the Node side AFTER quiet hours (REFRESH_QUIET_HOURS, default
+# 00:00-06:00). This Worker has NO equivalent gate: its cron is UTC, so
+# 00:00 UTC lands at 20:00 and 06:00 UTC at 02:00 America/New_York -- one of
+# the four daily ticks fires squarely inside the Node deployment's quiet
+# window. That is deliberate (this Worker serves whatever devices point at it,
+# on no known schedule), but it means quiet hours do NOT make the pair cheaper
+# by a full quarter.
+#
+# If the two deployments use DIFFERENT keys the constraint disappears and this
+# can move to two hours; check whether monthly units track ~3,120 or ~2,160.
+#
+# Deleting [triggers] entirely is NOT a cleanup: this Worker's KV table would
+# then never refresh and /v1/flights would permanently serve routeless flights
+# to any device still pointed at it.
 [triggers]
 crons = ["0 */6 * * *"]
 

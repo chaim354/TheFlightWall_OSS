@@ -30,6 +30,16 @@ void SerialConsole::begin()
     Serial.println("FlightWall serial console ready. Type 'help' for commands.");
 }
 
+bool SerialConsole::consumeSettingsChanged()
+{
+    if (_settingsChanged)
+    {
+        _settingsChanged = false;
+        return true;
+    }
+    return false;
+}
+
 // `light` / `light watch`. Prints the reading in the SELECTED SENSOR'S units and
 // spells out the hysteresis arithmetic, because the threshold's meaning changes with
 // the sensor type (raw ADC 0-4095 / lux / raw Clear) and no single default can suit
@@ -73,6 +83,13 @@ void SerialConsole::printLight(bool oneShot)
         Serial.printf("[light] %d  %s   (dark<%u, lit>%u)\n", lvl, _light->isDark() ? "DARK" : "lit", thr, lit);
 }
 
+// Longest accepted input line. Raising it would not make large `set` payloads
+// reliable on its own: Serial.begin() runs without setRxBufferSize(), and loop()
+// can block for seconds during a fetch, so a long pasted line overflows the UART
+// FIFO regardless. That is a main.cpp change; this only stops the truncation
+// from being SILENT.
+static const size_t kMaxLineChars = 512;
+
 void SerialConsole::poll()
 {
     if (_watchLight && millis() - _lastWatchMs >= 1000)
@@ -86,15 +103,33 @@ void SerialConsole::poll()
         char c = (char)Serial.read();
         if (c == '\n' || c == '\r')
         {
-            if (_buf.length() > 0)
+            if (_bufOverflow)
+            {
+                // Do NOT parse a truncated line. `get` emits ~1.2-1.4kB (70 keys
+                // of names alone is ~795 chars before any values), so the
+                // documented get -> edit -> set round-trip produced a document
+                // this cap silently cut in half -- and `set` then reported
+                // "Invalid JSON." on JSON that was perfectly valid when sent.
+                // Two bytes of state turn a wrong answer into a correct one.
+                Serial.printf("Input too long (>%u chars) and was discarded. "
+                              "Send a smaller `set` -- fromJson merges, so one section at a time works.\n",
+                              (unsigned)kMaxLineChars);
+                _bufOverflow = false;
+                _buf = "";
+            }
+            else if (_buf.length() > 0)
             {
                 handleLine(_buf);
                 _buf = "";
             }
         }
-        else if (_buf.length() < 512)
+        else if (_buf.length() < kMaxLineChars)
         {
             _buf += c;
+        }
+        else
+        {
+            _bufOverflow = true;
         }
     }
 }
@@ -186,6 +221,7 @@ void SerialConsole::handleLine(String line)
         g_settings.wifiSsid = ssid;
         g_settings.wifiPassword = pw; // may be empty for open networks
         g_settings.save();
+        _settingsChanged = true;
         Serial.print(F("WiFi saved (ssid='"));
         Serial.print(ssid);
         Serial.println(F("'). Type 'restart' to connect."));
@@ -202,6 +238,7 @@ void SerialConsole::handleLine(String line)
         g_settings.openSkyClientId = id;
         g_settings.openSkyClientSecret = secret;
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("OpenSky credentials saved."));
     }
     else if (cmd == "aeroapi")
@@ -213,6 +250,7 @@ void SerialConsole::handleLine(String line)
         }
         g_settings.aeroApiKey = args;
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("AeroAPI key saved."));
     }
     else if (cmd == "enrich")
@@ -230,6 +268,7 @@ void SerialConsole::handleLine(String line)
             return;
         }
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Enrichment source saved."));
     }
     else if (cmd == "mode")
@@ -245,6 +284,7 @@ void SerialConsole::handleLine(String line)
             return;
         }
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Mode saved."));
     }
     else if (cmd == "loc")
@@ -263,6 +303,7 @@ void SerialConsole::handleLine(String line)
         g_settings.centerLon = lonS.toDouble();
         g_settings.radiusKm = radS.toDouble();
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Location saved."));
     }
     else if (cmd == "get")
@@ -279,6 +320,7 @@ void SerialConsole::handleLine(String line)
         if (g_settings.fromJson(args))
         {
             g_settings.save();
+            _settingsChanged = true;
             Serial.println(F("Settings applied + saved."));
         }
         else
@@ -314,10 +356,16 @@ void SerialConsole::handleLine(String line)
     {
         g_settings.seedDefaults();
         g_settings.save();
+        _settingsChanged = true;
         Serial.println(F("Settings reset to defaults. Type 'restart'."));
     }
     else if (cmd == "restart")
     {
+        // A button-driven change may still be inside main.cpp's 10s coalescing
+        // window; Settings knows whether one is owed even though this file
+        // cannot see that timer.
+        if (g_settings.dirty())
+            g_settings.save();
         Serial.println(F("Restarting..."));
         delay(150);
         ESP.restart();

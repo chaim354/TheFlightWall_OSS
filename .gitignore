@@ -17,3 +17,7 @@ server/node_modules
 # wrangler's local cache -- holds the Cloudflare account id. Left over from
 # the deleted Worker; ignored so it cannot be swept into a commit.
 .wrangler
+
+# Python bytecode (tools/ + their host tests)
+__pycache__/
+*.pyc

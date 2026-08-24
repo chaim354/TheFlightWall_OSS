@@ -1,5 +1,9 @@
 # ESP32 → ESP32-S3-DevKitC-1 N16R8 Migration
 
+> **Dated record, not living documentation.** Accurate as of 2026-08; later
+> changes are deliberately NOT backported. Correcting it to match current
+> reality would falsify the record. Supersede it with a newer document instead.
+
 Staged plan to move FlightWall OSS from the plain ESP32 (`esp32dev`) to an
 **ESP32-S3-DevKitC-1 N16R8** (16 MB flash + 8 MB octal PSRAM). The build env
 `[env:esp32s3]` is already in `platformio.ini`. Nothing here is wired to

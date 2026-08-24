@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { callsignKey, candidateCarriers, matchSchedule } from '../src/join';
 import type { ScheduleRow } from '../src/types';
+import { getAirportCoord } from '../src/schedule/airports';
 
 // Default row: CVG -> LGA. Both ends carry coordinates, because corridor
 // deviation needs two points -- a row missing either end is rejected outright.
@@ -12,11 +13,16 @@ import type { ScheduleRow } from '../src/types';
  */
 const NOW = 1_787_000_000;
 
+// Ask the table production asks, rather than restating its output -- see
+// test/enrich.test.ts for why (F-SRV16-A).
+const CVG = getAirportCoord('KCVG')!;
+const LGA = getAirportCoord('KLGA')!;
+
 const row = (over: Partial<ScheduleRow>): ScheduleRow => ({
   carrierIata: 'DL', number: '5075', callsign: null,
   origIata: 'CVG', destIata: 'LGA',
-  origLat: 39.0488, origLon: -84.6678,
-  destLat: 40.7769, destLon: -73.8740,
+  origLat: CVG.lat, origLon: CVG.lon,
+  destLat: LGA.lat, destLon: LGA.lon,
   schedArrEpoch: null,
   revArrEpoch: null,
   ...over,

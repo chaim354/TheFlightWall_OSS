@@ -201,6 +201,49 @@ int main() {
         CHECK(cycleHits(8, 8, 3) == 24); // sized to the working set: every access hits
     }
 
+    // put() hands back the slot it stored into.
+    //
+    // Hub75Display wanted to build a ~2KB tile inside the cache rather than
+    // construct it outside and copy it in, and with a void put() taking const&
+    // the only way was put(key, V{}) followed by find(key). That inserts a
+    // TRANSIENT value first -- for LogoTile, an empty shell is exactly the
+    // w==0 "known missing" negative-cache sentinel -- and then asserts the
+    // find cannot fail. It can: see the zero-capacity case below.
+    {
+        LruCache<std::string, std::vector<int>> c(2);
+        std::vector<int> *slot = c.put("a", std::vector<int>{1, 2, 3});
+        CHECK(slot != nullptr);
+        CHECK(slot->size() == 3);
+        slot->push_back(4);                       // build in place
+        CHECK(c.find("a") != nullptr);
+        CHECK(c.find("a")->size() == 4);          // wrote through to the stored value
+    }
+
+    // Updating an existing key returns the slot too, and it is the same one.
+    {
+        LruCache<std::string, int> c(2);
+        int *first = c.put("a", 1);
+        int *again = c.put("a", 2);
+        CHECK(first == again);                    // updated in place, not re-inserted
+        CHECK(*again == 2);
+        CHECK(c.size() == 1);
+    }
+
+    // A zero-capacity cache stores nothing, and put() SAYS so instead of
+    // leaving the caller to dereference a slot that was evicted on the way in.
+    // Reachable: setCapacity(0) is legal and Hub75Display sizes its logo cache
+    // from a runtime setting.
+    {
+        LruCache<std::string, int> c(0);
+        CHECK(c.put("a", 1) == nullptr);
+        CHECK(c.size() == 0);
+        LruCache<std::string, int> d(2);
+        d.put("a", 1);
+        d.setCapacity(0);
+        CHECK(d.size() == 0);
+        CHECK(d.put("b", 2) == nullptr);
+    }
+
     if (failures == 0) { printf("ALL PASS\n"); return 0; }
     printf("%d FAILURES\n", failures);
     return 1;

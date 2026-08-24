@@ -11,8 +11,7 @@ class GFXcanvas16;
 // Drives a HUB75 RGB LED matrix via ESP32-HUB75-MatrixPanel-I2S-DMA.
 //
 // Every frame is composed into an in-RAM GFXcanvas16 (RGB565), then blitted to
-// the panel. That same canvas buffer is exposed via framebuffer() so the web UI
-// can render a live preview of exactly what's on the wall.
+// the panel in one pass, so a partially-drawn card is never visible.
 class Hub75Display : public BaseDisplay
 {
 public:
@@ -44,7 +43,6 @@ public:
     void showToast(const String &text, unsigned long durationMs = 2000);
 
     void setBrightness(uint8_t brightness);
-    const uint16_t *framebuffer(uint16_t &w, uint16_t &h) const override;
 
 private:
     MatrixPanel_I2S_DMA *_panel = nullptr;
@@ -124,9 +122,32 @@ private:
     void displayStackedCard(const FlightInfo &f);    // square/tall panels: logo top, text below
     void displayTextOnlyCard(const FlightInfo &f);   // very short panels: bordered text
     void displayLoadingScreen();
-    void displayNoFlights();                                 // dispatches by g_settings.layout.noFlightsMode
+    // ONE decode of layout.noFlightsMode, used by both the dispatcher and the
+    // recompose key.
+    //
+    // They used to decode it independently, each re-deriving which sub-screen
+    // clockfact is currently showing from its own millis() read, and each
+    // resolving "clock wanted but time not synced" its own way -- so in plain
+    // clock mode before NTP the key advanced every rotate interval while the
+    // screen stayed on static dots, recomposing for a picture that never
+    // changed. Deciding once removes the possibility of the two disagreeing.
+    struct NoFlightsFrame
+    {
+        enum class Screen
+        {
+            Dots,
+            Clock,
+            Fact
+        };
+        Screen screen = Screen::Dots;
+        long key = -1;      // -1 = static, never needs recomposing
+        size_t factIdx = 0; // valid only when screen == Fact
+    };
+    NoFlightsFrame noFlightsFrame() const;
+
+    void displayNoFlights();                                 // dispatches by noFlightsFrame()
     void drawClockScreen();                                  // large HH:MM + date line
-    void drawFunFactScreen();                                // rotating word-wrapped fun fact
+    void drawFunFactScreen(size_t factIdx);                  // word-wrapped fun fact
     long noFlightsFrameKey();                                // recompose key for the active animated mode
     uint16_t textColor();
 

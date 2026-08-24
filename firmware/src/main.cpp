@@ -44,6 +44,8 @@ Run loop:
 #include "adapters/Hub75Display.h"
 #include "adapters/LightSensor.h"
 #include "adapters/Buttons.h"
+#include "utils/FetchCadence.h"
+#include "utils/IdleWhenDark.h"
 #include "utils/BrightnessLadder.h"
 #include "adapters/GeoLocator.h"
 
@@ -74,6 +76,14 @@ static unsigned long g_lastLightMs = 0;
 static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
 static bool g_apMode = false;
 static unsigned long g_wifiDownSinceMs = 0; // for the runtime reconnect/AP-fallback watchdog
+// When the setup AP started, for the bounded-retry watchdog below. Zero means
+// "not counting" -- either we are not in AP mode, or there are no credentials to
+// retry with and the AP must stay up indefinitely.
+static unsigned long g_apSinceMs = 0;
+// How long the setup AP may hold a device that HAS credentials before rebooting
+// to retry STA. Long enough to finish provisioning by hand, short enough that a
+// router that came up late does not strand the panel for the evening.
+static const unsigned long kApRetryAfterMs = 10UL * 60UL * 1000UL;
 static unsigned long g_lastFetchMs = 0;
 static unsigned long g_lastRenderMs = 0;
 static bool g_firstFetchDone = false;
@@ -81,6 +91,9 @@ static int g_appliedBrightness = -1;
 static std::vector<FlightInfo> g_lastFlights;
 static uint8_t g_consecutiveFailures = 0;      // drives the fetch backoff
 static unsigned long g_lastGoodFetchMs = 0;    // for the stale-data cutoff
+// Whether the previous loop pass suppressed fetching because the panel was dark.
+// Only used to detect the WAKE edge; see utils/IdleWhenDark.h.
+static bool g_fetchSuppressed = false;
 static uint8_t g_consecutiveEmpty = 0;         // successful fetches that returned nothing
 
 // How many consecutive empty-but-successful fetches to see before believing the sky
@@ -91,7 +104,6 @@ static uint8_t g_consecutiveEmpty = 0;         // successful fetches that return
 // disabled) a throttled source flips the wall between flights and noFlightsMode every
 // cycle. Deliberately NOT routed through g_consecutiveFailures: that would back the
 // poll interval out to 5 minutes over a quiet sky and delay the first real arrival.
-static const uint8_t kEmptyConfirmCycles = 2;
 
 static const char *kSetupApSsid = "FlightWall-Setup";
 
@@ -308,6 +320,40 @@ static void applyBrightness()
 static void markSettingsDirty()
 {
     g_settingsDirtyMs = millis();
+    g_settings.markDirty();
+}
+
+// Settle any pending button-driven write NOW. Called on the debounce and before
+// every reboot: both restart paths used to drop it, so pressing the mode button
+// and hitting Restart within ten seconds reverted the change. (A watchdog panic
+// still drops it -- that is inherent to deferring, and out of scope.)
+static void flushSettingsIfDirty()
+{
+    if (!g_settings.dirty())
+        return;
+    g_settingsDirtyMs = 0;
+    g_settings.save();
+}
+
+// 6x the configured interval: the single definition of "too old to show".
+static unsigned long staleWindowMs()
+{
+    return (unsigned long)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
+}
+
+// Drop what's on screen. NOTE this lands on the NO-FLIGHTS card (displayFlights
+// with an empty vector takes Hub75Display's SIZE_MAX branch to displayNoFlights:
+// dots, clock, fun fact), not the loading card -- so for as long as it is up it
+// asserts "the sky is empty" rather than "we don't know yet". Tolerable on both
+// callers because neither leaves it up long: the failure path only reaches here
+// after a >3-minute streak, and the wake path forces a fetch on the same pass.
+static void clearStaleFlights(const char *why)
+{
+    Serial.println(why);
+    g_lastFlights.clear();
+    g_display.markFlightsUpdated();
+    g_display.displayFlights(g_lastFlights);
+    g_web.setServerStale(false); // nothing left on screen to BE stale
 }
 
 static void setManualBrightness(uint8_t v)
@@ -377,32 +423,24 @@ static void logHeap(const char *tag)
 static void doFetchAndRender()
 {
     logHeap("cycle-start");
-    std::vector<StateVector> states;
     std::vector<FlightInfo> flights;
     bool ok = false;
-    size_t enriched = g_fetcher->fetchFlights(states, flights, ok);
+    size_t enriched = g_fetcher->fetchFlights(flights, ok);
     if (!ok)
     {
         if (g_consecutiveFailures < 255)
             g_consecutiveFailures++;
         Serial.printf("Fetch FAILED (%u consecutive) — keeping last flights\n", (unsigned)g_consecutiveFailures);
-        g_web.setLastFetchInfo((int)g_lastFlights.size(), "fetch failed - showing last known");
+        g_web.setLastNote("fetch failed - showing last known");
         // Deliberately NOT g_web.setServerStale(g_fetcher->lastFetchStale()) here:
         // a failed cycle's own stale flag is meaningless (fetchServerMode() only
         // sets it true on a SUCCESSFUL server response), and overwriting it would
-        // desync the pill from _lastFlightCount/_lastNote just above, which both
-        // deliberately keep describing the RETAINED g_lastFlights rather than this
-        // cycle's failed attempt. Leaving _serverStale untouched keeps it doing
+        // desync the pill from _lastNote just above, which deliberately keeps
+        // describing the RETAINED g_lastFlights rather than this cycle's failed
+        // attempt. Leaving _serverStale untouched keeps it doing
         // the same thing: still describing whichever cycle's data is on screen.
-        const unsigned long staleMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
-        if (g_lastGoodFetchMs != 0 && (millis() - g_lastGoodFetchMs) > staleMs && !g_lastFlights.empty())
-        {
-            Serial.println("Last flights are stale; clearing");
-            g_lastFlights.clear();
-            g_display.markFlightsUpdated();
-            g_display.displayFlights(g_lastFlights);
-            g_web.setServerStale(false); // nothing left on screen to BE stale
-        }
+        if (g_lastGoodFetchMs != 0 && (millis() - g_lastGoodFetchMs) > staleWindowMs() && !g_lastFlights.empty())
+            clearStaleFlights("Last flights are stale; clearing");
         g_firstFetchDone = true; // so the loop keeps its cadence/backoff rather than hot-looping
         g_lastRenderMs = millis();
         return;
@@ -433,7 +471,7 @@ static void doFetchAndRender()
         {
             Serial.printf("Empty result (%u of %u) — holding last flights\n",
                           (unsigned)g_consecutiveEmpty, (unsigned)kEmptyConfirmCycles);
-            g_web.setLastFetchInfo((int)g_lastFlights.size(), "empty result - holding last known");
+            g_web.setLastNote("empty result - holding last known");
             // Same reasoning as the !ok path above: g_lastFlights (and whatever
             // staleness applied to it) is unchanged this cycle, so _serverStale
             // is left alone rather than overwritten with this cycle's own value.
@@ -447,8 +485,12 @@ static void doFetchAndRender()
         g_consecutiveEmpty = 0;
     }
 
-    g_web.setLastFetchInfo((int)flights.size(),
-                           g_settings.mode == TrackingMode::Flights ? "flights mode" : "area mode");
+    // A FETCH OUTCOME, not an echo of `mode`. /api/status already emits `mode`
+    // live from g_settings one line above this in the payload, so echoing it
+    // here made the document contradict itself for a whole fetch interval after
+    // a mode switch -- and cost the field its only real use, which is saying
+    // what the last fetch actually did.
+    g_web.setLastNote("fetch ok");
     // Only reached when g_lastFlights is about to actually be REPLACED below --
     // the one point in this function where "this cycle's result" and "what's
     // now on screen" are the same thing, matching the precedent set by
@@ -462,6 +504,91 @@ static void doFetchAndRender()
     g_display.displayFlights(g_lastFlights);
     g_lastRenderMs = millis();
     g_firstFetchDone = true;
+}
+
+// Returns true when loop() should return early because the panel is dark.
+//
+// g_appliedBrightness is applyBrightness()'s resolved output -- base setting,
+// night schedule, ambient sensor, button ramp and the off toggle all folded in
+// -- so this covers every reason the panel is off.
+//
+// It is NOT dormant on shipped defaults, and an earlier version of this comment
+// claiming otherwise was wrong. The night schedule does default off (Settings.h:
+// schedule.enabled = false, nightBrightness = 5), but two other paths reach 0
+// without anyone touching it:
+//   - the ambient sensor: lightSensorEnabled = true and lightSensorDimInstead =
+//     false by default, so isDark() blanks the panel outright;
+//   - the off toggle: g_panelOff, reachable from button A with buttonsEnabled
+//     = true by default.
+// The sensor is the one to watch. HANDOFF records a mis-sited TCS3472 reading
+// ~24 in a lit room against a 500-count threshold, which means a sensor in the
+// wrong PLACE now halts fetching as well as blanking the panel. That is why the
+// web API keeps serving through suppression and reports lightLevel/lightDark
+// alongside the "panel dark - fetch paused" note set below: the cause has to
+// stay visible, or this is indistinguishable from a hung device.
+//
+// With the night schedule ON at nightBrightness 0, the 22:00-07:00 window is
+// 9h * 3600s / 30s-interval =
+// 1080 fetches a night rendering to nothing, each a TLS handshake on a link
+// that is measurably fragile: the HUB75 I2S clock degrades WiFi, and 8 MHz
+// with a reseated ribbon is the usable floor.
+//
+// MUST be called after applyBrightness() earlier in loop(), or it reads a
+// stale brightness on the very pass where it changes -- the wake pass.
+//
+// Deliberately never touches g_consecutiveFailures/g_consecutiveEmpty:
+// suppression is not failure, and polluting them would start the first fetch
+// after a dark night at the 300s backoff cap.
+static bool fetchSuppressedWhileDark()
+{
+    // Pass g_appliedBrightness straight through. It is an int whose -1 means
+    // "not applied yet", and decideIdle treats any negative as LIT -- do NOT
+    // clamp it to 0 here. Clamping to 0 would mark the pass suppressed, and
+    // the NEXT pass would then force a fetch AND discard the held flights,
+    // blanking the wall from a momentary sentinel. handleButtons() resolves
+    // the same sentinel the same way, to a lit value.
+    const IdleDecision idle = decideIdle(
+        g_appliedBrightness, g_fetchSuppressed,
+        (uint32_t)g_lastGoodFetchMs, (uint32_t)millis(), (uint32_t)staleWindowMs());
+
+    const bool wasSuppressed = g_fetchSuppressed;
+    // suppressFetch IS the next pass's wasSuppressed -- one bit, not two.
+    g_fetchSuppressed = idle.suppressFetch;
+
+    if (idle.discardFlights && !g_lastFlights.empty())
+    {
+        // Woke to a set older than the stale window. Clearing shows the
+        // no-flights card for the length of one fetch (see clearStaleFlights --
+        // it is not the loading card) rather than aircraft that have landed.
+        clearStaleFlights("Woke with stale flights; clearing and refetching");
+    }
+    if (idle.forceFetch)
+    {
+        // Fetch on this pass rather than waiting out the interval. Load-bearing
+        // only for a SHORT dark period: after a real night g_lastFetchMs is
+        // already hours stale, because the gate below skips the very block that
+        // updates it, so the interval has long since elapsed and this changes
+        // nothing. What it actually covers is a brief blank -- a button toggle,
+        // or the ambient reading crossing its hysteresis band -- where the held
+        // flights are still inside the stale window and nothing was discarded.
+        // It does bypass the failure/empty ladders for that one fetch. Bounded
+        // on both sides: the toggle is a deliberate press where refreshing at
+        // once is the point, and LightSensor's hysteresis band is precisely what
+        // stops the sensor flapping across the threshold.
+        g_lastFetchMs = 0;
+    }
+
+    if (idle.suppressFetch && !wasSuppressed)
+    {
+        // Edge-triggered: one line per dark period, not one per pass. A silent
+        // skip would leave /api/status reporting "fetch ok" next to flights
+        // hours stale for the whole dark stretch -- the same failure mode the
+        // server-side quiet-hours skip logs against (flights.ts/server.ts).
+        Serial.println("Panel dark; pausing fetches until it wakes");
+        g_web.setLastNote("panel dark - fetch paused");
+    }
+
+    return idle.suppressFetch;
 }
 
 // ---- Arduino entry points -------------------------------------------------
@@ -571,21 +698,31 @@ void loop()
     // a ramp touches g_settings.brightness on every rung and save() rewrites the whole
     // file, so this coalesces a hold into one write instead of ~15.
     if (g_settingsDirtyMs != 0 && millis() - g_settingsDirtyMs >= 10000)
-    {
-        g_settingsDirtyMs = 0;
-        g_settings.save();
-    }
+        flushSettingsIfDirty();
     g_web.handle();
 
     if (g_web.consumeRestartRequested())
     {
         Serial.println("Restart requested via web UI");
+        flushSettingsIfDirty();
         delay(200);
         ESP.restart();
     }
 
-    if (g_web.consumeSettingsChanged())
+    // Bitwise |, NOT ||. Both flags are one-shot and must BOTH be drained every
+    // pass: short-circuiting would leave the console's set while the web's was
+    // true, so a console change made in the same pass as a web change would be
+    // silently swallowed until the next unrelated web save.
+    if (g_web.consumeSettingsChanged() | g_console.consumeSettingsChanged())
     {
+        // Someone is actively provisioning: restart the AP retry window below.
+        // Deliberately keyed on a SETTINGS WRITE rather than on
+        // softAPgetStationNum(), because a phone that auto-rejoins a remembered
+        // open "FlightWall-Setup" holds the station count above zero forever --
+        // a guard meant to protect a setup session would have re-created the
+        // very stranding this is here to end.
+        if (g_apMode)
+            g_apSinceMs = millis();
         // Re-apply runtime-tunable settings immediately. Hardware/WiFi changes
         // take effect on next reboot.
         // Re-apply the zone: TZ lives in libc's environment, not in Settings, so a
@@ -629,6 +766,40 @@ void loop()
             else if (nowMs - g_wifiDownSinceMs > 60000UL)
             {
                 Serial.println("WiFi down >60s; restarting to re-provision");
+                flushSettingsIfDirty();
+                delay(100);
+                ESP.restart();
+            }
+        }
+    }
+    else
+    {
+        // AP MODE IS NOT ABSORBING ANY MORE.
+        //
+        // g_apMode was set once and never cleared by anything, and it gates the
+        // whole self-heal block above -- so once the device fell back to the
+        // setup AP it stayed there until a human power-cycled it. Reaching that
+        // state needs no attacker and no misconfiguration: a power cut that
+        // restores mains to the ESP32 before the router finishes booting expires
+        // the 30s STA window, and that is enough. The device then holds working
+        // credentials while broadcasting an OPEN network with a wildcard captive
+        // portal that pushes the config page at any phone which joins.
+        //
+        // Only retry when there is something to retry WITH. With no credentials
+        // stored this is genuine first-time provisioning and the AP must stay up
+        // indefinitely -- rebooting would just loop.
+        if (!g_settings.hasWifi())
+        {
+            g_apSinceMs = 0;
+        }
+        else
+        {
+            if (g_apSinceMs == 0)
+                g_apSinceMs = nowMs;
+            else if (nowMs - g_apSinceMs > kApRetryAfterMs)
+            {
+                Serial.println("Setup AP up >10min with credentials stored; restarting to retry WiFi");
+                flushSettingsIfDirty();
                 delay(100);
                 ESP.restart();
             }
@@ -642,43 +813,24 @@ void loop()
         return;
     }
 
-    unsigned long intervalMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL;
-    if (g_consecutiveFailures > 0)
+    // Skip the fetch/render cadence entirely while the panel is dark. Must run
+    // after applyBrightness() above -- see fetchSuppressedWhileDark() for why,
+    // and why a suppressed pass must never touch g_consecutiveFailures or
+    // g_consecutiveEmpty.
+    if (fetchSuppressedWhileDark())
     {
-        // Exponential backoff on consecutive failures: 2x per failure, capped at 5 min.
-        // Protects the OpenSky daily credit budget when the API or WiFi is down.
-        uint8_t shift = g_consecutiveFailures > 4 ? 4 : g_consecutiveFailures;
-        unsigned long backoff = intervalMs << shift;
-        const unsigned long kMaxBackoffMs = 300000UL;
-        intervalMs = backoff > kMaxBackoffMs ? kMaxBackoffMs : backoff;
+        delay(5);
+        return;
     }
-    else if (g_consecutiveEmpty >= kEmptyConfirmCycles)
-    {
-        // Sustained empties get their own, gentler ladder. This covers the case the
-        // branch above cannot see: a source that is rate-limiting us purely with
-        // well-formed empty replies never sets ok=false, so g_consecutiveFailures stays
-        // 0 and we would otherwise keep polling at the base rate indefinitely — which is
-        // precisely the behaviour that sustains a rate limit.
-        //
-        // Capped at 2 minutes rather than the 5 above, because unlike a failure an empty
-        // result may simply be a quiet sky, and a 5-minute hole there would delay the
-        // first real arrival for no reason. Self-correcting either way: fewer requests
-        // let the limit lapse, flights come back, the counter resets, and the interval
-        // returns to whatever the user configured without anyone touching a setting.
-        // Engages on the SECOND consecutive empty, not the third. FR24's limiting
-        // alternates rather than clustering: measured over 13 minutes at a 50% throttle
-        // rate, the longest run of consecutive empties was two, so a ladder that waited
-        // for three stayed dormant through the entire window it was written for. Biasing
-        // the shift by one means the pair that actually occurs is enough to slow us down.
-        // The cost is that two quiet cycles over a genuinely empty sky now stretch the
-        // interval too — bounded by the 2-minute cap below, and cleared by the first
-        // cycle that returns any flight.
-        const uint8_t extra = (uint8_t)(g_consecutiveEmpty - kEmptyConfirmCycles + 1);
-        const uint8_t shift = extra > 2 ? 2 : extra;
-        unsigned long backoff = intervalMs << shift;
-        const unsigned long kMaxEmptyBackoffMs = 120000UL;
-        intervalMs = backoff > kMaxEmptyBackoffMs ? kMaxEmptyBackoffMs : backoff;
-    }
+
+    // Both pressure signals, combined by max() rather than precedence -- see
+    // utils/FetchCadence.h for why that distinction is load-bearing and for the
+    // measurements behind each ladder's cap.
+    const unsigned long intervalMs = fetchIntervalMs(
+        (unsigned long)g_settings.fetchIntervalSeconds * 1000UL,
+        g_consecutiveFailures,
+        g_consecutiveEmpty);
+
     const unsigned long now = millis();
     if (!g_firstFetchDone || (now - g_lastFetchMs >= intervalMs))
     {

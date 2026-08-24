@@ -25,3 +25,9 @@ config
 .dockerignore
 .DS_Store
 *.md
+
+# Local schedule table. Gitignored but was not excluded here, so anyone who had
+# run the server locally shipped their whole data/ directory into the build
+# context -- against this file's own rule at the top, and its note about the
+# daemon possibly being remote.
+data/

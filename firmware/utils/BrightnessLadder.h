@@ -44,5 +44,8 @@ inline uint8_t brightnessDown(uint8_t current)
             return prev;
         prev = kBrightnessLadder[i];
     }
+    // Unreachable in practice -- the top rung is 255 and `current` is a uint8_t,
+    // so the comparison above always succeeds on some rung. Kept because the
+    // compiler cannot see that and would warn about a missing return.
     return kBrightnessLadder[kBrightnessLadderLen - 1];
 }

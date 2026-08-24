@@ -25,9 +25,13 @@ public:
     // filters, caps to maxFlights, and enriches with friendly names + metrics.
     // `ok` distinguishes a genuine "0 flights overhead" (ok=true, returns 0) from
     // a failed fetch (ok=false) — callers must not blank the display on failure.
-    size_t fetchFlights(std::vector<StateVector> &outStates,
-                        std::vector<FlightInfo> &outFlights,
-                        bool &ok);
+    //
+    // The StateVector buffer the modes fill is scratch and stays inside: it used
+    // to be a leading out-parameter that every caller had to declare and none
+    // ever read. It remains a local inside fetchFlights (not a member), so the
+    // allocation pattern is exactly what it was -- this narrows the interface,
+    // it does not retain heap between cycles.
+    size_t fetchFlights(std::vector<FlightInfo> &outFlights, bool &ok);
 
     // Whether the last fetch's schedule data was flagged stale by the server.
     // Surfaced in the web UI only — a stale schedule still renders normally.

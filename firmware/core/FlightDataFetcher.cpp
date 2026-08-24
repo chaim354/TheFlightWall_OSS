@@ -195,11 +195,10 @@ void FlightDataFetcher::applyLocalClassification(std::vector<FlightInfo> &flight
                  flights.end());
 }
 
-size_t FlightDataFetcher::fetchFlights(std::vector<StateVector> &outStates,
-                                       std::vector<FlightInfo> &outFlights,
-                                       bool &ok)
+size_t FlightDataFetcher::fetchFlights(std::vector<FlightInfo> &outFlights, bool &ok)
 {
-    outStates.clear();
+    // Scratch for whichever mode runs; no caller has ever read it.
+    std::vector<StateVector> outStates;
     outFlights.clear();
     ok = false;
     _cycleStartMs = millis(); // starts the enrichment budget (see kEnrichBudgetMs)
@@ -373,7 +372,7 @@ size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
         // key routes on airline-format callsigns, never a tail number). Bounded by
         // maxFlights and the 45s budget, so the cost is wasted round trips, not
         // watchdog headroom.
-        if (!s.has_inline_enrichment)
+        if (!s.hasInlineRoute())
             getEnriched(s.callsign, s.icao24, info, withinEnrichBudget());
 
         // Overlay whatever the position source carried inline (e.g. FlightRadar24
@@ -386,7 +385,7 @@ size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
         //
         // origin/dest: applied whenever the feed has them, with no check for an
         // existing network value first (unlike the airline fill-gap below). Safe
-        // only because has_inline_enrichment is exactly origin||dest, which already
+        // only because hasInlineRoute() is exactly origin||dest, which already
         // skipped the lookup above — there is no network value to defer to. If that
         // flag is ever narrowed to origin&&dest, these two guards need re-deriving,
         // or a leg with only one side inline would confidently pair FR24's origin
@@ -449,11 +448,8 @@ size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
             info.heading_deg = s.heading;
         if (!isnan(s.vertical_rate))
             info.vertical_rate_fpm = s.vertical_rate * kMetersPerSecToFpm;
-        info.on_ground = s.on_ground;
         info.is_helicopter = (s.category == 8); // ADS-B rotorcraft category
         info.distance_km = s.distance_km;
-        info.bearing_deg = s.bearing_deg;
-        info.has_metrics = true;
 
         // Fall back to the live callsign as ident if AeroAPI gave us nothing.
         if (info.ident.length() == 0)

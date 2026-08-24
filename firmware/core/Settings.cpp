@@ -49,14 +49,18 @@ static LightSensorType lightSensorTypeFromName(const char *name)
 // an arbitrary source.
 static const char *positionSourceToString(PositionSource s)
 {
+    // No `default:` -- it would suppress -Wswitch for the whole switch, which is
+    // exactly the compile-time protection lightSensorTypeName's comment claims
+    // for this pattern (and gets, because it has no default). The fallback lives
+    // below the switch instead, so adding an enumerator warns here.
     switch (s)
     {
     case PositionSource::FlightRadar24:    return "fr24";
     case PositionSource::AdsbLol:          return "adsblol";
     case PositionSource::FlightWallServer: return "server";
-    case PositionSource::OpenSky:
-    default:                               return "opensky";
+    case PositionSource::OpenSky:          return "opensky";
     }
+    return "opensky";
 }
 
 static PositionSource positionSourceFromString(const String &s)
@@ -73,52 +77,32 @@ static const char *kSettingsPath = "/settings.json";
 
 void Settings::seedDefaults()
 {
+    // Reset to the in-class initialisers -- Settings.h is the single source of
+    // truth for every default -- then overlay the five values only Secrets.h can
+    // supply. A field added to the struct is now in the reset path automatically;
+    // the omission class is unrepresentable rather than merely absent today.
+    //
+    // This replaces a hand-maintained second copy of ~30 defaults that had
+    // already failed twice: it never assigned serverUrl or positionSource at all,
+    // so the documented `erase` ("reset to defaults") left a bad server URL in
+    // place and wrote it back -- useless precisely when a bad server URL is what
+    // you are trying to escape -- and its centerLat/centerLon disagreed with
+    // Settings.h's, so which "default location" you got depended on which of the
+    // begin() paths had run.
+    //
+    // Move-assignment: Settings declares no destructor, copy, assignment or
+    // virtuals, so this is the implicit move. ~240 bytes of stack for the
+    // temporary and a few small allocations, two of which the old code already
+    // made via `layout = DisplayLayout()`. Runs at most once per boot.
+    *this = Settings();
+
+    // The only values a header initialiser cannot express.
     wifiSsid = WiFiConfiguration::WIFI_SSID;
     wifiPassword = WiFiConfiguration::WIFI_PASSWORD;
 
     openSkyClientId = APIConfiguration::OPENSKY_CLIENT_ID;
     openSkyClientSecret = APIConfiguration::OPENSKY_CLIENT_SECRET;
     aeroApiKey = APIConfiguration::AEROAPI_KEY;
-
-    enrichmentSource = EnrichmentSource::Adsbdb;
-    enrichmentCacheSeconds = 600;
-    enrichmentFallbackToAeroApi = true;
-
-    mode = TrackingMode::Area;
-    centerLat = UserConfiguration::CENTER_LAT;
-    centerLon = UserConfiguration::CENTER_LON;
-    radiusKm = UserConfiguration::RADIUS_KM;
-    autoLocateOnBoot = false;
-    trackedFlights.clear();
-
-    brightness = UserConfiguration::DISPLAY_BRIGHTNESS;
-    textColorR = UserConfiguration::TEXT_COLOR_R;
-    textColorG = UserConfiguration::TEXT_COLOR_G;
-    textColorB = UserConfiguration::TEXT_COLOR_B;
-    maxFlights = UserConfiguration::MAX_FLIGHTS;
-    cycleSeconds = TimingConfiguration::DISPLAY_CYCLE_SECONDS;
-    fetchIntervalSeconds = TimingConfiguration::FETCH_INTERVAL_SECONDS;
-
-    layout = DisplayLayout();
-    filters = AircraftFilters();
-    schedule = BrightnessSchedule();
-
-    buttonsEnabled = true;
-    lightSensorEnabled = true;
-    lightSensorType = LightSensorType::TCS3472;
-    lightSensorPin = HardwareConfiguration::LIGHT_ANALOG_PIN;
-    lightDarkThreshold = 500;
-    lightHysteresis = 150;
-    lightSensorDimInstead = false;
-    lightDimBrightness = 3;
-
-    panelResX = HardwareConfiguration::PANEL_RES_X;
-    panelResY = HardwareConfiguration::PANEL_RES_Y;
-    panelChain = HardwareConfiguration::PANEL_CHAIN;
-    panelClkPhase = false;
-    panelI2sSpeedMhz = 8;
-    panelLatchBlanking = 1;
-    panelDriverChip = "shift";
 }
 
 bool Settings::begin()
@@ -159,6 +143,9 @@ bool Settings::load()
 
 bool Settings::save() const
 {
+    _dirty = false; // whoever saves settles the pending write, whatever prompted it
+
+
     // Write to a temp file, verify it landed whole, THEN rename over the live file.
     // A truncate-then-write here (the previous behavior) meant a power cut mid-save
     // left a partial /settings.json — losing the WiFi password and API keys and
@@ -196,16 +183,37 @@ bool Settings::save() const
 
 String Settings::toJson() const
 {
+    return serialize(false);
+}
+
+String Settings::toJsonPublic() const
+{
+    return serialize(true);
+}
+
+String Settings::serialize(bool redactSecrets) const
+{
     JsonDocument doc;
 
     JsonObject net = doc.createNestedObject("network");
     net["wifiSsid"] = wifiSsid;
-    net["wifiPassword"] = wifiPassword;
+    if (redactSecrets)
+        net["wifiPasswordSet"] = wifiPassword.length() > 0;
+    else
+        net["wifiPassword"] = wifiPassword;
 
     JsonObject api = doc.createNestedObject("api");
     api["openSkyClientId"] = openSkyClientId;
-    api["openSkyClientSecret"] = openSkyClientSecret;
-    api["aeroApiKey"] = aeroApiKey;
+    if (redactSecrets)
+    {
+        api["openSkyClientSecretSet"] = openSkyClientSecret.length() > 0;
+        api["aeroApiKeySet"] = aeroApiKey.length() > 0;
+    }
+    else
+    {
+        api["openSkyClientSecret"] = openSkyClientSecret;
+        api["aeroApiKey"] = aeroApiKey;
+    }
     api["positionSource"] = positionSourceToString(positionSource);
     api["serverUrl"] = serverUrl;
     api["enrichmentSource"] = (enrichmentSource == EnrichmentSource::AeroApi) ? "aeroapi"
@@ -306,7 +314,20 @@ bool Settings::fromJson(const String &in)
         JsonObject net = doc["network"];
         if (net.containsKey("wifiSsid"))
             wifiSsid = net["wifiSsid"].as<String>();
-        if (net.containsKey("wifiPassword"))
+        // An EMPTY secret means "unchanged", not "clear it".
+        //
+        // Since GET no longer returns these, a client cannot echo them back --
+        // so an empty string here is a page that had nothing to send, not a
+        // deliberate wipe. Without this guard, a browser holding a CACHED older
+        // index.html against new firmware would read the (now absent) password,
+        // fall back to "", post it, and strand the device in the open setup AP
+        // with its credentials gone. That makes the firmware/UI upload order
+        // irrelevant instead of load-bearing.
+        //
+        // Clearing a secret deliberately is still possible over the serial
+        // console (`set`), which requires physical possession, and `erase`
+        // resets everything.
+        if (net.containsKey("wifiPassword") && net["wifiPassword"].as<String>().length())
             wifiPassword = net["wifiPassword"].as<String>();
     }
 
@@ -315,9 +336,10 @@ bool Settings::fromJson(const String &in)
         JsonObject api = doc["api"];
         if (api.containsKey("openSkyClientId"))
             openSkyClientId = api["openSkyClientId"].as<String>();
-        if (api.containsKey("openSkyClientSecret"))
+        // Same "empty means unchanged" rule as wifiPassword above.
+        if (api.containsKey("openSkyClientSecret") && api["openSkyClientSecret"].as<String>().length())
             openSkyClientSecret = api["openSkyClientSecret"].as<String>();
-        if (api.containsKey("aeroApiKey"))
+        if (api.containsKey("aeroApiKey") && api["aeroApiKey"].as<String>().length())
             aeroApiKey = api["aeroApiKey"].as<String>();
         if (api.containsKey("positionSource"))
             positionSource = positionSourceFromString(api["positionSource"].as<String>());

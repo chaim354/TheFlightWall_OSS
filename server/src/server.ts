@@ -3,6 +3,7 @@ import { handleFlights, type Env } from './flights';
 import { fileStorage } from './schedule/fileStorage';
 import { refreshSchedule, refreshPanynj, BOARD_FETCH_DELAY_MS } from './schedule/refresh';
 import { PAGE_DELAY_MS } from './schedule/panynj';
+import { parseQuietHours, inQuietHours, shouldRefresh, type QuietWindow } from './schedule/quietHours';
 
 /** Everything server.ts needs, read from process.env with a default for
  * every var except the API key -- there is no sensible default for that. */
@@ -13,6 +14,20 @@ export interface ServerConfig {
   schedulePath: string;
   /** How often to refresh the schedule table after the initial boot fetch. */
   refreshIntervalMs: number;
+  /**
+   * Hours during which the schedule refresh is skipped, as "START-END" local
+   * hours, or null to always refresh.
+   *
+   * Defaults to 00:00-06:00: the panel's night schedule ends at 07:00, and this
+   * must end BEFORE that so a refresh lands while it is still dark and the
+   * table is centred on the morning. Leaving the window forces a refresh within
+   * REFRESH_CHECK_MS (5 minutes), so the margin needed is minutes, not a whole
+   * refresh interval -- the hour the default leaves is generous, not required.
+   * See src/schedule/quietHours.ts.
+   */
+  quietHours: QuietWindow | null;
+  /** IANA zone the quiet-hours window is interpreted in. */
+  quietHoursTimeZone: string;
   /**
    * How often to re-merge the free Port Authority boards on top of it.
    *
@@ -58,7 +73,9 @@ const DEFAULT_SCHEDULE_PATH = './data/schedule.json';
  *
  * Cost, against the $5/mo Pro tier's 6,000 units/month (see
  * fixtures/README.md for how the 2-units-per-call tier was measured):
- *   4 boards x 2 units x 12/day x 30 = 2,880 units/month
+ *   4 boards x 2 units x 9/day x 30 = 2,160 units/month
+ * (9, not 12: quiet hours skip the 00:00, 02:00 and 04:00 refreshes and add one
+ * forced refresh when the window ends -- see DEFAULT_QUIET_HOURS below)
  * versus 960 at six-hourly. Three times the spend, no change in dollars, and
  * still ~2x headroom. Hourly would be 5,760 -- inside the tier but with no
  * margin for a retry storm, so two hours is the defensible point.
@@ -87,6 +104,34 @@ const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
  */
 const PANYNJ_DISABLED = 0;
 
+// 00:00-06:00. All four boards are NYC-area, so local time is America/New_York.
+const DEFAULT_QUIET_HOURS = '0-6';
+const DEFAULT_QUIET_TZ = 'America/New_York';
+
+/**
+ * The zone if we can actually format with it, else the default.
+ *
+ * The refresh path feeds this straight to `new Intl.DateTimeFormat`, which
+ * throws RangeError on a zone it does not know -- from inside a floating
+ * `void refreshTick()`, where under Node's default --unhandled-rejections=throw
+ * it takes the process down. REFRESH_QUIET_TZ is a plain-text value in
+ * config/deploy.yml, so without this a one-character typo is an outage of the
+ * entire service, positions and /up included, rather than of the refresh it was
+ * meant to configure. Probing once at startup turns that into a log line, the
+ * same refusal-to-guess parseQuietHours applies to a malformed window.
+ */
+function usableTimeZone(tz: string): string {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric' }).format(new Date());
+    return tz;
+  } catch {
+    console.error(
+      `REFRESH_QUIET_TZ="${tz}" is not a usable IANA zone; falling back to ${DEFAULT_QUIET_TZ}`,
+    );
+    return DEFAULT_QUIET_TZ;
+  }
+}
+
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     port: Number(env.PORT) || DEFAULT_PORT,
@@ -94,6 +139,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     boards: env.BOARDS ?? DEFAULT_BOARDS,
     schedulePath: env.SCHEDULE_PATH ?? DEFAULT_SCHEDULE_PATH,
     refreshIntervalMs: TWO_HOURS_MS,
+    quietHours: parseQuietHours(env.REFRESH_QUIET_HOURS ?? DEFAULT_QUIET_HOURS),
+    quietHoursTimeZone: usableTimeZone(env.REFRESH_QUIET_TZ ?? DEFAULT_QUIET_TZ),
     boardFetchDelayMs: BOARD_FETCH_DELAY_MS,
     panynjIntervalMs: PANYNJ_DISABLED,
     panynjPageDelayMs: PAGE_DELAY_MS,
@@ -142,7 +189,9 @@ export interface RunningServer {
  */
 export function startServer(config: ServerConfig): Promise<RunningServer> {
   const storage = fileStorage(config.schedulePath);
-  const env: Env = { SCHEDULE: storage, BOARDS: config.boards, AERODATABOX_KEY: config.aerodataboxKey };
+  // Only what handleFlights reads. It used to be handed the board list and a
+  // paid-API secret it has no use for, on a per-request read-only path.
+  const env: Env = { SCHEDULE: storage };
   const boards = config.boards.split(',').map((s) => s.trim()).filter(Boolean);
 
   if (!config.aerodataboxKey) {
@@ -210,8 +259,54 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
     await runPanynj();
   };
 
-  void runBoth(); // once at boot
-  const timer = setInterval(() => void runBoth(), config.refreshIntervalMs);
+  // Checked every 5 minutes rather than every refreshIntervalMs. setInterval has
+  // arbitrary phase, so keying the refresh off it alone would mean the first run
+  // after quiet hours end could be nearly a full interval late -- leaving the
+  // table centred on the previous evening exactly when the panel wakes.
+  const REFRESH_CHECK_MS = 5 * 60 * 1000;
+  let lastRefreshMs: number | null = null;
+  let wasQuiet = false;
+  let quietLogged = false;
+
+  const localHour = (): number =>
+    Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: config.quietHoursTimeZone,
+        hour: 'numeric',
+        hour12: false,
+      }).format(new Date()),
+    ) % 24;
+
+  const refreshTick = async (): Promise<void> => {
+    const quiet = config.quietHours !== null && inQuietHours(localHour(), config.quietHours);
+    const go = shouldRefresh({
+      nowMs: Date.now(),
+      lastRefreshMs,
+      intervalMs: config.refreshIntervalMs,
+      quiet,
+      wasQuiet,
+    });
+    wasQuiet = quiet;
+    if (!go) {
+      // Logged, not silent: a refresh that stops happening must say so, or it is
+      // indistinguishable from an upstream outage. Keyed to the first tick
+      // actually SKIPPED rather than to the quiet edge, because a cold start
+      // inside the window refreshes anyway (see shouldRefresh) -- announcing a
+      // pause on the tick that refreshes would be exactly the plausible-looking
+      // wrong statement this line exists to prevent.
+      if (quiet && !quietLogged) {
+        console.log(`schedule: quiet hours (${config.quietHours!.startHour}-${config.quietHours!.endHour} ${config.quietHoursTimeZone}); refresh paused until the window ends`);
+        quietLogged = true;
+      }
+      return;
+    }
+    quietLogged = false;
+    lastRefreshMs = Date.now();
+    await runBoth();
+  };
+
+  void refreshTick(); // once at boot
+  const timer = setInterval(() => void refreshTick(), REFRESH_CHECK_MS);
   const panynjTimer = panynjEnabled
     ? setInterval(() => void runPanynj(), config.panynjIntervalMs)
     : undefined;

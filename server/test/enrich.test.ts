@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { enrich } from '../src/enrich';
 import type { Aircraft, ScheduleRow } from '../src/types';
+import { getAirportCoord } from '../src/schedule/airports';
 
-const LGA = { lat: 40.7769, lon: -73.8740 };
-const CVG = { lat: 39.0488, lon: -84.6678 };
+// Ask the table production asks. These were hand-copied from a two-table
+// version of airports.ts that 8556a5a DELETED, and LGA had since drifted
+// 120 m from the value the Worker actually emits (F-SRV16-A). Nothing failed
+// -- the corridor gate is 300 km -- but it meant every geometry assertion
+// here was validated against a position production does not produce.
+const LGA = getAirportCoord('KLGA')!;
+const CVG = getAirportCoord('KCVG')!;
 
 // Fixed instant used everywhere enrich() needs "now". enrich() is pure and
 // takes it as an argument rather than reading Date.now() itself, so every
@@ -29,7 +35,7 @@ const sched: ScheduleRow[] = [{
 
 describe('enrich', () => {
   it('fills route, carrier name and ETA from the schedule', () => {
-    const f = enrich(ac(), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), sched, {}, NOW_MS)!;
     expect(f.from).toBe('CVG');
     expect(f.to).toBe('LGA');
     expect(f.al).toBe('Delta');
@@ -42,7 +48,7 @@ describe('enrich', () => {
   it('still returns a flight when no schedule row matches', () => {
     // Route blank, but callsign, position and metrics must survive -- the card
     // still renders, it just has no route.
-    const f = enrich(ac({ callsign: 'ZZZ9999' }), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac({ callsign: 'ZZZ9999' }), sched, {}, NOW_MS)!;
     expect(f.cs).toBe('ZZZ9999');
     expect(f.to).toBeNull();
     expect(f.eta_min).toBeNull();
@@ -51,7 +57,7 @@ describe('enrich', () => {
   });
 
   it('carries registration and type through from the position feed', () => {
-    const f = enrich(ac(), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), sched, {}, NOW_MS)!;
     expect(f.reg).toBe('N914XJ');
     expect(f.ac).toBe('CRJ9');
   });
@@ -76,26 +82,18 @@ describe('enrich', () => {
     // narrowing entirely, same as a provider-supplied callsign would in
     // production.
     const rows = [{ ...sched[0]!, carrierIata: 'ZZ', callsign: 'EDV5075' }];
-    expect(enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!.al).toBe('ZZ');
+    expect(enrich(ac(), rows, {}, NOW_MS)!.al).toBe('ZZ');
   });
 
   it('computes distance and bearing when the feed did not supply them', () => {
     const f = enrich(ac({ distanceNm: null, bearingDeg: null }), sched,
-      { units: 'imperial', centerLat: LGA.lat, centerLon: LGA.lon }, NOW_MS)!;
+      { center: { lat: LGA.lat, lon: LGA.lon } }, NOW_MS)!;
     expect(f.dst).toBeGreaterThan(0);
     expect(f.brg).toBeGreaterThanOrEqual(0);
   });
 
-  it('emits metric units on request', () => {
-    const imperial = enrich(ac(), sched, { units: 'imperial' }, NOW_MS)!;
-    const metric = enrich(ac(), sched, { units: 'metric' }, NOW_MS)!;
-    // 400 kt -> ~741 km/h (larger number); 18000 ft -> ~5486 m (smaller number).
-    expect(metric.spd!).toBeGreaterThan(imperial.spd!);
-    expect(metric.alt!).toBeLessThan(imperial.alt!);
-  });
-
   it('drops an aircraft with no callsign', () => {
-    expect(enrich(ac({ callsign: '' }), sched, { units: 'imperial' }, NOW_MS)).toBeNull();
+    expect(enrich(ac({ callsign: '' }), sched, {}, NOW_MS)).toBeNull();
   });
 });
 
@@ -117,7 +115,7 @@ describe('enrich: edge cases', () => {
       origLat: CVG.lat, origLon: CVG.lon, destLat: null, destLon: null,
       schedArrEpoch: null, revArrEpoch: null,
     }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.from).toBe('CVG');
     expect(f.to).toBe('LGA');
     expect(f.eta_min).toBeNull();
@@ -129,7 +127,7 @@ describe('enrich: edge cases', () => {
     // Placed at CVG itself -- ~507nm from LGA, well past TERMINAL_NM (60) --
     // so the model needs groundspeed and does not have it.
     const f = enrich(ac({ lat: CVG.lat, lon: CVG.lon, groundspeedKt: null }), sched,
-      { units: 'imperial' }, NOW_MS)!;
+      {}, NOW_MS)!;
     expect(f.to).toBe('LGA'); // the row still matched -- only the ETA is unavailable
     expect(f.eta_min).toBeNull();
     expect(f.eta_text).toBeNull();
@@ -140,7 +138,7 @@ describe('enrich: edge cases', () => {
     // The default ac() position is ~52nm from LGA -- inside TERMINAL_NM (60)
     // -- where the model uses a nominal speed, not the aircraft's own. A
     // missing groundspeed this close to the airport must not blank the ETA.
-    const f = enrich(ac({ groundspeedKt: null }), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac({ groundspeedKt: null }), sched, {}, NOW_MS)!;
     expect(f.eta_min).not.toBeNull();
     expect(f.eta_text).toMatch(/^~|^LANDING$/);
   });
@@ -153,7 +151,7 @@ describe('enrich: edge cases', () => {
     // or missed approach), not touching down. Horizontal distance alone
     // said 0 minutes; it now correctly reflects the descent still owed:
     // 18000ft / 1800fpm (NOMINAL_DESCENT_FPM) = 10 minutes.
-    const f = enrich(ac({ lat: LGA.lat, lon: LGA.lon }), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac({ lat: LGA.lat, lon: LGA.lon }), sched, {}, NOW_MS)!;
     expect(f.eta_min).toBe(10);
     expect(f.eta_text).toBe('~10m');
   });
@@ -162,7 +160,7 @@ describe('enrich: edge cases', () => {
     // The genuine case the old test above meant to cover: an aircraft
     // actually near the ground at its destination's coordinates, where the
     // descent floor (50ft / 1800fpm, about 0.03min) is negligible.
-    const f = enrich(ac({ lat: LGA.lat, lon: LGA.lon, altFt: 50 }), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac({ lat: LGA.lat, lon: LGA.lon, altFt: 50 }), sched, {}, NOW_MS)!;
     expect(f.eta_min).toBe(0);
     expect(f.eta_text).toBe('LANDING');
   });
@@ -175,29 +173,25 @@ describe('enrich: edge cases', () => {
     // altitude had never been supplied.
     const f = enrich(
       ac({ lat: LGA.lat, lon: LGA.lon, altFt: null, groundspeedKt: 0, onGround: true }),
-      sched, { units: 'imperial' }, NOW_MS,
+      sched, {}, NOW_MS,
     )!;
     expect(f.eta_min).toBe(0);
     expect(f.eta_text).toBe('LANDING');
   });
 
-  it('converts kt to km/h and ft to m by the documented factor, not just in the right direction', () => {
-    const imperial = enrich(ac(), sched, { units: 'imperial' }, NOW_MS)!;
-    const metric = enrich(ac(), sched, { units: 'metric' }, NOW_MS)!;
-    expect(imperial.spd).toBe(400);
-    expect(imperial.alt).toBe(18000);
-    expect(metric.spd).toBe(741);   // 400kt * 1.852 km/h-per-kt
-    expect(metric.alt).toBe(5486);  // 18000ft / 3.28084 ft-per-m
-  });
-
-  it('also converts vertical rate to m/min, the one metric field the plan never tests', () => {
-    // Same division-by-FT_PER_M family as altitude, but a separate line of
-    // code (a.verticalRateFpm / FT_PER_M) with no coverage anywhere in the
-    // plan's own enrich tests.
-    const imperial = enrich(ac(), sched, { units: 'imperial' }, NOW_MS)!;
-    const metric = enrich(ac(), sched, { units: 'metric' }, NOW_MS)!;
-    expect(imperial.vs).toBe(-1200);
-    expect(metric.vs).toBe(-366); // -1200fpm / 3.28084 ft-per-m, sign preserved
+  it('emits source units verbatim -- ft, kt, fpm, nm', () => {
+    // The wire is imperial-only. These three assertions are what survives of the
+    // metric-conversion tests: they pinned the imperial side too, and that half
+    // is the actual contract the firmware decodes.
+    const f = enrich(ac(), sched, {}, NOW_MS)!;
+    expect(f.alt).toBe(18000);
+    expect(f.spd).toBe(400);
+    expect(f.vs).toBe(-1200);
+    // hdg was the ONE wire key no test named. Every other key is pinned only
+    // because some test happens to mention it -- rename this one and nothing
+    // here fails, while FlightWallServerFetcher.cpp's optNum(f, "hdg") silently
+    // returns nothing and the panel's heading row goes blank.
+    expect(f.hdg).toBe(120);
   });
 });
 
@@ -232,7 +226,7 @@ describe('enrich: WJA2101 regression', () => {
         distanceNm: null, bearingDeg: null,
       }),
       rows,
-      { units: 'imperial' },
+      {},
       NOW_MS,
     )!;
     expect(f.to).toBe('JFK');
@@ -255,7 +249,7 @@ describe('enrich: schedule-time priority chain', () => {
       schedArrEpoch: NOW_SEC + 60 * 60,  // published: 1h from now
       revArrEpoch: NOW_SEC + 90 * 60,    // delayed 30min per the operator's own update
     }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('revised');
     expect(f.eta_min).toBe(90);
     expect(f.eta_text).toBe('~1h30');
@@ -267,7 +261,7 @@ describe('enrich: schedule-time priority chain', () => {
       schedArrEpoch: NOW_SEC + 45 * 60,
       revArrEpoch: null,
     }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(45);
     expect(f.eta_text).toBe('~45m');
@@ -279,7 +273,7 @@ describe('enrich: schedule-time priority chain', () => {
     // because the task asked for this tier to have its own named case
     // rather than resting on the general "fills route..." test doing double
     // duty for it.
-    const f = enrich(ac(), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), sched, {}, NOW_MS)!;
     expect(f.eta_src).toBe('physics');
     expect(f.eta_min).toBeGreaterThan(0);
   });
@@ -293,7 +287,7 @@ describe('enrich: schedule-time priority chain', () => {
     // this case; it means the no-match path degrades exactly as it always
     // did -- eta_min/eta_text/eta_src all null, no crash from touching
     // row.revArrEpoch/schedArrEpoch on a null row.
-    const f = enrich(ac({ callsign: 'ZZZ9999' }), sched, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac({ callsign: 'ZZZ9999' }), sched, {}, NOW_MS)!;
     expect(f.to).toBeNull();
     expect(f.eta_min).toBeNull();
     expect(f.eta_text).toBeNull();
@@ -310,7 +304,7 @@ describe('enrich: schedule-time priority chain', () => {
       schedArrEpoch: NOW_SEC + 20 * 60,  // still ahead of now
       revArrEpoch: NOW_SEC - 5 * 60,     // 5 minutes in the past
     }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(20);
   });
@@ -328,7 +322,7 @@ describe('enrich: a past arrival time is treated as stale, not as a negative ETA
       schedArrEpoch: NOW_SEC - 10 * 60, // 10 minutes ago -- e.g. already landed, or a stale row
       revArrEpoch: null,
     }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('physics');
     // The default ac()/sched pairing is the same geometry the plain
     // "fills route..." physics test uses -- a positive number, not a
@@ -350,7 +344,7 @@ describe('enrich: a past arrival time is treated as stale, not as a negative ETA
       schedArrEpoch: NOW_SEC - 3600,
       revArrEpoch: NOW_SEC - 1800,
     }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_min).toBeNull();
     expect(f.eta_text).toBeNull();
     expect(f.eta_src).toBeNull();
@@ -361,7 +355,7 @@ describe('enrich: a past arrival time is treated as stale, not as a negative ETA
     // arrival epoch equal to nowSec is still a usable (if imminent) answer,
     // not a case for falling through to the next tier.
     const rows: ScheduleRow[] = [{ ...sched[0]!, schedArrEpoch: NOW_SEC, revArrEpoch: null }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(0);
   });
@@ -394,7 +388,7 @@ describe('enrich: JBU81 JFK->RNO regression (real arrival time beats a bad physi
         distanceNm: null, bearingDeg: null,
       }),
       rows,
-      { units: 'imperial' },
+      {},
       NOW_MS,
     )!;
 
@@ -454,7 +448,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     }];
     const f = enrich(
       ac({ callsign: 'THY6044', lat: 44.62927266987777, lon: ATL.lon, distanceNm: null, bearingDeg: null }),
-      rows, { units: 'imperial' }, NOW_MS,
+      rows, {}, NOW_MS,
     )!;
     expect(f.to).toBe('ATL');
     // Falls through to physics rather than the impossible 15-minute figure.
@@ -495,7 +489,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     }];
     const f = enrich(
       ac({ callsign: 'DAL688', lat: 82.40761217283855, lon: SEA.lon, distanceNm: null, bearingDeg: null }),
-      rows, { units: 'imperial' }, NOW_MS,
+      rows, {}, NOW_MS,
     )!;
     expect(f.to).toBe('SEA');
     // (2099-60)/400*60 + 18 = 323.85 -> rounds to 324; the 18000ft descent
@@ -525,7 +519,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     }];
     const f = enrich(
       ac({ callsign: 'BAW112', lat: JFK.lat, lon: JFK.lon, distanceNm: null, bearingDeg: null }),
-      rows, { units: 'imperial' }, NOW_MS,
+      rows, {}, NOW_MS,
     )!;
     expect(f.to).toBe('LHR');
     expect(f.eta_src).toBe('scheduled');
@@ -551,7 +545,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     }];
     const f = enrich(
       ac({ callsign: 'THY6044', lat: 44.62927266987777, lon: ATL.lon, distanceNm: null, bearingDeg: null }),
-      rows, { units: 'imperial' }, NOW_MS,
+      rows, {}, NOW_MS,
     )!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(90);
@@ -581,7 +575,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     }];
     const f = enrich(
       ac({ callsign: 'THY6044', lat: 44.62927266987777, lon: ATL.lon, distanceNm: null, bearingDeg: null }),
-      rows, { units: 'imperial' }, NOW_MS,
+      rows, {}, NOW_MS,
     )!;
     expect(f.eta_src).toBe('revised');
     expect(f.eta_min).toBe(100);
@@ -601,7 +595,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     // which would fail the guard at long range -- passes through exactly as
     // it would have before this guard existed.
     const rows: ScheduleRow[] = [{ ...sched[0]!, schedArrEpoch: NOW_SEC + 4 * 60, revArrEpoch: null }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(4);
     expect(f.eta_text).toBe('~5m'); // never rounds down to a bare zero
@@ -620,7 +614,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
       schedArrEpoch: NOW_SEC + 2 * 60, // "impossible" at any real distance, but there is none to check
       revArrEpoch: null,
     }];
-    const f = enrich(ac(), rows, { units: 'imperial' }, NOW_MS)!;
+    const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(2);
   });

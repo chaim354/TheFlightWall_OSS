@@ -6,6 +6,7 @@ Purpose: Implementation of the on-device configuration & control web server.
 #include "core/Settings.h"
 #include "config/HardwareConfiguration.h" // board-guarded pins reported in /api/status
 #include "adapters/GeoLocator.h"
+#include "utils/ServerJson.h" // renderable()
 
 #include <LittleFS.h>
 #include <WiFi.h>
@@ -62,9 +63,8 @@ bool WebConfigServer::consumeRestartRequested()
     return false;
 }
 
-void WebConfigServer::setLastFetchInfo(int flightCount, const String &note)
+void WebConfigServer::setLastNote(const String &note)
 {
-    _lastFlightCount = flightCount;
     _lastNote = note;
 }
 
@@ -125,7 +125,9 @@ void WebConfigServer::handleRoot()
 
 void WebConfigServer::handleGetSettings()
 {
-    _server.send(200, "application/json", g_settings.toJson());
+    // REDACTED projection: this endpoint is unauthenticated and reachable by any
+    // LAN peer. save() still persists the full document via toJson().
+    _server.send(200, "application/json", g_settings.toJsonPublic());
 }
 
 void WebConfigServer::handlePostSettings()
@@ -156,7 +158,15 @@ void WebConfigServer::handleGetStatus()
     doc["ip"] = _ip;
     doc["rssi"] = _apMode ? 0 : WiFi.RSSI();
     doc["mode"] = (g_settings.mode == TrackingMode::Flights) ? "flights" : "area";
-    doc["flightCount"] = _lastFlightCount;
+    // Derived, not cached. This was a pushed int, and it went stale in a way that
+    // mattered: main.cpp pushes the count on a failed fetch, then clears
+    // g_lastFlights when they age out, and nothing re-pushes -- so /api/status
+    // reported N flights while /api/flights returned []. With the backoff at its
+    // 300s cap that contradiction persisted for five minutes, on the only
+    // diagnostic channel a wall-mounted board has, at exactly the moment someone
+    // is looking at it. (It misled a live diagnosis on 2026-08-23.) Reading the
+    // same vector /api/flights serialises makes them agree by construction.
+    doc["flightCount"] = _flights ? (int)_flights->size() : 0;
     doc["note"] = _lastNote;
     // FlightWall-server-only: schedule or position data was served from cache
     // after a provider failure on the last cycle. Always false off the server
@@ -184,20 +194,17 @@ void WebConfigServer::handleGetStatus()
     // S3, which has no GPIO 22 and whose ADC1 is 1-10 rather than 32-39.
     doc["i2cSda"] = HardwareConfiguration::I2C_SDA;
     doc["i2cScl"] = HardwareConfiguration::I2C_SCL;
-    doc["adc1Min"] = HardwareConfiguration::ADC1_PIN_MIN;
-    doc["adc1Max"] = HardwareConfiguration::ADC1_PIN_MAX;
+    // The USABLE window, not the chip's full ADC1 range. index.html renders these
+    // verbatim as "Analog pin (ADC1: <min>-<max>)", so publishing the raw range
+    // advertised seven HUB75 data lines as valid choices on the S3 -- and
+    // Settings.cpp accepts whatever is POSTed without validating it.
+    doc["adc1Min"] = HardwareConfiguration::ADC1_FREE_MIN;
+    doc["adc1Max"] = HardwareConfiguration::ADC1_FREE_MAX;
     doc["buttonAPin"] = HardwareConfiguration::BUTTON_A_PIN;
     doc["buttonBPin"] = HardwareConfiguration::BUTTON_B_PIN;
     String out;
     serializeJson(doc, out);
     _server.send(200, "application/json", out);
-}
-
-// Prefer IATA, fall back to ICAO — the rule AirportInfo documents as the display code,
-// and the same one iataRoute() applies when drawing the panel.
-static String displayCode(const AirportInfo &a)
-{
-    return a.code_iata.length() ? a.code_iata : a.code_icao;
 }
 
 String WebConfigServer::buildFlightsJson() const
@@ -219,38 +226,42 @@ String WebConfigServer::buildFlightsJson() const
             o["airline"] = f.airline_display_name_full.length() ? f.airline_display_name_full
                            : (f.operator_iata.length() ? f.operator_iata
                               : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
-            o["aircraft"] = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+            o["aircraft"] = f.aircraft_code;
             // Reading code_icao alone blanked this list for any source that supplies only
             // IATA — which is every flight under Flightradar24, whose feed carries IATA
             // origin/destination inline and no ICAO at all. The UI renders these as
             // `${x.origin||'?'}`, so the card showed "? → ?" for traffic the panel beside
             // it was displaying correctly. Under OpenSky/adsbdb both codes are populated,
             // so this also switches the list from KJFK to JFK and matches the wall.
-            o["origin"] = displayCode(f.origin);
-            o["destination"] = displayCode(f.destination);
+            o["origin"] = f.origin.displayCode();
+            o["destination"] = f.destination.displayCode();
             o["helicopter"] = f.is_helicopter;
             o["cargo"] = f.is_cargo;
             o["private"] = f.is_private;
-            if (f.has_metrics)
-            {
-                // Distance from the configured center — the key the list is already
-                // ordered by (FlightDataFetcher sorts candidates nearest-first). NAN in
-                // Flights mode, which has no center to measure from, so the guard omits
-                // the key there rather than emitting null.
-                if (!isnan(f.distance_km))
-                    o["distanceKm"] = round(f.distance_km * 10.0) / 10.0;
-                if (!isnan(f.altitude_ft))
-                    o["altitudeFt"] = (long)f.altitude_ft;
-                if (!isnan(f.groundspeed_kt))
-                    o["speedKt"] = (long)f.groundspeed_kt;
-                if (!isnan(f.heading_deg))
-                    o["headingDeg"] = (long)f.heading_deg;
-                if (!isnan(f.vertical_rate_fpm))
-                    o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
-            }
+            // Each field gates on its own value being present. There was an outer
+            // `if (f.has_metrics)` here, but every guard below already asks the only
+            // question that matters, so the gate could only ever suppress fields that
+            // WERE present -- which it did: AeroAPI set has_metrics for
+            // altitude/speed/heading and not for vertical rate, so a flight reporting
+            // only altitude_change had its rate omitted here while the panel drew CLB.
+            //
+            // Distance from the configured center — the key the list is already
+            // ordered by (FlightDataFetcher sorts candidates nearest-first). NAN in
+            // Flights mode, which has no center to measure from, so the guard omits
+            // the key there rather than emitting null.
+            if (renderable(f.distance_km))
+                o["distanceKm"] = round(f.distance_km * 10.0) / 10.0;
+            if (renderable(f.altitude_ft))
+                o["altitudeFt"] = (long)f.altitude_ft;
+            if (renderable(f.groundspeed_kt))
+                o["speedKt"] = (long)f.groundspeed_kt;
+            if (renderable(f.heading_deg))
+                o["headingDeg"] = (long)f.heading_deg;
+            if (renderable(f.vertical_rate_fpm))
+                o["verticalRateFpm"] = (long)f.vertical_rate_fpm;
             // eta_text/eta_minutes come only from the FlightWall server (empty/NAN
             // for every OpenSky/adsb.lol flight and any server flight with no
-            // destination), so these are independent of has_metrics above -- the
+            // destination), so these are independent of the metrics above -- the
             // live list is the fastest way to see whether ETA is arriving at all
             // without staring at the panel. etaText is the server's pre-rounded
             // display string; etaMin is the unrounded minutes for debugging.

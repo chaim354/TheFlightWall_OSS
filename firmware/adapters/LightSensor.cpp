@@ -54,26 +54,35 @@ static bool tcsRead8(uint8_t reg, uint8_t &out)
     return true;
 }
 
-// True only for an ADC1 pin on THIS target. ADC2 is unusable while WiFi is up, and on
-// the S3 the classic 32-39 range lands on SPI flash / octal PSRAM — so an unchecked
-// pin from the web UI could point analogRead() at a live PSRAM line. Range-checking
-// keeps a bad setting inert instead of hazardous.
+// True only for a USABLE ADC1 pin on THIS target. ADC2 is unusable while WiFi is up,
+// and on the S3 the classic 32-39 range lands on SPI flash / octal PSRAM — so an
+// unchecked pin from the web UI could point analogRead() at a live PSRAM line.
+//
+// Checks the FREE window, not the chip's full ADC1 range. That distinction is the
+// fix: on the S3, ADC1 is 1-10 while HUB75 owns 4-17, so seven of the ten values
+// this used to accept were live panel data lines. The guard was protecting PSRAM
+// and not the panel's own signals.
 static bool isValidAdc1Pin(uint8_t pin)
 {
-    return pin >= HardwareConfiguration::ADC1_PIN_MIN && pin <= HardwareConfiguration::ADC1_PIN_MAX;
+    return pin >= HardwareConfiguration::ADC1_FREE_MIN && pin <= HardwareConfiguration::ADC1_FREE_MAX;
 }
 
 void LightSensor::begin()
 {
     _dark = false;
     _last = -1;
-    _i2cReady = false;
-    _analogReady = false;
+    _ready = false;
 
     if (!g_settings.lightSensorEnabled)
         return;
 
-    switch (g_settings.lightSensorType)
+    // Latch the configuration being brought up. Everything below validates and
+    // configures THESE, and readSensor() samples THESE -- never the live
+    // Settings, which can move underneath us between calls.
+    _type = g_settings.lightSensorType;
+    _pin = g_settings.lightSensorPin;
+
+    switch (_type)
     {
     case LightSensorType::BH1750:
         Wire.begin(HardwareConfiguration::I2C_SDA, HardwareConfiguration::I2C_SCL);
@@ -83,9 +92,9 @@ void LightSensor::begin()
         {
             Wire.beginTransmission(kBH1750Addr);
             Wire.write(kBH1750ContHighRes);
-            _i2cReady = (Wire.endTransmission() == 0);
+            _ready = (Wire.endTransmission() == 0);
         }
-        if (!_i2cReady)
+        if (!_ready)
             Serial.printf("LightSensor: BH1750 not found on I2C (SDA=%d, SCL=%d)\n",
                           (int)HardwareConfiguration::I2C_SDA, (int)HardwareConfiguration::I2C_SCL);
         break;
@@ -95,7 +104,7 @@ void LightSensor::begin()
         Wire.begin(HardwareConfiguration::I2C_SDA, HardwareConfiguration::I2C_SCL);
         // ID check first: without it an absent/miswired sensor reads 0 and update()
         // would call a pitch-black room, blanking the panel. A failed ID leaves
-        // _i2cReady false, which fails safe to "lit".
+        // _ready false, which fails safe to "lit".
         uint8_t id = 0;
         if (!tcsRead8(kTcsRegId, id) || (id != kTcsIdPart1 && id != kTcsIdPart2))
         {
@@ -110,7 +119,7 @@ void LightSensor::begin()
         ok = ok && tcsWrite(kTcsRegAtime, kTcsAtime154ms);
         ok = ok && tcsWrite(kTcsRegControl, kTcsGain16x);
         ok = ok && tcsWrite(kTcsRegEnable, kTcsEnablePon | kTcsEnableAen);
-        _i2cReady = ok;
+        _ready = ok;
         if (!ok)
             Serial.println("LightSensor: TCS3472 found but failed to configure");
         break;
@@ -123,40 +132,49 @@ void LightSensor::begin()
         // fighting over one pin is exactly the bug that produced the 18/21 mistake;
         // say so out loud instead of letting it be debugged twice.
         if (g_settings.buttonsEnabled &&
-            (g_settings.lightSensorPin == (uint8_t)HardwareConfiguration::BUTTON_A_PIN ||
-             g_settings.lightSensorPin == (uint8_t)HardwareConfiguration::BUTTON_B_PIN))
+            (_pin == (uint8_t)HardwareConfiguration::BUTTON_A_PIN ||
+             _pin == (uint8_t)HardwareConfiguration::BUTTON_B_PIN))
         {
             Serial.printf("LightSensor: pin %u is already a button (A=%d, B=%d); "
                           "analog sensor disabled. Disable buttons or pick another pin.\n",
-                          (unsigned)g_settings.lightSensorPin,
+                          (unsigned)_pin,
                           (int)HardwareConfiguration::BUTTON_A_PIN,
                           (int)HardwareConfiguration::BUTTON_B_PIN);
             break;
         }
-        if (!isValidAdc1Pin(g_settings.lightSensorPin))
+        if (!isValidAdc1Pin(_pin))
         {
             Serial.printf("LightSensor: pin %u is not ADC1 on this board (valid %u-%u); "
                           "analog sensor disabled\n",
-                          (unsigned)g_settings.lightSensorPin,
-                          (unsigned)HardwareConfiguration::ADC1_PIN_MIN,
-                          (unsigned)HardwareConfiguration::ADC1_PIN_MAX);
+                          (unsigned)_pin,
+                          (unsigned)HardwareConfiguration::ADC1_FREE_MIN,
+                          (unsigned)HardwareConfiguration::ADC1_FREE_MAX);
             break;
         }
         // ADC1 only (WiFi disables ADC2). 11dB attenuation -> ~full 3.3V range.
         analogReadResolution(12);
-        analogSetPinAttenuation(g_settings.lightSensorPin, ADC_11db);
-        _analogReady = true;
+        analogSetPinAttenuation(_pin, ADC_11db);
+        _ready = true;
         break;
     }
 }
 
 int LightSensor::readSensor()
 {
-    switch (g_settings.lightSensorType)
+    // ONE readiness gate, and it asks the right question: is the configuration
+    // begin() validated still the configuration Settings wants? If Settings has
+    // moved on and nothing re-ran begin(), we are not ready for the new one --
+    // fail safe to "lit" rather than sampling something unvalidated. Note this
+    // deliberately does NOT compare the pin: begin() validated _pin, so reading
+    // it stays safe, and a pin change without a re-begin self-heals as soon as
+    // one happens. Thresholds are still read live in update() -- that is the
+    // documented `light watch` tuning loop and must not become latched state.
+    if (!_ready || _type != g_settings.lightSensorType)
+        return -1;
+
+    switch (_type)
     {
     case LightSensorType::BH1750:
-        if (!_i2cReady)
-            return -1;
         if (Wire.requestFrom((int)kBH1750Addr, 2) != 2)
             return -1;
         {
@@ -165,8 +183,6 @@ int LightSensor::readSensor()
         }
 
     case LightSensorType::TCS3472:
-        if (!_i2cReady)
-            return -1;
         // Auto-increment across CDATAL/CDATAH; the part is little-endian here.
         Wire.beginTransmission(kTcsAddr);
         Wire.write(kTcsCmdAutoInc | kTcsRegCData);
@@ -181,9 +197,7 @@ int LightSensor::readSensor()
         }
 
     case LightSensorType::Analog:
-        if (!_analogReady)
-            return -1; // pin failed validation -> fail safe to "lit"
-        return analogRead(g_settings.lightSensorPin); // 0..4095, higher = brighter
+        return analogRead(_pin); // the pin begin() validated; 0..4095, higher = brighter
     }
     return -1;
 }

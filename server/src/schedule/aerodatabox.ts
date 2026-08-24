@@ -147,8 +147,10 @@ function collect(
     if (!parsed) continue; // no derivable flight number -- cannot index this row
 
     const airline = m?.airline as Record<string, unknown> | undefined;
+    // No emptiness check: splitCarrierNumber returns null rather than an empty
+    // carrier on both of its branches, so parsed.carrier is always non-empty and
+    // this expression cannot be.
     const carrier = str(airline?.iata) || parsed.carrier;
-    if (!carrier) continue;
 
     // The far end is whichever side ("departure" for an arrivals-array row,
     // "arrival" for a departures-array row) carries the `airport` object.
@@ -203,7 +205,26 @@ const API_HOST = 'aerodatabox.p.rapidapi.com';
  * The window matters and is centred, not forward-biased -- see the comment on
  * the computation below for the measurement that settled it.
  */
-export async function fetchBoard(icao: string, apiKey: string): Promise<ScheduleRow[]> {
+export interface FetchBoardOptions {
+  /** Injected for tests; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
+export async function fetchBoard(
+  icao: string,
+  apiKey: string,
+  opts: FetchBoardOptions = {},
+): Promise<ScheduleRow[]> {
+  // PRECONDITION, checked before any I/O. collect() silently returns when it
+  // has no coordinates for the board, so a typo'd or newly-added BOARDS entry
+  // used to make a real billable call (2 units) every pass, forever, yield an
+  // empty board, and report nothing -- roughly 720 wasted units/month per bad
+  // board against a 6,000-unit budget. It is a config error knowable without
+  // asking the network, so ask nothing.
+  if (!getAirportCoord(icao)) {
+    throw new Error(`aerodatabox ${icao}: no coordinates for this board (check BOARDS)`);
+  }
+
   // Window is centred, not forward-biased. FIDS rows are keyed on SCHEDULED
   // time, but we match aircraft that are airborne NOW -- and a delayed flight
   // still in the air can have been scheduled many hours ago. A -2h/+10h window
@@ -222,9 +243,30 @@ export async function fetchBoard(icao: string, apiKey: string): Promise<Schedule
   const url =
     `https://${API_HOST}/flights/airports/icao/${icao}/${from}/${to}` +
     `?withLeg=true&direction=Both&withCancelled=false&withCodeshared=false`;
-  const res = await fetch(url, {
+  const res = await (opts.fetchImpl ?? fetch)(url, {
     headers: { 'x-rapidapi-key': apiKey, 'x-rapidapi-host': API_HOST },
   });
   if (!res.ok) throw new Error(`aerodatabox ${icao} ${res.status}`);
-  return parseFids(await res.json(), icao);
+
+  const body = await res.json();
+
+  // POSTCONDITION. parseFids never throws by design -- one bad row must not
+  // cost the board -- which means a payload whose SHAPE changed degrades to
+  // "this board has no flights", indistinguishable from a quiet board. Draw
+  // the line here instead, where the difference is still visible: neither list
+  // present at all is a transport-level failure, not an empty board. The
+  // sibling adapter already enforces exactly this (panynj.ts's `if
+  // (body?.errors) throw`), and a 204 on this path already throws out of
+  // res.json(), so "empty-looking board throws, previous table kept" is
+  // established behaviour here rather than something new.
+  //
+  // Defence in depth BEHIND refresh.ts's write gate, which is the
+  // authoritative fix for an empty table from any cause. What this adds is
+  // naming WHICH board went wrong, which a row count alone cannot.
+  const b = body as { arrivals?: unknown; departures?: unknown };
+  if (!Array.isArray(b?.arrivals) && !Array.isArray(b?.departures)) {
+    throw new Error(`aerodatabox ${icao}: payload carried neither arrivals nor departures`);
+  }
+
+  return parseFids(body, icao);
 }

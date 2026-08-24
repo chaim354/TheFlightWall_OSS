@@ -62,6 +62,22 @@ const TTL_MS = 6 * 60 * 60 * 1000;
  */
 const NEG_TTL_MS = 30 * 60 * 1000;
 
+/**
+ * How long a NON-answer is remembered.
+ *
+ * Note what the rationale above is actually about: a database that ANSWERED and
+ * said it has no such route. None of it applies to a request that never got an
+ * answer at all -- a timeout, a DNS failure, a 429, a 502. Those say "ask
+ * again", not "this route does not exist", and treating them alike blanked a
+ * callsign for half an hour over one slow response, on the module that exists
+ * as the last resort for flights that would otherwise render blank. Worse, a
+ * rate-limit or an IP-level block poisoned every callsign asked during it.
+ *
+ * 60s mirrors the firmware's equivalent cache (FlightDataFetcher.cpp), which
+ * has always kept its failure TTL 30x shorter than its success TTL.
+ */
+const FAIL_TTL_MS = 60 * 1000;
+
 /** Bounded so a long-running process cannot grow one entry per callsign seen. */
 const MAX_ENTRIES = 2000;
 
@@ -96,8 +112,9 @@ function cacheGet(key: string, nowMs: number): Entry | undefined {
   return e;
 }
 
-function cacheSet(key: string, fix: RouteFix | null, nowMs: number): void {
-  cache.set(key, { fix, expiresMs: nowMs + (fix ? TTL_MS : NEG_TTL_MS) });
+function cacheSet(key: string, fix: RouteFix | null, nowMs: number, answered = true): void {
+  const ttl = fix ? TTL_MS : answered ? NEG_TTL_MS : FAIL_TTL_MS;
+  cache.set(key, { fix, expiresMs: nowMs + ttl });
   while (cache.size > MAX_ENTRIES) {
     const oldest = cache.keys().next();
     if (oldest.done) break;
@@ -156,8 +173,9 @@ export function parseHexdb(text: unknown): RouteFix | null {
  *
  * The whole reason these sources are usable. Returns the route unchanged when
  * it survives, null when it does not, so a caller cannot accidentally use an
- * ungated result -- there is no code path that produces a RouteFix without
- * passing through here.
+ * ungated result. No PRODUCTION path skips it -- flights.ts imports only
+ * resolveGatedRoute -- but lookupRoute is exported and returns an ungated
+ * RouteFix, so this is a convention the module surface does not enforce.
  */
 export function gateRoute(fix: RouteFix, lat: number, lon: number): RouteFix | null {
   const excess = corridorExcessKm(lat, lon, fix.origLat, fix.origLon, fix.destLat, fix.destLon);
@@ -171,19 +189,40 @@ export interface LookupOptions {
   timeoutMs?: number;
 }
 
-async function getText(url: string, opts: LookupOptions): Promise<string | null> {
+/**
+ * What one upstream request produced.
+ *
+ * The distinction that matters is `no-record` vs `unreachable`: both yield no
+ * route right now, but only the first is EVIDENCE that there is no route. The
+ * caller turns that into a 30-minute or a 60-second memory.
+ */
+type Answer =
+  | { kind: 'body'; text: string }
+  | { kind: 'no-record' }
+  | { kind: 'unreachable' };
+
+async function getText(url: string, opts: LookupOptions): Promise<Answer> {
   const doFetch = opts.fetchImpl ?? fetch;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? 3000);
   try {
     const res = await doFetch(url, { signal: ac.signal, headers: { accept: '*/*' } });
-    if (!res.ok) return null;
-    return await res.text();
+    if (!res.ok) {
+      // 429 and 5xx are the service declining to answer, not answering "no".
+      // Everything else -- 404 above all, which is these APIs' normal way of
+      // saying "not in this DB" -- is a real answer. Classifying narrowly is
+      // deliberate: if a service ever served 5xx for a genuinely unknown
+      // callsign, the cost is a 60s retry rather than a wrong permanent miss.
+      return res.status === 429 || res.status >= 500
+        ? { kind: 'unreachable' }
+        : { kind: 'no-record' };
+    }
+    return { kind: 'body', text: await res.text() };
   } catch {
-    // Timeout, DNS, transport -- all mean "no route this time". Deliberately
-    // silent: this runs per flight per cycle, and a third-party service being
-    // briefly unreachable is an expected condition, not an incident.
-    return null;
+    // Timeout, DNS, transport. Deliberately silent: this runs per flight per
+    // cycle, and a third-party service being briefly unreachable is an expected
+    // condition, not an incident -- but it is not a negative result either.
+    return { kind: 'unreachable' };
   } finally {
     clearTimeout(timer);
   }
@@ -208,11 +247,17 @@ export async function lookupRoute(
   const hit = cacheGet(cs, nowMs);
   if (hit) return hit.fix;
 
+  // Whether BOTH services actually answered. If either one did not, a null
+  // result is "we could not find out", which earns the short retry rather than
+  // the long negative -- the other one might well have known.
+  let answered = true;
+
   const a = await getText(ADSBDB + encodeURIComponent(cs), opts);
-  if (a) {
+  if (a.kind === 'unreachable') answered = false;
+  if (a.kind === 'body') {
     let parsed: RouteFix | null = null;
     try {
-      parsed = parseAdsbdb(JSON.parse(a));
+      parsed = parseAdsbdb(JSON.parse(a.text));
     } catch {
       parsed = null; // not JSON; fall through to hexdb
     }
@@ -223,8 +268,9 @@ export async function lookupRoute(
   }
 
   const h = await getText(HEXDB + encodeURIComponent(cs), opts);
-  const parsed = h ? parseHexdb(h) : null;
-  cacheSet(cs, parsed, nowMs);
+  if (h.kind === 'unreachable') answered = false;
+  const parsed = h.kind === 'body' ? parseHexdb(h.text) : null;
+  cacheSet(cs, parsed, nowMs, answered);
   return parsed;
 }
 

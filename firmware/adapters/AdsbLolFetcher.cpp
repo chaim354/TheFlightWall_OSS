@@ -9,7 +9,7 @@ Row shape (every field optional in practice):
 #include "adapters/AdsbLolFetcher.h"
 #include "core/Settings.h"
 #include "utils/GeoUtils.h"
-#include "utils/ServerJson.h"
+#include "utils/JsonOptional.h"
 #include <esp_heap_caps.h>
 
 static constexpr const char *kHost = "https://api.adsb.lol";
@@ -24,24 +24,13 @@ static constexpr double kNmToKm = 1.852;
 // Same safety cap as the other parsers: bounds the output vector, not the parse.
 static constexpr size_t kMaxFlights = 40;
 
-// Optional numeric field -> value-or-NAN, mirroring FlightWallServerFetcher's
-// optNum(). ArduinoJson's `a["field"] | NAN` idiom TYPE-CHECKS before
-// converting (is<float>() must hold, or the default wins) -- but `.isNull() ?
-// NAN : .as<double>()`, used elsewhere in this file until now, does NOT: it
-// only null-checks. A present-but-wrong-typed value (a JSON `true`, an array,
-// an object -- adsb.lol is a third-party feed we don't control) silently
-// coerces under .as<double>(): true becomes 1.0, an array/object becomes 0.0.
-// 0.0 in an altitude field renders as sea level -- the exact "silently renders
-// as fact" failure the "ground" string sentinel below exists to prevent, just
-// arriving through a different, less obvious door. Routing every numeric read
-// through this makes a wrong-typed value degrade to unknown, matching the
-// discipline the "ground" handling already applies to alt_baro's string case.
-static double optNum(JsonObject o, const char *key)
-{
-    JsonVariant v = o[key];
-    const bool present = !v.isNull() && v.is<float>();
-    return optionalNumber(present, present ? v.as<double>() : NAN);
-}
+// Numeric reads go through optNum() in utils/JsonOptional.h, which type-checks
+// rather than only null-checking. That matters here specifically: adsb.lol is a
+// third-party feed we do not control, and `.isNull() ? NAN : .as<double>()`
+// silently coerces a present-but-wrong-typed value -- a JSON true becomes 1.0,
+// an array or object becomes 0.0. Zero in an altitude field renders as sea
+// level, which is the same "silently renders as fact" failure the "ground"
+// string sentinel below exists to prevent, arriving through a quieter door.
 
 #if defined(BOARD_HAS_PSRAM)
 namespace
@@ -167,16 +156,25 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
         s.velocity = isnan(gsKt) ? NAN : gsKt * kKnotsToMetersPerSec;
         s.heading = optNum(a, "track");
 
-        double rateFpm = optNum(a, "baro_rate");
-        if (isnan(rateFpm))
-            rateFpm = optNum(a, "geom_rate");
+        // The "ground" sentinel governs the vertical rate too, not just altitude
+        // above. A surface aircraft has no climb rate, and the two fallback
+        // chains are otherwise identical -- leaving this one ungated let a
+        // rebroadcast row report a rate while its altitude had been discarded
+        // as unknowable. Matches server/src/adsblol.ts, which parses the same
+        // feed independently.
+        double rateFpm = NAN;
+        if (!s.on_ground)
+        {
+            rateFpm = optNum(a, "baro_rate");
+            if (isnan(rateFpm))
+                rateFpm = optNum(a, "geom_rate");
+        }
         s.vertical_rate = isnan(rateFpm) ? NAN : rateFpm * kFpmToMetersPerSec;
 
         // Inline, and the reason this source removes the aircraft lookup: type
         // is keyed by ICAO24 (the airframe), the one enrichment field that was
         // already 100% reliable.
         s.aircraft_type = String(a["t"] | "");
-        s.registration = String(a["r"] | "");
 
         // adsb.lol encodes the ADS-B emitter category as a STRING ("A7" =
         // rotorcraft); OpenSky uses an integer (8 = rotorcraft) and
@@ -204,8 +202,7 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
                                       : dirDeg;
 
         // NOT set: this source carries no route, so enrichment must still run.
-        // has_inline_enrichment means "the feed carried a ROUTE".
-        s.has_inline_enrichment = false;
+        // hasInlineRoute() means "the feed carried a ROUTE".
 
         outStateVectors.push_back(s);
     }

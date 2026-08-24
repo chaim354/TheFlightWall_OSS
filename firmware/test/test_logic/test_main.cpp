@@ -13,6 +13,7 @@ Compile-only check (no board):   pio test --without-uploading --without-testing
 
 #include "core/Filters.h"
 #include "core/Settings.h"
+#include "models/AirportInfo.h"
 
 // ---- Filters --------------------------------------------------------------
 
@@ -171,6 +172,163 @@ void test_server_url_trailing_slash_normalized()
     TEST_ASSERT_TRUE(g_settings.serverUrl == "https://example.com");
 }
 
+// ---- redacted settings projection ------------------------------------------
+
+// GET /api/settings is unauthenticated and reachable by any LAN peer; it used
+// to return the WiFi PSK, the OpenSky secret and the AeroAPI key in plaintext.
+void test_public_json_omits_secrets()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "hunter2";
+    g_settings.openSkyClientSecret = "osky-secret";
+    g_settings.aeroApiKey = "aero-key";
+
+    const String pub = g_settings.toJsonPublic();
+    TEST_ASSERT_TRUE(pub.indexOf("hunter2") < 0);
+    TEST_ASSERT_TRUE(pub.indexOf("osky-secret") < 0);
+    TEST_ASSERT_TRUE(pub.indexOf("aero-key") < 0);
+    // Replaced by booleans, which is all the UI needs.
+    TEST_ASSERT_TRUE(pub.indexOf("wifiPasswordSet") >= 0);
+    TEST_ASSERT_TRUE(pub.indexOf("openSkyClientSecretSet") >= 0);
+    TEST_ASSERT_TRUE(pub.indexOf("aeroApiKeySet") >= 0);
+    // Non-secret fields still travel.
+    TEST_ASSERT_TRUE(pub.indexOf("wifiSsid") >= 0);
+    TEST_ASSERT_TRUE(pub.indexOf("openSkyClientId") >= 0);
+}
+
+// The PERSISTENCE format must stay complete -- save() writes toJson(), and a
+// redacted file would lose the credentials on the next boot.
+void test_persisted_json_still_carries_secrets()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "hunter2";
+    const String full = g_settings.toJson();
+    TEST_ASSERT_TRUE(full.indexOf("hunter2") >= 0);
+}
+
+// An empty secret means "unchanged", never "clear". Without this, a browser
+// holding a cached OLD index.html against new firmware would post "" for a
+// password it could no longer read and strand the device in the open setup AP.
+void test_empty_secret_does_not_wipe_a_stored_one()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "hunter2";
+    g_settings.aeroApiKey = "aero-key";
+
+    TEST_ASSERT_TRUE(g_settings.fromJson(String(
+        "{\"network\":{\"wifiSsid\":\"Home\",\"wifiPassword\":\"\"},"
+        "\"api\":{\"aeroApiKey\":\"\"}}")));
+
+    TEST_ASSERT_TRUE(g_settings.wifiPassword == "hunter2");
+    TEST_ASSERT_TRUE(g_settings.aeroApiKey == "aero-key");
+    TEST_ASSERT_TRUE(g_settings.wifiSsid == "Home"); // non-secrets still apply
+}
+
+// A non-empty secret still replaces the stored one.
+void test_nonempty_secret_replaces()
+{
+    g_settings.seedDefaults();
+    g_settings.wifiPassword = "old";
+    TEST_ASSERT_TRUE(g_settings.fromJson(String("{\"network\":{\"wifiPassword\":\"new\"}}")));
+    TEST_ASSERT_TRUE(g_settings.wifiPassword == "new");
+}
+
+// ---- AirportInfo::displayCode ----------------------------------------------
+
+// The rule three consumers used to re-derive, one of them wrongly. The case
+// that mattered is the third: a server- or FR24-sourced flight carries IATA
+// only, and reading code_icao alone made the panel drop the route line
+// entirely.
+void test_airport_display_code()
+{
+    AirportInfo both;
+    both.code_icao = "KJFK";
+    both.code_iata = "JFK";
+    TEST_ASSERT_TRUE(both.displayCode() == "JFK"); // IATA preferred
+
+    AirportInfo icaoOnly;
+    icaoOnly.code_icao = "KJFK";
+    TEST_ASSERT_TRUE(icaoOnly.displayCode() == "KJFK"); // falls back
+
+    AirportInfo iataOnly; // what the server and FR24 paths actually produce
+    iataOnly.code_iata = "JFK";
+    TEST_ASSERT_TRUE(iataOnly.displayCode() == "JFK");
+
+    AirportInfo neither;
+    TEST_ASSERT_TRUE(neither.displayCode() == "");
+}
+
+// ---- seedDefaults ---------------------------------------------------------
+
+// The `erase` command's contract. seedDefaults() used to be a hand-maintained
+// second copy of ~30 field assignments, and it had silently omitted serverUrl
+// and positionSource -- so "reset to defaults" left a bad server URL in place
+// and wrote it back, useless exactly when a bad server URL is what you are
+// escaping. Dirty EVERY field this test can reach, then assert the reset really
+// resets, rather than spot-checking the ones that happened to be listed.
+void test_seed_defaults_resets_every_field()
+{
+    g_settings.seedDefaults();
+
+    // The two the old implementation forgot.
+    g_settings.serverUrl = "https://stale.example";
+    g_settings.positionSource = PositionSource::FlightWallServer;
+    // A spread across every other group, including nested structs.
+    g_settings.centerLat = 1.0;
+    g_settings.centerLon = 2.0;
+    g_settings.brightness = 99;
+    g_settings.maxFlights = 3;
+    g_settings.mode = TrackingMode::Flights;
+    g_settings.lightSensorEnabled = false;
+    g_settings.buttonsEnabled = false;
+    g_settings.panelChain = 7;
+    g_settings.layout.showRoute = false;
+    g_settings.filters.excludeOnGround = false;
+    g_settings.schedule.timezone = "PST8PDT";
+    g_settings.trackedFlights.push_back("DAL1");
+
+    g_settings.seedDefaults();
+
+    TEST_ASSERT_TRUE(g_settings.serverUrl == "");
+    TEST_ASSERT_EQUAL((int)PositionSource::OpenSky, (int)g_settings.positionSource);
+    TEST_ASSERT_EQUAL((int)TrackingMode::Area, (int)g_settings.mode);
+    TEST_ASSERT_TRUE(g_settings.lightSensorEnabled);
+    TEST_ASSERT_TRUE(g_settings.buttonsEnabled);
+    TEST_ASSERT_TRUE(g_settings.layout.showRoute);
+    TEST_ASSERT_TRUE(g_settings.filters.excludeOnGround);
+    TEST_ASSERT_TRUE(g_settings.schedule.timezone == "UTC0");
+    TEST_ASSERT_EQUAL(0, (int)g_settings.trackedFlights.size());
+}
+
+// A default-constructed Settings and seedDefaults() must agree with the config
+// headers, which is what the two lists failed at: Settings.h said San Francisco
+// while UserConfiguration.h said JFK, and UserConfiguration.h's own comment
+// ("They must agree") was the only thing asserting it.
+void test_seed_defaults_matches_config_constants()
+{
+    g_settings.seedDefaults();
+
+    TEST_ASSERT_EQUAL_DOUBLE(UserConfiguration::CENTER_LAT, g_settings.centerLat);
+    TEST_ASSERT_EQUAL_DOUBLE(UserConfiguration::CENTER_LON, g_settings.centerLon);
+    TEST_ASSERT_EQUAL_DOUBLE(UserConfiguration::RADIUS_KM, g_settings.radiusKm);
+    TEST_ASSERT_EQUAL(UserConfiguration::DISPLAY_BRIGHTNESS, g_settings.brightness);
+    TEST_ASSERT_EQUAL(UserConfiguration::MAX_FLIGHTS, g_settings.maxFlights);
+    TEST_ASSERT_EQUAL(UserConfiguration::TEXT_COLOR_R, g_settings.textColorR);
+    TEST_ASSERT_EQUAL(TimingConfiguration::DISPLAY_CYCLE_SECONDS, g_settings.cycleSeconds);
+    TEST_ASSERT_EQUAL(TimingConfiguration::FETCH_INTERVAL_SECONDS, g_settings.fetchIntervalSeconds);
+    TEST_ASSERT_EQUAL(HardwareConfiguration::PANEL_RES_X, g_settings.panelResX);
+    TEST_ASSERT_EQUAL(HardwareConfiguration::PANEL_RES_Y, g_settings.panelResY);
+    TEST_ASSERT_EQUAL(HardwareConfiguration::PANEL_CHAIN, g_settings.panelChain);
+
+    // And a fresh instance must equal a reset one on the same fields -- the two
+    // paths that used to disagree.
+    Settings fresh;
+    TEST_ASSERT_EQUAL_DOUBLE(fresh.centerLat, g_settings.centerLat);
+    TEST_ASSERT_EQUAL_DOUBLE(fresh.centerLon, g_settings.centerLon);
+    TEST_ASSERT_EQUAL((int)fresh.positionSource, (int)g_settings.positionSource);
+    TEST_ASSERT_TRUE(fresh.serverUrl == g_settings.serverUrl);
+}
+
 // ---- runner ---------------------------------------------------------------
 
 void setup()
@@ -185,6 +343,13 @@ void setup()
     RUN_TEST(test_position_source_roundtrip);
     RUN_TEST(test_position_source_unknown_falls_back_to_opensky);
     RUN_TEST(test_server_url_trailing_slash_normalized);
+    RUN_TEST(test_public_json_omits_secrets);
+    RUN_TEST(test_persisted_json_still_carries_secrets);
+    RUN_TEST(test_empty_secret_does_not_wipe_a_stored_one);
+    RUN_TEST(test_nonempty_secret_replaces);
+    RUN_TEST(test_airport_display_code);
+    RUN_TEST(test_seed_defaults_resets_every_field);
+    RUN_TEST(test_seed_defaults_matches_config_constants);
     UNITY_END();
 }
 

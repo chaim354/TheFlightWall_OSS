@@ -40,7 +40,21 @@ Depends on the panel's pixel pitch. A 128×64 build from two 64×64 panels is ro
 This firmware drives a **HUB75 RGB LED matrix** (like the 128×64 used by the FlightWall Mini), via the [ESP32-HUB75-MatrixPanel-DMA](https://github.com/mrcodetastic/ESP32-HUB75-MatrixPanel-DMA) library. Default geometry is a 64×64 panel ×2 chained = **128×64**; set your panel width/height and chain length from the web UI.
 
 ### HUB75 → ESP32 pin map
-The data pins are the only compile-time hardware setting — edit them in [`firmware/config/HardwareConfiguration.h`](firmware/config/HardwareConfiguration.h) to match your wiring:
+The data pins are the only compile-time hardware setting — edit them in [`firmware/config/HardwareConfiguration.h`](firmware/config/HardwareConfiguration.h) to match your wiring.
+
+**Two maps, and they are not interchangeable.** The header picks one at compile time from the target; these tables are what it picks. On an ESP32-S3 the classic map's GPIOs are nonexistent (22–25), SPI flash (26–32) or octal PSRAM (33–37), so wiring a breakout from the wrong table cannot work.
+
+**ESP32-S3** (the recommended board — [`esp32s3`](firmware/platformio.ini) env):
+
+| HUB75 | GPIO | HUB75 | GPIO | HUB75 | GPIO |
+|---|---|---|---|---|---|
+| R1 | 4 | R2 | 7 | A | 10 |
+| G1 | 5 | G2 | 8 | B | 11 |
+| B1 | 6 | B2 | 9 | C | 12 |
+| CLK | 17 | LAT | 15 | D | 13 |
+| OE | 16 | | | E | 14 |
+
+**ESP32 (original)** — the `esp32dev` env:
 
 | HUB75 | GPIO | HUB75 | GPIO | HUB75 | GPIO |
 |---|---|---|---|---|---|
@@ -71,7 +85,7 @@ The data for this project consists of two parts:
    - **[OpenSky](https://opensky-network.org)** — *default, free, needs an OAuth client id/secret.*
    - **Flightradar24** — *opt-in, no key.* An **unofficial** scrape of fr24.com's internal `feed.js` — the same JSON the live map uses. When a flight's row includes a route, that one call already has route/airline/aircraft too, so the per-flight enrichment lookup is skipped for it; when it doesn't (mainly non-scheduled/GA traffic), the normal enrichment lookup below still runs. Trade-offs: it **violates Flightradar24's Terms of Service** (personal/educational use only — see business@fr24.com for commercial), the endpoint is undocumented and can break or rate-limit, and it parses the whole area in one shot — so it's intended for the **ESP32-S3 (PSRAM)** and a modest radius. OpenSky remains the default; this is never on unless you select it.
    - **[adsb.lol](https://adsb.lol/)** — *opt-in, no key, no account.* A keyless community ADS-B aggregator (ODbL-licensed) — no ToS problem, unlike Flightradar24. Carries aircraft type and registration inline, plus a precomputed distance/bearing, so it replaces the per-flight aircraft lookup too. **Carries no route** — the enrichment lookup below still runs, same as under OpenSky.
-   - **FlightWall server** — *opt-in, needs a server URL.* Not a raw ADS-B feed — a small server *you deploy yourself* that fetches adsb.lol, joins it to airport schedules, and returns routes, resolved airline names, and ETA already computed, all in one HTTP call. Enrichment below does not run under this source; the server already did it. Falls back to adsb.lol (no route, no ETA) for the cycle if it can't be reached, and retries automatically — it never freezes or blanks the wall. See [`docs/superpowers/plans/2026-08-20-flightwall-server-worker.md`](docs/superpowers/plans/2026-08-20-flightwall-server-worker.md) to build and deploy one.
+   - **FlightWall server** — *opt-in, needs a server URL.* Not a raw ADS-B feed — a small server *you deploy yourself* that fetches adsb.lol, joins it to airport schedules, and returns routes, resolved airline names, and ETA already computed, all in one HTTP call. Enrichment below does not run under this source; the server already did it. Falls back to adsb.lol (no route, no ETA) for the cycle if it can't be reached, and retries automatically — it never freezes or blanks the wall. See [`server/README.md`](server/README.md) to build and deploy one.
 2. **Flight enrichment** — airline, route (origin/destination), and aircraft type. Always used under OpenSky and adsb.lol; under Flightradar24 it still runs for any flight whose row didn't already include a route; **skipped entirely under the FlightWall server**, which already resolved all three server-side. Selectable in the web UI:
    - **[adsbdb.com](https://www.adsbdb.com/)** — *default, free, no API key.* Callsign → route + airline, ICAO24 → aircraft type.
    - **[FlightAware AeroAPI](https://flightaware.com/aeroapi)** — paid; optional. Can be the primary source, or just a **backup** that only fires when adsbdb misses a flight (so you pay only for the gaps).
@@ -143,33 +157,40 @@ Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <ads
 - **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, which **fields** appear on each card (airline+flight, route, **ETA**, aircraft, altitude, speed, heading, vertical rate), and the **no-flights screen** (clock / aviation fun facts). ETA only ever renders for FlightWall-server flights with a resolved destination — blank otherwise, same as an unfilled route.
 - **Filters** — altitude band, hide aircraft on the ground, and an airline allow-list.
 - **Brightness schedule** — separate day/night brightness with configurable night hours, using a **POSIX timezone string** (e.g. `EST5EDT,M3.2.0,M11.1.0`) so daylight-saving transitions are handled automatically.
-- **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (34/35/36/39/33 — ADC2 can't be used with WiFi on), or an I²C **BH1750** lux sensor or **TCS3472** RGBC sensor on SDA=21/SCL=22. Threshold + hysteresis are tunable, and the web UI shows the live reading for calibration.
+- **Ambient light sensor** — optionally auto-blank (or dim) the panel when the room goes dark. Supports an analog photoresistor/LDR on an **ADC1** pin (ADC2 can't be used with WiFi on), or an I²C **BH1750** lux sensor or **TCS3472** RGBC sensor. **The usable pins differ per board**, so the device reports its own: `/api/status` publishes the ADC1 range and the I²C pins, and the web UI fills them in for you — read them there rather than from any table. Threshold + hysteresis are tunable, and the UI shows the live reading for calibration.
 - **Hardware** — tile size and tile count, so you can match any panel layout (changes apply after a restart).
 - **Live status** — current connection, mode, and the flights currently on the wall, each with its **distance** (the list is ordered nearest-first).
 
 Settings are stored on the device (LittleFS) and survive reboots — no re-flashing needed to change anything except the data pin.
 
+> **On credentials.** WiFi and API secrets are stored on the device and are **not**
+> returned by `GET /api/settings` — that endpoint is unauthenticated and reachable by
+> any peer on your LAN, so it reports only whether each secret is set. Leave a secret
+> field blank when saving to keep the stored value. Reading one back requires the
+> serial console, which needs physical possession. Note that a LAN peer can still
+> restart the device and change its settings; the config UI has no authentication.
+
 ## Airline logos
 
-The wall renders a **Mini-style flight card**: an airline logo tile on the left, then the flight number, route, aircraft, and your chosen metrics on the right. Logos are 16×16 tiles stored on the device at `firmware/data/logos/<ICAO>.rgb565` (keyed by the airline's ICAO code, e.g. `UAL.rgb565`).
+The wall renders a **Mini-style flight card**: an airline logo tile on the left, then the flight number, route, aircraft, and your chosen metrics on the right. Logos are 32×32 tiles stored on the device at `firmware/data/logos/<ICAO>.rgb565` (keyed by the airline's ICAO code, e.g. `UAL.rgb565`).
 
 - A bundled set of **150+ carriers worldwide** (passenger and cargo) ships in the repo as brand-colored code-badge tiles — the airline's 2-letter code on its brand color, not trademarked logo artwork. Airlines without a tile fall back to the same brand-style badge generated on the fly.
 - They're flashed as part of the LittleFS image (`pio run -t uploadfs`).
 
 ### Add or replace logos
-- **Use real artwork** (one airline) — convert a PNG you have rights to use, then re-flash the filesystem:
+- **Use real artwork** (one airline) — convert a PNG you have rights to use, then re-flash the filesystem. Both converters share one transform ([`tools/rgb565_tile.py`](tools/rgb565_tile.py)), so a single logo and a batch give identical pixels, and artwork too dark to see on an unlit panel is flattened onto white instead of black:
   ```bash
   pip install pillow
-  python3 tools/png_to_rgb565.py my_airline.png firmware/data/logos/SWA.rgb565 --size 16
+  python3 tools/png_to_rgb565.py my_airline.png firmware/data/logos/SWA.rgb565
   pio run -t uploadfs   # from the firmware/ folder
   ```
 - **Batch-convert a whole folder** of `<ICAO>.png` logos at once:
   ```bash
-  python3 tools/convert_logo_folder.py ~/airline_logos firmware/data/logos --size 16
+  python3 tools/convert_logo_folder.py ~/airline_logos firmware/data/logos
   ```
-- **Regenerate the bundled code-badge tiles** (no dependencies): edit the `AIRLINES` table in [`tools/gen_starter_logos.py`](tools/gen_starter_logos.py) and run `python3 tools/gen_starter_logos.py`.
+- **Regenerate the bundled code-badge tiles** (no dependencies): edit the `AIRLINES` table in [`tools/gen_starter_logos.py`](tools/gen_starter_logos.py) and run `python3 tools/gen_starter_logos.py`. Tiles that already exist are skipped, so your own artwork is safe; pass `--force` to overwrite them.
 
-Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64. **For a 128×64 panel use `--size 32`** (the big-panel layout draws a 32×32 logo); the renderer auto-fits whatever size you provide. The bundled brand badges are 16×16 and get upscaled when needed.
+Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64, and every tool here defaults to 32×32 — the size the bundled badges ship at and the size the 128×64 big-panel layout draws. Pass `--size` to the converters only if you want something else; the renderer auto-fits whatever size you provide, but it only ever upscales.
 
 ### Layouts by panel size
 The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft Spd:258mph` / `Trk:263deg <flight #>`, with IATA airport codes) — the second row shows the flight number or vertical rate depending on the toggle above, except that a resolved ETA (FlightWall server only) takes that slot instead, e.g. `Trk:263deg ETA:~1h05`; **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.

@@ -9,7 +9,6 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
   - *Flights* — a user list of idents/callsigns/tails looked up directly via AeroAPI; metrics from `last_position`.
 - **Enrich flights** (airline / route / aircraft type) from a selectable source: **adsbdb.com** (free, no key — default), **AeroAPI** (paid; usable as primary or as a backup that only fires when adsbdb misses), or off. adsbdb provides the airline name and route, with a hexdb.io fallback; the aircraft field shows the ICAO type code. Results are cached per flight leg to minimize requests.
 - **Render** a Mini-style flight card — airline logo tile on the left, then a configurable set of fields (flight #, route, ETA, aircraft, altitude, speed, heading, vertical rate) on the right — on a **HUB75 RGB LED matrix**, cycling up to N flights. ETA only ever appears for FlightWall-server flights with a resolved destination. Logos load from `data/logos/<ICAO>.rgb565`; airlines without a tile get a brand-style code badge.
-- **Live web preview** — each frame is composed into an in-RAM `GFXcanvas16` and blitted to the panel; the same buffer is served at `/api/framebuffer` so the web UI mirrors the wall pixel-for-pixel.
 - **Brightness scheduling** — day/night brightness using NTP time.
 - **WiFi provisioning** — falls back to a `FlightWall-Setup` access point with a captive portal when no credentials are saved.
 
@@ -23,7 +22,7 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - **adapters/FlightWallServerFetcher**: One GET to a self-hosted FlightWall server; fills a display-ready `FlightInfo` list directly (route, airline name, ETA already computed), skipping Area-mode enrichment entirely. Falls back to `AdsbLolFetcher` for the cycle if the server is unreachable.
 - **adapters/AeroAPIFetcher**: Retrieves flight details + last-position metrics by ident via AeroAPI.
 - **adapters/AdsbdbFetcher**: Free enrichment via adsbdb.com (airline name + route by callsign, ICAO aircraft type by ICAO24), with a hexdb.io fallback.
-- **adapters/Hub75Display**: Composes each frame into a `GFXcanvas16`, blits to the HUB75 panel, and draws the Mini-style logo + layout card; cycles flights; runtime brightness/color/geometry; exposes the framebuffer for the web preview.
+- **adapters/Hub75Display**: Composes each frame into a `GFXcanvas16`, blits to the HUB75 panel, and draws the Mini-style logo + layout card; cycles flights; runtime brightness/color/geometry.
 - **config/**: Compile-time *default* values (used to seed runtime Settings on first boot).
 - **models/**: Lightweight structs for `StateVector`, `FlightInfo` (now incl. metrics), `AirportInfo`.
 - **utils/GeoUtils.h**: Haversine distance and bounding boxes.
@@ -39,9 +38,40 @@ This is a high-level overview of the firmware that powers TheFlightWall on ESP32
 - Reachable on the network at `http://flightwall.local` (mDNS) once connected.
 
 ### Tests
-Pure logic (filters + Settings JSON parse/round-trip) is covered by Unity tests in `test/`:
+Three, and they run in different places.
+
+**Host tests — no board needed.** The pure-logic suites (`test/test_*.cpp`: parsers,
+classify, lru, buttons, clock, route, serverjson, serverbackoff) are standalone g++
+programs, each with its own `main()`:
+- `./run_host_tests.sh` — build and run all of them; exits non-zero if any fails.
+- `./run_host_tests.sh route lru` — just those.
+
+Adding `test/test_foo.cpp` is enough for it to be picked up; the runner globs, so there
+is no list to update. Each file guards its body with `#ifndef PIO_UNIT_TESTING`, which
+is what keeps it out of the `pio test` binary — see the comment in `platformio.ini`.
+
+**On-device tests.** Unity suite in `test/test_logic/`, covering filters and the
+Settings JSON parse/round-trip:
 - `pio test` — build, flash, and run on a connected ESP32 (reports over serial).
 - `pio test --without-uploading --without-testing` — compile-only check, no board needed.
+
+**Web UI — no board needed.** `data/index.html` is served from LittleFS, so the only
+way to exercise it used to be `pio run -t uploadfs`, which erases `/settings.json`.
+Instead, stub the device API and drive the real page in a browser:
+
+```bash
+node ../tools/webui_stub.mjs        # http://localhost:8099
+```
+
+Query-string knobs make the awkward states reachable — a slow or failing
+`/api/settings`, a hostile SSID, firmware without the heap-block fields — and
+`/__probe` reports what the page actually sent. The script header lists the knobs and
+carries a reproduction recipe for each of the four defects the 2026-08-23 audit found
+here, written as the assertion that fails on unfixed code.
+
+It refuses to start if its canned settings payload is missing any field
+`loadSettings()` reads: an incomplete stub makes the page throw partway and leaves
+Save disabled, which looks exactly like the bug you would be testing for.
 
 ### Notes
 - OpenSky OAuth is required for `states/all`. Token auto-refreshes with a safety skew.

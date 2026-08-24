@@ -22,6 +22,11 @@ look like a pitch-black room and blank the panel.
 
 #include <Arduino.h>
 
+// Opaque-enum declaration rather than including core/Settings.h -- no header in
+// this tree includes it, and this is legal (and gives a complete type usable as
+// a member) because the underlying type is fixed where the enum is defined.
+enum class LightSensorType : uint8_t;
+
 class LightSensor
 {
 public:
@@ -33,8 +38,20 @@ public:
 private:
     bool _dark = false;
     int _last = -1;
-    bool _i2cReady = false;    // I2C part present + configured
-    bool _analogReady = false; // analog pin passed the per-board ADC1 range check
+
+    // WHAT begin() ACTUALLY BROUGHT UP -- not what Settings currently says.
+    // These used to be two bare bools, so readiness certified a configuration
+    // the object did not store: readSensor() dispatched on the LIVE
+    // g_settings.lightSensorType and sampled the LIVE g_settings.lightSensorPin
+    // while guarded only by a flag meaning "some pin, once, passed validation".
+    // Change the pin without re-running begin() (the serial console had no
+    // settings-changed signal) and analogRead() would sample an unvalidated pin,
+    // which reads 0, which is not < 0, so update()'s fail-safe was skipped and
+    // the panel latched dark permanently. Storing the configuration is what
+    // makes that state unrepresentable.
+    bool _ready = false;
+    LightSensorType _type{};
+    uint8_t _pin = 0;
 
     int readSensor();
 };

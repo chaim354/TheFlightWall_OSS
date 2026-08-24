@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { parseFids } from '../src/schedule/aerodatabox';
+import { parseFids, fetchBoard } from '../src/schedule/aerodatabox';
 
 // Live fixture: KJFK board, 4-hour window around 2026-08-20T21:30Z,
 // withLeg=true&direction=Both, 261 rows (131 arrivals + 130 departures).
@@ -527,5 +527,63 @@ describe('revArrEpoch: revised arrival time (AeroDataBox\'s revisedTime, delay-a
     expect(out).toHaveLength(1);
     expect(out[0]!.schedArrEpoch).toBeNull();
     expect(out[0]!.revArrEpoch).toBe(Math.floor(Date.parse('2026-08-20 12:34Z') / 1000));
+  });
+});
+
+describe('fetchBoard', () => {
+  // F-SRV12-A, defence-in-depth BEHIND refresh.ts's write gate -- not a
+  // substitute for it. fetchBoard used to collapse three different outcomes
+  // into one empty array: an genuinely empty board, a payload whose shape
+  // changed, and a board ICAO we hold no coordinates for. The third is a
+  // CONFIG error knowable before any I/O, and it was costing a real billable
+  // call (2 units) every pass, forever, reported nowhere -- roughly 720 wasted
+  // units/month per bad board against a 6,000-unit budget.
+  //
+  // This is also the first direct test of fetchBoard: it had none, because it
+  // called global fetch with no injection point. It now takes the same
+  // fetchImpl seam panynj.fetchBoard has.
+
+  const ok = (body: unknown): typeof fetch =>
+    (async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch;
+
+  it('refuses an unrecognised board ICAO before spending a billable call', async () => {
+    let called = 0;
+    const spy = (async () => {
+      called++;
+      return { ok: true, status: 200, json: async () => ({ arrivals: [], departures: [] }) };
+    }) as unknown as typeof fetch;
+
+    await expect(fetchBoard('ZZZZ', 'key', { fetchImpl: spy }))
+      .rejects.toThrow(/no coordinates for this board/);
+    expect(called).toBe(0); // the point: no request was sent at all
+  });
+
+  it('throws on a payload carrying neither list, rather than reporting an empty board', async () => {
+    // What a shape change looks like: 200, valid JSON, no recognisable lists.
+    await expect(
+      fetchBoard('KJFK', 'key', { fetchImpl: ok({ flights: [] }) }),
+    ).rejects.toThrow(/neither arrivals nor departures/);
+  });
+
+  it('accepts a genuinely empty board when the lists are present', async () => {
+    // Distinguishable from the case above, which is the whole point.
+    await expect(
+      fetchBoard('KJFK', 'key', { fetchImpl: ok({ arrivals: [], departures: [] }) }),
+    ).resolves.toEqual([]);
+  });
+
+  it('accepts a board carrying only one of the two lists', async () => {
+    const rows = await fetchBoard('KJFK', 'key', { fetchImpl: ok({ departures: [] }) });
+    expect(rows).toEqual([]);
+  });
+
+  it('still throws on a non-200', async () => {
+    const bad = (async () => ({ ok: false, status: 429, json: async () => ({}) })) as unknown as typeof fetch;
+    await expect(fetchBoard('KJFK', 'key', { fetchImpl: bad })).rejects.toThrow(/429/);
+  });
+
+  it('parses a real board through the same path', async () => {
+    const rows = await fetchBoard('KJFK', 'key', { fetchImpl: ok(raw) });
+    expect(rows.length).toBeGreaterThan(100);
   });
 });

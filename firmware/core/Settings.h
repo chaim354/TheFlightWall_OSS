@@ -16,7 +16,23 @@ Flow:
 
 #include <Arduino.h>
 #include <vector>
-#include "config/HardwareConfiguration.h" // board-guarded default light-sensor pin
+#include "config/HardwareConfiguration.h" // board-guarded pins + panel geometry
+#include "config/UserConfiguration.h"     // location, brightness, colours, carousel size
+#include "config/TimingConfiguration.h"   // fetch cadence + display cycle
+
+// The initialisers below are THE defaults. seedDefaults() resets to them via
+// `*this = Settings()` and then overlays only the five credentials that live in
+// Secrets.h -- so a field added to this struct is in the reset path
+// automatically. It used to be a hand-maintained second copy in Settings.cpp,
+// which had already drifted (centerLat/centerLon said San Francisco here and
+// JFK there) and had silently omitted serverUrl and positionSource entirely.
+// Name the config constant rather than restating its value: a literal here is
+// how that drift starts.
+//
+// WiFiConfiguration.h / APIConfiguration.h are deliberately NOT included -- they
+// pull in Secrets.h, and this header is included by nearly every translation
+// unit. Keeping credential seeding in the .cpp confines the baked-in password to
+// one TU.
 
 enum class TrackingMode : uint8_t
 {
@@ -130,20 +146,20 @@ struct Settings
 
     // ---- Tracking ----
     TrackingMode mode = TrackingMode::Area;
-    double centerLat = 37.7749;
-    double centerLon = -122.4194;
-    double radiusKm = 10.0;
+    double centerLat = UserConfiguration::CENTER_LAT;
+    double centerLon = UserConfiguration::CENTER_LON;
+    double radiusKm = UserConfiguration::RADIUS_KM;
     bool autoLocateOnBoot = false; // set center from IP geolocation each boot
     std::vector<String> trackedFlights; // idents / callsigns / tails for Flights mode
 
     // ---- Display ----
-    uint8_t brightness = 20;
-    uint8_t textColorR = 255;
-    uint8_t textColorG = 255;
-    uint8_t textColorB = 255;
-    uint8_t maxFlights = 12;       // up to N aircraft kept/cycled (must match UserConfiguration::MAX_FLIGHTS)
-    uint32_t cycleSeconds = 3;     // seconds per flight when cycling
-    uint32_t fetchIntervalSeconds = 30;
+    uint8_t brightness = UserConfiguration::DISPLAY_BRIGHTNESS;
+    uint8_t textColorR = UserConfiguration::TEXT_COLOR_R;
+    uint8_t textColorG = UserConfiguration::TEXT_COLOR_G;
+    uint8_t textColorB = UserConfiguration::TEXT_COLOR_B;
+    uint8_t maxFlights = UserConfiguration::MAX_FLIGHTS; // length of the carousel, not what is on screen
+    uint32_t cycleSeconds = TimingConfiguration::DISPLAY_CYCLE_SECONDS;
+    uint32_t fetchIntervalSeconds = TimingConfiguration::FETCH_INTERVAL_SECONDS;
 
     DisplayLayout layout;
     AircraftFilters filters;
@@ -170,9 +186,9 @@ struct Settings
     uint8_t lightDimBrightness = 3;     // brightness used when dimming in the dark
 
     // ---- Hardware: HUB75 panel geometry (web-editable; applied on restart) ----
-    uint16_t panelResX = 64; // pixels wide per panel module
-    uint16_t panelResY = 64; // pixels high per panel module
-    uint8_t panelChain = 2;  // panels chained -> matrix width = panelResX * panelChain
+    uint16_t panelResX = HardwareConfiguration::PANEL_RES_X; // pixels wide per panel module
+    uint16_t panelResY = HardwareConfiguration::PANEL_RES_Y; // pixels high per panel module
+    uint8_t panelChain = HardwareConfiguration::PANEL_CHAIN;  // panels chained -> matrix width = panelResX * panelChain
 
     // HUB75 signal-integrity tuning (try these if pixels flicker / shift by one):
     bool panelClkPhase = false;       // default off — fixes the off-by-one pixel shift on most panels
@@ -186,10 +202,49 @@ struct Settings
     bool save() const;     // write /settings.json
     void seedDefaults();   // populate from compile-time config/*.h
 
-    String toJson() const;            // serialize for the web UI / persistence
+    // FULL serialization, secrets included. This is the PERSISTENCE format --
+    // save() writes it to /settings.json -- and it must stay complete.
+    String toJson() const;
+
+    // The same document with the three secrets REDACTED: wifiPassword,
+    // openSkyClientSecret and aeroApiKey are replaced by `<name>Set` booleans.
+    //
+    // A sibling rather than a flag inside toJson(), because toJson() is
+    // simultaneously the wire format and the persistence format -- one
+    // serializer, two audiences with incompatible requirements. Masking inside
+    // it would write masked values to flash.
+    //
+    // GET /api/settings served the full document, unauthenticated, to any LAN
+    // peer. The UI does not need the values back: it assigns them into
+    // type="password" inputs and nothing displays, validates, compares or
+    // computes on them. The booleans are enough to show whether each is set.
+    String toJsonPublic() const;
     bool fromJson(const String &in);  // apply an incoming JSON document
 
+private:
+    // mutable: save() is const, and this is bookkeeping about persistence
+    // rather than part of the settings themselves.
+    mutable bool _dirty = false;
+    String serialize(bool redactSecrets) const;
+
+public:
+
     bool hasWifi() const { return wifiSsid.length() > 0; }
+
+    // DEFERRED-WRITE BOOKKEEPING.
+    //
+    // Button-driven changes are coalesced rather than written on every press: a
+    // brightness ramp touches this struct on every rung and save() rewrites the
+    // whole file, so main.cpp debounces ~10s. The flag lives HERE rather than
+    // beside that timer because the thing that has to consult it -- "am I about
+    // to reboot with an unsaved change?" -- happens in three translation units,
+    // and two of them cannot see main.cpp's statics. Both restart paths used to
+    // simply drop the pending write: press the mode button, hit Restart in the
+    // web UI within ten seconds, and noFlightsMode reverted.
+    //
+    // main.cpp still owns WHEN to coalesce; this owns WHETHER anything is owed.
+    void markDirty() { _dirty = true; }
+    bool dirty() const { return _dirty; }
 };
 
 extern Settings g_settings;

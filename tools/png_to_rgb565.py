@@ -4,7 +4,12 @@ Convert a logo image (PNG/JPG/etc.) into the LED panel's .rgb565 tile format so
 you can ship real airline artwork on the wall.
 
 Usage:
-    python3 tools/png_to_rgb565.py united.png firmware/data/logos/UAL.rgb565 [--size 16]
+    python3 tools/png_to_rgb565.py united.png firmware/data/logos/UAL.rgb565 [--size 32]
+
+The image transform itself lives in rgb565_tile.py, shared with
+convert_logo_folder.py -- the two used to carry different copies, and this one
+was missing the dark-on-transparent rescue, so a black wordmark converted here
+came out invisible on the panel.
 
 Requires Pillow:  pip install pillow
 
@@ -13,39 +18,23 @@ Output format (.rgb565), little-endian:
 Transparent pixels are flattened onto black (the panel's "off" color).
 """
 import argparse
-import struct
 
-try:
-    from PIL import Image
-except ImportError:
-    raise SystemExit("Pillow is required: pip install pillow")
+from rgb565_tile import TILE_SIZE, convert
 
 
-def rgb565(r, g, b):
-    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-
-
-def main():
+def build_parser():
     ap = argparse.ArgumentParser()
     ap.add_argument("input")
     ap.add_argument("output")
-    ap.add_argument("--size", type=int, default=16, help="square tile size (px)")
-    args = ap.parse_args()
+    ap.add_argument("--size", type=int, default=TILE_SIZE, help="square tile size (px)")
+    ap.add_argument("--no-normalize", action="store_true", help="skip brightness normalization")
+    return ap
 
-    img = Image.open(args.input).convert("RGBA")
-    img = img.resize((args.size, args.size), Image.LANCZOS)
 
-    bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
-    img = Image.alpha_composite(bg, img).convert("RGB")
-
-    w, h = img.size
-    with open(args.output, "wb") as f:
-        f.write(struct.pack("<HH", w, h))
-        for y in range(h):
-            for x in range(w):
-                r, g, b = img.getpixel((x, y))
-                f.write(struct.pack("<H", rgb565(r, g, b)))
-    print(f"Wrote {w}x{h} tile -> {args.output}")
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    convert(args.input, args.output, args.size, do_normalize=not args.no_normalize)
+    print(f"Wrote {args.output} ({args.size}x{args.size})")
 
 
 if __name__ == "__main__":

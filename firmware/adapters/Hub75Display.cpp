@@ -3,8 +3,7 @@ Purpose: Render flight info on a HUB75 RGB LED matrix.
 Responsibilities:
 - Initialize the panel from runtime Settings (geometry/brightness) and the
   compile-time HUB75 pin map (HardwareConfiguration).
-- Compose each frame into an in-RAM GFXcanvas16, then blit it to the panel; the
-  same canvas backs framebuffer() for the web preview.
+- Compose each frame into an in-RAM GFXcanvas16, then blit it to the panel.
 - Render a Mini-style flight card (airline logo tile + flight #, route, aircraft,
   and the configured metrics), cycling through multiple flights.
 Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
@@ -18,6 +17,7 @@ Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
 #include "esp_heap_caps.h"
 #include "config/HardwareConfiguration.h"
 #include "config/FunFacts.h"
+#include "utils/ServerJson.h" // renderable()
 #include "core/Settings.h"
 #include "utils/ClockFormat.h"
 
@@ -177,19 +177,6 @@ void Hub75Display::drawToastIfActive()
     drawTextLine(2, y + 2, _toastText, 0xFFFF);
 }
 
-const uint16_t *Hub75Display::framebuffer(uint16_t &w, uint16_t &h) const
-{
-    if (!_canvas)
-    {
-        w = 0;
-        h = 0;
-        return nullptr;
-    }
-    w = _matrixWidth;
-    h = _matrixHeight;
-    return _canvas->getBuffer();
-}
-
 void Hub75Display::setBrightness(uint8_t brightness)
 {
     if (_panel)
@@ -230,7 +217,7 @@ String Hub75Display::truncateToColumns(const String &text, int maxColumns)
 
 static String formatAltitude(double altFt)
 {
-    if (isnan(altFt))
+    if (!renderable(altFt))
         return String("");
     long ft = (long)(altFt + 0.5);
     if (ft >= 18000)
@@ -240,7 +227,7 @@ static String formatAltitude(double altFt)
 
 static String formatHeading(double deg)
 {
-    if (isnan(deg))
+    if (!renderable(deg))
         return String("");
     long d = ((long)(deg + 0.5)) % 360;
     if (d < 0)
@@ -250,18 +237,27 @@ static String formatHeading(double deg)
     return String(buf);
 }
 
+// AeroAPI's Flights-mode feed reports a DIRECTION rather than a rate: a
+// documented +/-1.0 sentinel meaning "climbing" / "descending", not one foot per
+// minute. Both vertical-rate formatters have to know that, so the rule lives in
+// one place rather than in whichever of them happens to remember it.
+static bool isDirectionOnlyRate(double fpm) { return fabs(fpm) <= 2.0; }
+
+static String directionOnlyRate(double fpm)
+{
+    if (fpm > 0)
+        return String("CLB");
+    if (fpm < 0)
+        return String("DES");
+    return String("LVL");
+}
+
 static String formatVerticalRate(double fpm)
 {
-    if (isnan(fpm))
+    if (!renderable(fpm))
         return String("");
-    if (fabs(fpm) <= 2.0) // direction-only indicator (Flights mode)
-    {
-        if (fpm > 0)
-            return String("CLB");
-        if (fpm < 0)
-            return String("DES");
-        return String("LVL");
-    }
+    if (isDirectionOnlyRate(fpm))
+        return directionOnlyRate(fpm);
     long v = (long)(fpm + (fpm >= 0 ? 0.5 : -0.5));
     return String(v > 0 ? "+" : "") + String(v) + "fpm";
 }
@@ -288,8 +284,8 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
 
     if (L.showRoute)
     {
-        String origin = f.origin.code_icao;
-        String dest = f.destination.code_icao;
+        String origin = f.origin.displayCode();
+        String dest = f.destination.displayCode();
         if (origin.length() || dest.length())
             outLines.push_back(origin + ">" + dest);
     }
@@ -306,7 +302,7 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
 
     if (L.showAircraft)
     {
-        String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+        String type = f.aircraft_code;
         if (type.length())
             outLines.push_back(type);
     }
@@ -318,7 +314,7 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
             outLines.push_back(a);
     }
 
-    if (L.showSpeed && !isnan(f.groundspeed_kt))
+    if (L.showSpeed && renderable(f.groundspeed_kt))
         outLines.push_back(String((long)(f.groundspeed_kt + 0.5)) + "kt");
 
     if (L.showHeading)
@@ -374,12 +370,35 @@ const Hub75Display::LogoTile *Hub75Display::tileFor(const String &key)
         f.close();
     }
 
-    // put() takes the value by const&, so insert an empty shell and move the
-    // decoded pixels into it — no transient second copy of the tile.
-    _logoCache.put(key, LogoTile{});
-    LogoTile *slot = _logoCache.find(key); // just inserted -> MRU, never null
-    *slot = std::move(tile);
-    return slot;
+    // Move the decoded tile straight in and use the slot put() hands back. The
+    // old shape inserted an empty LogoTile first and then found it -- which
+    // stored the w==0 "known missing" sentinel for the duration, and assumed
+    // the find could not fail. It can: with capacity 0 the entry is evicted on
+    // the way in, and _logoCache is sized from a runtime setting.
+    return _logoCache.put(key, std::move(tile));
+}
+
+// The key the accent colour is hashed from.
+//
+// Two call sites used to derive this differently for the same flight: the badge
+// fill hashed operator_icao else the uppercased FIRST TWO CHARS of
+// iata/icao/operator_code, while the side-by-side separator hashed operator_icao
+// else the FULL operator_code. accentColorFor is FNV-1a, so for any flight
+// WITHOUT an operator_icao -- GA and private traffic, which is most of what has
+// no ICAO operator -- the badge and the separator came out completely unrelated
+// hues on the same card.
+//
+// Unified on the full string rather than the two-char prefix: more input means
+// fewer carriers colliding onto one colour. operator_iata is the last resort
+// rather than the second, so the key is never the empty string (which would
+// hash every operator-less flight to one shared colour).
+static String operatorAccentKey(const FlightInfo &f)
+{
+    if (f.operator_icao.length())
+        return f.operator_icao;
+    if (f.operator_code.length())
+        return f.operator_code;
+    return f.operator_iata;
 }
 
 uint16_t Hub75Display::accentColorFor(const String &code)
@@ -445,11 +464,15 @@ void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, in
         return;
     }
 
+    // The two-character badge TEXT keeps its own iata-first chain -- that is what
+    // reads best in a 2-glyph box -- but the COLOUR is keyed independently, and
+    // on the full string. They were entangled before, which is how the badge and
+    // the separator ended up hashing different things.
     String code = f.operator_iata.length() ? f.operator_iata
                   : (f.operator_icao.length() ? f.operator_icao : f.operator_code);
     code = code.substring(0, 2);
     code.toUpperCase();
-    String key = f.operator_icao.length() ? f.operator_icao : code;
+    const String key = operatorAccentKey(f);
 
     const uint8_t ts = (h >= 24) ? 2 : 1; // larger code text in a tall box
     _canvas->fillRect(x, y, w, h, accentColorFor(key));
@@ -497,8 +520,8 @@ void Hub75Display::displayFlightCard(const FlightInfo &f)
 // "ORD-LAX" style route, preferring IATA codes.
 static String iataRoute(const FlightInfo &f)
 {
-    String o = f.origin.code_iata.length() ? f.origin.code_iata : f.origin.code_icao;
-    String d = f.destination.code_iata.length() ? f.destination.code_iata : f.destination.code_icao;
+    String o = f.origin.displayCode();
+    String d = f.destination.displayCode();
     if (!o.length() && !d.length())
         return String("");
     return o + "-" + d;
@@ -508,7 +531,7 @@ static String iataRoute(const FlightInfo &f)
 // reclaim width instead of truncating with an ellipsis).
 static String miniAlt(double ft, bool unit)
 {
-    if (isnan(ft))
+    if (!renderable(ft))
         return String("");
     if (ft >= 1000)
     {
@@ -521,14 +544,14 @@ static String miniAlt(double ft, bool unit)
 
 static String miniSpdMph(double kt, bool unit)
 {
-    if (isnan(kt))
+    if (!renderable(kt))
         return String("");
     return String((long)(kt * 1.15078 + 0.5)) + (unit ? "mph" : "");
 }
 
 static String miniTrk(double deg, bool unit)
 {
-    if (isnan(deg))
+    if (!renderable(deg))
         return String("");
     long d = ((long)(deg + 0.5)) % 360;
     if (d < 0)
@@ -538,8 +561,15 @@ static String miniTrk(double deg, bool unit)
 
 static String miniVr(double fpm, bool unit)
 {
-    if (isnan(fpm))
+    if (!renderable(fpm))
         return String("");
+    // Without this the sentinel divided by 60 and rounded to zero, so the mini
+    // layout printed "0ft/s" -- LEVEL -- for an aircraft AeroAPI had reported as
+    // climbing or descending, while formatVerticalRate on every other layout
+    // showed CLB/DES for the same flight. Same defect as AirportInfo's display
+    // code: one rule, two encodings, one of them wrong.
+    if (isDirectionOnlyRate(fpm))
+        return directionOnlyRate(fpm);
     long fps = (long)(fpm / 60.0 + (fpm >= 0 ? 0.5 : -0.5));
     return String(fps) + (unit ? "ft/s" : "");
 }
@@ -620,7 +650,7 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
                      : (f.operator_iata.length() ? f.operator_iata
                         : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
     String route = iataRoute(f);
-    String type = f.aircraft_display_name_short.length() ? f.aircraft_display_name_short : f.aircraft_code;
+    String type = f.aircraft_code;
     airline = airlineNameOverride(f.operator_icao, airline);
     if (!airline.length())
         airline = f.ident.length() ? f.ident : String("?");
@@ -753,8 +783,7 @@ void Hub75Display::displaySideBySideCard(const FlightInfo &f)
     drawLogoOrBadge(f, boxX, boxY, boxW, boxH);
 
     const int16_t sepX = boxX + boxW + 1;
-    _canvas->drawLine(sepX, 1, sepX, _matrixHeight - 2,
-                      accentColorFor(f.operator_icao.length() ? f.operator_icao : f.operator_code));
+    _canvas->drawLine(sepX, 1, sepX, _matrixHeight - 2, accentColorFor(operatorAccentKey(f)));
 
     const int16_t tx = sepX + 2;
     const int maxCols = (_matrixWidth - tx - 1) / 6;
@@ -933,91 +962,78 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
     present();
 }
 
-// Frame key for the active no-flights mode: a value that changes exactly when
-// the screen should redraw. Returns -1 for the static "dots" mode (never
-// animates). For clock: the current local minute-of-day (updates each minute).
-// For funfact: the rotating fact index. For clockfact: combine the alternation
-// phase with whichever sub-screen is active.
-long Hub75Display::noFlightsFrameKey()
+// Decide, once, what the no-flights screen should be showing and what value
+// changes exactly when it needs redrawing.
+//
+// Everything that was duplicated lives here: which mode was configured, which
+// half of clockfact's alternation is up, and whether a requested clock is
+// actually usable (time(nullptr) < 100000 means NTP has not synced).
+Hub75Display::NoFlightsFrame Hub75Display::noFlightsFrame() const
 {
     const String &mode = g_settings.layout.noFlightsMode;
     const bool wantClock = (mode == "clock" || mode == "clockfact");
     const bool wantFact = (mode == "funfact" || mode == "clockfact");
+
+    NoFlightsFrame f;
     if (!wantClock && !wantFact)
-        return -1; // "dots" (or unknown) -> static
+        return f; // "dots" or an unknown value -> static
 
-    long key = 0;
-    if (mode == "clockfact")
-    {
-        // Alternate every rotate interval; key must move on each phase flip and
-        // on the underlying clock-minute / fact rotation.
-        const long phase = (long)((millis() / kNoFlightsRotateMs) % 2);
-        key = phase * 1000000L;
-    }
+    // Read millis() ONCE: both halves of clockfact derived their phase from
+    // separate reads, which could straddle a rotate boundary.
+    const unsigned long ticks = millis() / kNoFlightsRotateMs;
+    const size_t factCount = kFunFactCount ? kFunFactCount : 1;
+    const size_t factIdx = (size_t)(ticks % factCount);
 
-    if (wantClock && (mode != "clockfact" || (millis() / kNoFlightsRotateMs) % 2 == 0))
+    const bool clockPhase = (mode != "clockfact") || (ticks % 2 == 0);
+    const bool synced = time(nullptr) >= 100000;
+
+    if (wantClock && clockPhase && synced)
     {
+        struct tm tmv;
         time_t now = time(nullptr);
-        if (now < 100000) // not synced -> fall back to fact rotation / dots
-            key += (long)((millis() / kNoFlightsRotateMs) % (kFunFactCount ? kFunFactCount : 1));
-        else
-        {
-            struct tm tmv;
-            localtime_r(&now, &tmv); // TZ-aware (configTzTime); DST included
-            key += (long)tmv.tm_hour * 60L + tmv.tm_min; // minute of day
-        }
+        localtime_r(&now, &tmv); // TZ-aware (configTzTime); DST included
+        f.screen = NoFlightsFrame::Screen::Clock;
+        // Minute of day. The fact key below sits in a separate decade, so a
+        // clockfact flip always moves the key even within the same minute.
+        f.key = (long)tmv.tm_hour * 60L + tmv.tm_min;
+        return f;
     }
-    else // fun fact (funfact mode, or clockfact on the fact phase)
+
+    // Fact, either because it was asked for, or because clockfact is on its
+    // fact phase, or because a clock was wanted and time is not synced yet.
+    if (wantFact || (wantClock && !synced && mode == "clockfact"))
     {
-        key += (long)((millis() / kNoFlightsRotateMs) % (kFunFactCount ? kFunFactCount : 1));
+        f.screen = NoFlightsFrame::Screen::Fact;
+        f.factIdx = factIdx;
+        f.key = 1000000L + (long)factIdx; // distinct decade from the clock key
+        return f;
     }
-    return key;
+
+    return f; // plain clock, not synced -> dots, and dots never animate
 }
 
-// Dispatch the no-flights screen by the configured mode. Composes onto the
-// canvas and presents. Falls back to the dots/loading screen for "dots",
-// unknown values, or when a clock is requested but time isn't synced yet.
+// Recompose key for the active no-flights mode. -1 means static.
+long Hub75Display::noFlightsFrameKey()
+{
+    return noFlightsFrame().key;
+}
+
+// Dispatch the no-flights screen. Composes onto the canvas and presents.
 void Hub75Display::displayNoFlights()
 {
-    const String &mode = g_settings.layout.noFlightsMode;
-    bool showClock = false, showFact = false;
-    if (mode == "clock")
-        showClock = true;
-    else if (mode == "funfact")
-        showFact = true;
-    else if (mode == "clockfact")
+    const NoFlightsFrame f = noFlightsFrame();
+    switch (f.screen)
     {
-        if ((millis() / kNoFlightsRotateMs) % 2 == 0)
-            showClock = true;
-        else
-            showFact = true;
-    }
-
-    if (showClock)
-    {
-        if (time(nullptr) >= 100000)
-        {
-            drawClockScreen();
-            return;
-        }
-        // Clock requested but not synced: in clockfact, show a fact instead; in
-        // plain clock mode, fall back to the dots screen.
-        if (mode == "clockfact")
-            showFact = true;
-        else
-        {
-            displayLoadingScreen();
-            return;
-        }
-    }
-
-    if (showFact)
-    {
-        drawFunFactScreen();
+    case NoFlightsFrame::Screen::Clock:
+        drawClockScreen();
         return;
+    case NoFlightsFrame::Screen::Fact:
+        drawFunFactScreen(f.factIdx);
+        return;
+    case NoFlightsFrame::Screen::Dots:
+        break;
     }
-
-    displayLoadingScreen(); // "dots" / unknown
+    displayLoadingScreen();
 }
 
 // Large centered HH:MM with a "Mon Jun 17" date line below. Caller guarantees
@@ -1076,7 +1092,7 @@ void Hub75Display::drawClockScreen()
 
 // Rotating, word-wrapped fun fact, vertically centered. Wraps on spaces into
 // lines of at most maxCols columns; a single over-long word is truncated.
-void Hub75Display::drawFunFactScreen()
+void Hub75Display::drawFunFactScreen(size_t factIdx)
 {
     if (kFunFactCount == 0)
     {
@@ -1084,7 +1100,10 @@ void Hub75Display::drawFunFactScreen()
         return;
     }
     const uint16_t color = textColor();
-    const size_t idx = (size_t)((millis() / kNoFlightsRotateMs) % kFunFactCount);
+    // Which fact is decided by noFlightsFrame(), not re-derived here: this was a
+    // third read of millis() that had to land on the same rotation as the
+    // recompose key's.
+    const size_t idx = factIdx % kFunFactCount;
     const String fact = String(kFunFacts[idx]);
 
     const int charWidth = 6, charHeight = 8, lineSpacing = 2;

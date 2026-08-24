@@ -64,6 +64,23 @@ export interface ScheduleRow {
 }
 
 /** A display-ready flight, in the units the device renders. */
+/**
+ * THE WIRE SHAPE. This is a contract with a second implementation that cannot
+ * be refactored alongside it: firmware/adapters/FlightWallServerFetcher.cpp
+ * reads these keys by literal string, on devices already on walls.
+ *
+ * So: renaming or removing a key here is a BREAKING change and needs the path
+ * to move to /v2/flights. Adding an optional key is safe -- the firmware
+ * ignores what it does not read.
+ *
+ * A rename fails silently, which is why this is written down rather than
+ * assumed: the firmware's optNum()/optStr() helpers degrade a missing key to
+ * "no value", so the field just stops appearing on the panel with no error on
+ * either side. There is no shared fixture and deliberately so -- for two
+ * implementations at this scale, a grep plus this comment beats a schema
+ * pipeline. What that costs is that keys are pinned only by tests naming them,
+ * so test/enrich.test.ts asserts every one of them explicitly.
+ */
 export interface Flight {
   cs: string;
   flt: string | null;

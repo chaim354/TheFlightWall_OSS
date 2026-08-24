@@ -5,14 +5,18 @@ import { airlineName } from './airlines';
 import type { Aircraft, Flight, ScheduleRow } from './types';
 
 export interface EnrichOptions {
-  units: 'imperial' | 'metric';
-  /** Used only when the position feed did not precompute distance/bearing. */
-  centerLat?: number;
-  centerLon?: number;
+  /**
+   * Where the panel is. Used only when the position feed did not precompute
+   * distance and bearing.
+   *
+   * ONE PAIR, not two independent optional scalars. Latitude without longitude
+   * is not a location, and the old shape made that state representable and then
+   * needed a second predicate to rule it out at the use site. Same defect class
+   * as pairing the schedule row's coordinates, with none of the cost -- no
+   * persisted shape, no KV_KEY bump, no rebuild window.
+   */
+  center?: { lat: number; lon: number };
 }
-
-const FT_PER_M = 3.28084;
-const KMH_PER_KT = 1.852;
 
 /**
  * An arrival epoch counts as a usable source only if it is still ahead of
@@ -221,12 +225,13 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
   // fallback is for sources that don't.
   let dstNm = a.distanceNm;
   let brg = a.bearingDeg;
-  if (opts.centerLat !== undefined && opts.centerLon !== undefined) {
-    if (dstNm === null) dstNm = haversineKm(opts.centerLat, opts.centerLon, a.lat, a.lon) / KM_PER_NM;
-    if (brg === null) brg = bearingDeg(opts.centerLat, opts.centerLon, a.lat, a.lon);
+  // One check, because the pair is one value. This used to test two optional
+  // scalars for undefined independently.
+  if (opts.center) {
+    if (dstNm === null) dstNm = haversineKm(opts.center.lat, opts.center.lon, a.lat, a.lon) / KM_PER_NM;
+    if (brg === null) brg = bearingDeg(opts.center.lat, opts.center.lon, a.lat, a.lon);
   }
 
-  const metric = opts.units === 'metric';
   const round = (v: number | null): number | null => (v === null ? null : Math.round(v));
 
   return {
@@ -237,12 +242,12 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
     ac: a.typeIcao,
     from: row?.origIata ?? null,
     to: row?.destIata ?? null,
-    alt: round(a.altFt === null ? null : metric ? a.altFt / FT_PER_M : a.altFt),
-    spd: round(a.groundspeedKt === null ? null : metric ? a.groundspeedKt * KMH_PER_KT : a.groundspeedKt),
+    alt: round(a.altFt),
+    spd: round(a.groundspeedKt),
     hdg: round(a.trackDeg),
-    vs: round(a.verticalRateFpm === null ? null : metric ? a.verticalRateFpm / FT_PER_M : a.verticalRateFpm),
+    vs: round(a.verticalRateFpm),
     // One decimal: the panel shows "12.4" but never "12.437".
-    dst: dstNm === null ? 0 : Math.round((metric ? dstNm * KM_PER_NM : dstNm) * 10) / 10,
+    dst: dstNm === null ? 0 : Math.round(dstNm * 10) / 10,
     brg: brg === null ? 0 : Math.round(brg),
     eta_min: round(etaMin),
     eta_text: etaText,

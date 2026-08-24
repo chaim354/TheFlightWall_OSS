@@ -60,6 +60,28 @@ describe('configFromEnv', () => {
   });
 });
 
+describe('configFromEnv quiet-hours timezone', () => {
+  // A zone string goes straight into `new Intl.DateTimeFormat` on the refresh
+  // path, which throws RangeError on an unknown zone. That path runs inside a
+  // floating `void refreshTick()`, so under Node's default
+  // --unhandled-rejections=throw a one-character typo in the plain-text
+  // REFRESH_QUIET_TZ of config/deploy.yml takes down the whole HTTP service --
+  // positions and /up, not just the refresh. Reject it here, where the blast
+  // radius is a log line, for the same reason parseQuietHours refuses to guess.
+  it('falls back to the default zone when REFRESH_QUIET_TZ is not a real zone', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cfg = configFromEnv({ REFRESH_QUIET_TZ: 'America/New_Yrok' } as NodeJS.ProcessEnv);
+    expect(cfg.quietHoursTimeZone).toBe('America/New_York');
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+  });
+
+  it('keeps a valid zone that is not the default', () => {
+    const cfg = configFromEnv({ REFRESH_QUIET_TZ: 'Europe/Berlin' } as NodeJS.ProcessEnv);
+    expect(cfg.quietHoursTimeZone).toBe('Europe/Berlin');
+  });
+});
+
 describe('startServer', () => {
   it('serves /up and /v1/flights, 404s everything else, and shuts down cleanly', async () => {
     running = await startServer({
@@ -70,6 +92,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
     const base = `http://127.0.0.1:${running.port}`;
@@ -106,6 +130,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
     const res = await fetch(`http://127.0.0.1:${running.port}/v1/flights?lat=40.7&lon=-73.9`);
@@ -125,6 +151,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0, // pacing itself is covered by test/refresh.test.ts
     });
     // The boot refresh is fire-and-forget (does not block server start), so
@@ -143,6 +171,8 @@ describe('startServer', () => {
       panynjIntervalMs: 0, // no network from tests
       panynjPageDelayMs: 0,
       refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null, // no quiet-hours gating in these tests
+      quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
       boardFetchDelayMs: 0,
     });
     // A second server bound to the exact same (now-taken) port must fail
@@ -160,6 +190,8 @@ describe('startServer', () => {
         panynjIntervalMs: 0, // no network from tests
         panynjPageDelayMs: 0,
         refreshIntervalMs: 24 * 60 * 60 * 1000,
+        quietHours: null, // no quiet-hours gating in these tests
+        quietHoursTimeZone: 'America/New_York', // unused when quietHours is null, but required by the type
         boardFetchDelayMs: 0,
       }),
     ).rejects.toThrow();

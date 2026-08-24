@@ -1,5 +1,9 @@
 # Overnight feature work — design decisions (for review)
 
+> **Dated record, not living documentation.** Accurate as of 2026-06; later
+> changes are deliberately NOT backported. Correcting it to match current
+> reality would falsify the record. Supersede it with a newer document instead.
+
 ## STATUS: all 6 implemented, reviewed, build + host-tests green (not device-verified)
 Commits: `84082d5` classify utils · `e7681ed` two-pass private/cargo · `8158866` logo
 priority · `1e67437` 19 cargo badges · `9385296` no-flights screen+fun facts · `1a40863`

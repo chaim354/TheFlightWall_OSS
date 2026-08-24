@@ -226,17 +226,24 @@ export function matchSchedule(
   candidates = candidates.filter((r) => temporallyPlausible(r, lat, lon, nowSec));
   if (candidates.length === 0) return null;
 
-  const scored = candidates
-    .map((r) => ({ row: r, excess: excessFor(r, lat, lon) }))
-    .filter((c) => c.excess !== null && c.excess <= MAX_CORRIDOR_EXCESS_KM)
-    .sort((a, b) => a.excess! - b.excess!);
+  // Narrow ONCE, at the point the unscoreable rows are dropped, so what
+  // survives is `{ row, excess: number }` -- a total type. The old shape kept
+  // `excess: number | null` all the way through and then needed a non-null
+  // assertion on every subsequent use (sort, both tiebreak reads), each of
+  // which asserts a fact the filter one line above had already established.
+  const scored: { row: ScheduleRow; excess: number }[] = [];
+  for (const row of candidates) {
+    const excess = excessFor(row, lat, lon);
+    if (excess !== null && excess <= MAX_CORRIDOR_EXCESS_KM) scored.push({ row, excess });
+  }
+  scored.sort((a, b) => a.excess - b.excess);
 
   if (scored.length === 0) return null;
   if (scored.length === 1) return scored[0]!.row;
 
   // Two or more plausible rows: only choose if one is clearly the better fit.
   const [best, next] = scored;
-  return next!.excess! - best!.excess! >= TIEBREAK_MARGIN_KM ? best!.row : null;
+  return next!.excess - best!.excess >= TIEBREAK_MARGIN_KM ? best!.row : null;
 }
 
 /**

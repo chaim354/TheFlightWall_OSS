@@ -67,7 +67,7 @@
   <div class="bar">
     <span id="connPill" class="pill">…</span>
     <button class="ghost" onclick="loadAll()">Refresh</button>
-    <button onclick="save()">Save</button>
+    <button id="saveBtn" onclick="save()" disabled title="Loading current settings…">Save</button>
     <button class="warn" onclick="restart()">Restart</button>
   </div>
 </header>
@@ -314,6 +314,12 @@ const $ = id => document.getElementById(id);
 // serverUrl field is the one setting that lets this device fetch from a
 // host the user chooses rather than a fixed, built-in one.
 function esc(s){ const d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
+// A stored secret shows as an empty box that says it is set. Blank on save
+// means "leave it alone" -- the device treats an empty secret as unchanged.
+function secretField(id,isSet){
+  const el=$(id); el.value='';
+  el.placeholder = isSet ? 'stored — leave blank to keep' : 'not set';
+}
 function rgbToHex(r,g,b){return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
@@ -341,10 +347,15 @@ function toggleServerUrl(){
 async function loadSettings(){
   const s = await (await fetch('/api/settings')).json();
   $('wifiSsid').value = s.network.wifiSsid || '';
-  $('wifiPassword').value = s.network.wifiPassword || '';
+  // Secrets are NOT returned by /api/settings any more -- it is unauthenticated
+  // and any LAN peer can read it. The device sends `<name>Set` booleans instead,
+  // which is all this page ever needed: these are type="password" inputs that
+  // nothing displays, validates or computes on. Leave them empty and say whether
+  // one is stored; typing a value replaces it, leaving it blank keeps it.
+  secretField('wifiPassword', s.network.wifiPasswordSet);
   $('openSkyClientId').value = s.api.openSkyClientId || '';
-  $('openSkyClientSecret').value = s.api.openSkyClientSecret || '';
-  $('aeroApiKey').value = s.api.aeroApiKey || '';
+  secretField('openSkyClientSecret', s.api.openSkyClientSecretSet);
+  secretField('aeroApiKey', s.api.aeroApiKeySet);
   $('positionSource').value = s.api.positionSource || 'opensky';
   $('serverUrl').value = s.api.serverUrl || '';
   $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
@@ -400,14 +411,26 @@ async function loadSettings(){
 
   toggleMode();
   toggleServerUrl();
+
+  // Arm Save only on the success path; it ships disabled in the static HTML.
+  // Until here the form holds HTML DEFAULTS, and collect() reads the DOM
+  // unconditionally -- so saving early POSTs a complete document of blanks and
+  // zeros over live config: no wifiSsid/wifiPassword (next boot lands in the
+  // open setup AP), no API keys, panelRes 0x0, mode forced to "area". The
+  // window is real: main.cpp serves one request per loop() and can block for
+  // seconds. The button's own `disabled` IS the state -- no second flag.
+  const b = $('saveBtn'); b.disabled = false; b.title = '';
 }
 
+// Omit an untouched secret entirely rather than sending "". fromJson skips
+// absent keys, so omission is the existing, tested way to say "unchanged".
+function secret(id){ const v=$(id).value; return v ? {[id]:v} : {}; }
 function collect(){
   const [r,g,b] = hexToRgb($('textColor').value);
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
-    network:{ wifiSsid:$('wifiSsid').value, wifiPassword:$('wifiPassword').value },
-    api:{ openSkyClientId:$('openSkyClientId').value, openSkyClientSecret:$('openSkyClientSecret').value, aeroApiKey:$('aeroApiKey').value, positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    network:{ wifiSsid:$('wifiSsid').value, ...secret('wifiPassword') },
+    api:{ openSkyClientId:$('openSkyClientId').value, ...secret('openSkyClientSecret'), ...secret('aeroApiKey'), positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),
@@ -444,6 +467,9 @@ function collect(){
 }
 
 async function save(){
+  // Same single source of truth as the button, not a parallel flag: if the
+  // form was never loaded, saving it would blank the device (see loadSettings).
+  if($('saveBtn').disabled) return;
   const res = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())});
   const j = await res.json();
   toast(j.ok ? 'Saved ✓' : ('Error: '+(j.error||'failed')));
@@ -493,11 +519,20 @@ async function loadStatus(){
     else if(s.wifiConnected){ pill.textContent='Online'; pill.className='pill on'; }
     else { pill.textContent='Offline'; pill.className='pill off'; }
     $('status').innerHTML =
-      `<span class="pill">${s.apMode?'AP':'WiFi'}: ${s.ssid||'-'}</span>`+
+      `<span class="pill">${s.apMode?'AP':'WiFi'}: ${esc(s.ssid)||'-'}</span>`+
       `<span class="pill">IP ${s.ip||'-'}</span>`+
       `<span class="pill">${s.mode} mode</span>`+
       `<span class="pill">${s.flightCount} flights</span>`+
       `<span class="pill">heap ${Math.round(s.freeHeap/1024)}k</span>`+
+      // freeHeap alone misled a live diagnosis once already (~174KB free reads
+      // healthy while the largest CONTIGUOUS block, which a TLS handshake needs
+      // ~40KB of, was the number moving). WebConfigServer added these four to
+      // correct exactly that; the page rendered none of them. Guarded like
+      // i2cSda below so older firmware shows fewer pills, not "undefinedk".
+      ('largestInternal' in s ? `<span class="pill">largest ${Math.round(s.largestInternal/1024)}k</span>` : '')+
+      ('largestDma' in s ? `<span class="pill">dma ${Math.round(s.largestDma/1024)}k</span>` : '')+
+      ('freeInternal' in s ? `<span class="pill">int ${Math.round(s.freeInternal/1024)}k</span>` : '')+
+      ('freePsram' in s && s.freePsram>0 ? `<span class="pill">psram ${(s.freePsram/1048576).toFixed(1)}M</span>` : '')+
       // Only shown when true -- the FlightWall server itself is degraded
       // (schedule or position data served from cache after a provider
       // failure). Flights keep rendering normally either way.
@@ -510,7 +545,12 @@ async function loadStatus(){
       const el = $('lightLive');
       if(el) el.textContent = `Live reading: ${s.lightLevel}  ·  panel ${s.lightDark ? 'OFF (dark)' : 'on (lit)'} — set the threshold just above the dark value.`;
     }
-  }catch(e){}
+  }catch(e){
+    // Never leave the pills frozen on last-known values as though they were
+    // live -- a plausible-looking stale reading is a silent failure, on the
+    // only diagnostic channel a wall-mounted board has.
+    const pill=$('connPill'); pill.textContent='Unreachable'; pill.className='pill off';
+  }
   try{
     const f = await (await fetch('/api/flights')).json();
     $('flights').innerHTML = f.map(x=>{
@@ -528,9 +568,27 @@ async function loadStatus(){
   }catch(e){}
 }
 
-function loadAll(){ loadSettings(); loadStatus(); }
+// setInterval fired on wall-clock regardless of whether the last tick had
+// finished, so against a device that blocks for seconds several polls could be
+// in flight and a stale one could land on top of a fresh one. Rescheduling
+// after completion makes the gap "5s after the last RESPONSE". The clearTimeout
+// is load-bearing: without it every Refresh click forks another chain.
+let statusTimer=null, statusBusy=false;
+async function pollStatus(){
+  clearTimeout(statusTimer);
+  // Refresh calls straight in on top of the timer, so bounding the timer alone
+  // still let rapid clicks stack requests. Whichever call is in flight owns the
+  // rescheduling, so returning here cannot break the chain.
+  if(statusBusy) return;
+  statusBusy=true;
+  try{ await loadStatus(); }
+  finally{ statusBusy=false; statusTimer=setTimeout(pollStatus, 5000); }
+}
+function loadAll(){
+  loadSettings().catch(()=>{ toast('Could not load settings — Save stays disabled'); });
+  pollStatus();
+}
 loadAll();
-setInterval(loadStatus, 5000);
 </script>
 </body>
 </html>

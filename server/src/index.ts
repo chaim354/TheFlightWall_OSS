@@ -18,7 +18,9 @@ export default {
   async fetch(req: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname !== '/v1/flights') return new Response('not found', { status: 404 });
-    const flightsEnv: Env = { ...env, SCHEDULE: kvStorage(env.SCHEDULE) };
+    // Explicit, not a spread: the spread carried BOARDS and AERODATABOX_KEY into
+    // a request-scoped object that never reads them.
+    const flightsEnv: Env = { SCHEDULE: kvStorage(env.SCHEDULE) };
     return handleFlights(url, flightsEnv, Date.now());
   },
 
