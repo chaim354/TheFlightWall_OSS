@@ -31,6 +31,22 @@ int main() {
         CHECK(!d.forceFetch);
     }
 
+    // --- brightness 1 is LIT, not dark: pins the "== 0" boundary ---
+    //
+    // Mutation-testing found this unguarded: mutating the check to "<= 1"
+    // survives the suite above because it only ever exercises 0 and 20.
+    // Brightness 1 is a real, reachable state -- the ambient sensor's
+    // lightDimBrightness defaults to 3, and a manual button ramp can land
+    // lower still -- so treating it as dark would wrongly suppress fetching
+    // on a panel that is actually visible.
+    {
+        IdleDecision d = decideIdle(1, false, 1000UL, 5000UL, STALE);
+        CHECK(!d.suppressFetch);
+        CHECK(!d.discardFlights);
+        CHECK(!d.forceFetch);
+        CHECK(!d.nowSuppressed);
+    }
+
     // --- staying dark stays suppressed ---
     {
         IdleDecision d = decideIdle(0, true, 1000UL, 900000UL, STALE);
@@ -54,6 +70,21 @@ int main() {
         // last good fetch at t=1000, now t=60000 -> 59s old, inside 180s
         IdleDecision d = decideIdle(20, true, 1000UL, 60000UL, STALE);
         CHECK(!d.suppressFetch);
+        CHECK(d.forceFetch);
+        CHECK(!d.discardFlights);
+    }
+
+    // --- staleness boundary: exactly STALE old is NOT "older than" ---
+    //
+    // Mutation-testing found this unguarded: mutating ">" to ">=" on the
+    // discardFlights line survives the suite above because no existing case
+    // lands exactly on the boundary (899s and 59s both miss it). "Older
+    // than" is the correct reading of the staleness rule, so equal must
+    // still keep the held flights -- only strictly-greater may discard them.
+    {
+        // last good fetch at t=1000, now t=181000 -> elapsed is exactly
+        // 180000ms, equal to STALE.
+        IdleDecision d = decideIdle(20, true, 1000UL, 181000UL, STALE);
         CHECK(d.forceFetch);
         CHECK(!d.discardFlights);
     }
