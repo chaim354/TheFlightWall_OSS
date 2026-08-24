@@ -1,0 +1,216 @@
+[
+  {
+    "greatCircleDistance": {
+      "meter": 6883860.42,
+      "km": 6883.86,
+      "mile": 4277.43,
+      "nm": 3716.99,
+      "feet": 22584843.9
+    },
+    "departure": {
+      "airport": {
+        "icao": "KJFK",
+        "iata": "JFK",
+        "name": "New York John F Kennedy",
+        "shortName": "John F Kennedy",
+        "municipalityName": "New York",
+        "location": {
+          "lat": 40.6398,
+          "lon": -73.7789
+        },
+        "countryCode": "US",
+        "timeZone": "America/New_York"
+      },
+      "quality": []
+    },
+    "arrival": {
+      "airport": {
+        "icao": "LIRF",
+        "iata": "FCO",
+        "name": "Rome Leonardo da Vinci\u2013Fiumicino",
+        "shortName": "Leonardo da Vinci\u2013Fiumicino",
+        "municipalityName": "Rome",
+        "location": {
+          "lat": 41.8045,
+          "lon": 12.2508
+        },
+        "countryCode": "IT",
+        "timeZone": "Europe/Rome"
+      },
+      "scheduledTime": {
+        "utc": "2026-08-24 05:55Z",
+        "local": "2026-08-24 07:55+02:00"
+      },
+      "revisedTime": {
+        "utc": "2026-08-25 02:17Z",
+        "local": "2026-08-25 04:17+02:00"
+      },
+      "terminal": "3",
+      "quality": [
+        "Basic",
+        "Live"
+      ]
+    },
+    "lastUpdatedUtc": "2026-08-24 06:24Z",
+    "number": "DL 182",
+    "callSign": "DAL182",
+    "status": "Canceled",
+    "codeshareStatus": "IsOperator",
+    "isCargo": false,
+    "aircraft": {
+      "reg": "N823NW",
+      "modeS": "AB3D41",
+      "model": "Airbus A330-300"
+    },
+    "airline": {
+      "name": "Delta Air Lines",
+      "iata": "DL",
+      "icao": "DAL"
+    }
+  },
+  {
+    "departure": {
+      "airport": {
+        "icao": "CYYT",
+        "iata": "YYT",
+        "name": "St. John's",
+        "shortName": "St. John's",
+        "municipalityName": "St. John's",
+        "location": {
+          "lat": 47.6186,
+          "lon": -52.7519
+        },
+        "countryCode": "CA",
+        "timeZone": "America/St_Johns"
+      },
+      "scheduledTime": {
+        "utc": "2026-08-24 12:21Z",
+        "local": "2026-08-24 09:51-02:30"
+      },
+      "revisedTime": {
+        "utc": "2026-08-24 12:21Z",
+        "local": "2026-08-24 09:51-02:30"
+      },
+      "runwayTime": {
+        "utc": "2026-08-24 12:21Z",
+        "local": "2026-08-24 09:51-02:30"
+      },
+      "runway": "16",
+      "quality": [
+        "Basic",
+        "Live"
+      ]
+    },
+    "arrival": {
+      "airport": {
+        "name": "Unknown"
+      },
+      "quality": []
+    },
+    "lastUpdatedUtc": "2026-08-24 12:35Z",
+    "number": "DL 182",
+    "callSign": "DAL182",
+    "status": "Departed",
+    "codeshareStatus": "IsCodeshared",
+    "isCargo": false,
+    "aircraft": {
+      "reg": "N428DX",
+      "modeS": "A519B8",
+      "model": "Airbus A330"
+    },
+    "airline": {
+      "name": "Delta Air Lines",
+      "iata": "DL",
+      "icao": "DAL"
+    }
+  },
+  {
+    "greatCircleDistance": {
+      "meter": 6883860.42,
+      "km": 6883.86,
+      "mile": 4277.43,
+      "nm": 3716.99,
+      "feet": 22584843.9
+    },
+    "departure": {
+      "airport": {
+        "icao": "KJFK",
+        "iata": "JFK",
+        "name": "New York John F Kennedy",
+        "shortName": "John F Kennedy",
+        "municipalityName": "New York",
+        "location": {
+          "lat": 40.6398,
+          "lon": -73.7789
+        },
+        "countryCode": "US",
+        "timeZone": "America/New_York"
+      },
+      "scheduledTime": {
+        "utc": "2026-08-24 21:20Z",
+        "local": "2026-08-24 17:20-04:00"
+      },
+      "revisedTime": {
+        "utc": "2026-08-24 21:44Z",
+        "local": "2026-08-24 17:44-04:00"
+      },
+      "runwayTime": {
+        "utc": "2026-08-24 21:44Z",
+        "local": "2026-08-24 17:44-04:00"
+      },
+      "terminal": "4",
+      "quality": [
+        "Basic",
+        "Live"
+      ]
+    },
+    "arrival": {
+      "airport": {
+        "icao": "LIRF",
+        "iata": "FCO",
+        "name": "Rome Leonardo da Vinci\u2013Fiumicino",
+        "shortName": "Leonardo da Vinci\u2013Fiumicino",
+        "municipalityName": "Rome",
+        "location": {
+          "lat": 41.8045,
+          "lon": 12.2508
+        },
+        "countryCode": "IT",
+        "timeZone": "Europe/Rome"
+      },
+      "scheduledTime": {
+        "utc": "2026-08-25 05:55Z",
+        "local": "2026-08-25 07:55+02:00"
+      },
+      "revisedTime": {
+        "utc": "2026-08-25 05:55Z",
+        "local": "2026-08-25 07:55+02:00"
+      },
+      "predictedTime": {
+        "utc": "2026-08-25 05:41Z",
+        "local": "2026-08-25 07:41+02:00"
+      },
+      "terminal": "3",
+      "quality": [
+        "Basic",
+        "Live"
+      ]
+    },
+    "lastUpdatedUtc": "2026-08-24 21:45Z",
+    "number": "DL 182",
+    "callSign": "DAL182",
+    "status": "EnRoute",
+    "codeshareStatus": "IsOperator",
+    "isCargo": false,
+    "aircraft": {
+      "reg": "N816NW",
+      "modeS": "AB20E7",
+      "model": "Airbus A330"
+    },
+    "airline": {
+      "name": "Delta Air Lines",
+      "iata": "DL",
+      "icao": "DAL"
+    }
+  }
+]

@@ -88,6 +88,20 @@ describe('decideTracked - resolved', () => {
       action: 'none',
     });
   });
+
+  it('becomes unresolved, with a reason, rather than sitting inert with no departure time', () => {
+    // Bug: an entry that resolved without a departure time could never reach
+    // `airborne` (the `depMs === null` guard just kept returning
+    // resolved/none), so it sat doing nothing and telling nobody until the
+    // 24h date backstop silently expired it a day later. It must instead
+    // become terminal `unresolved` immediately, with a reason, so it surfaces
+    // on GET /v1/tracked.
+    const e = resolved({ schedDepEpoch: null, stateAtMs: DAY_START });
+    const d = decideTracked(e, DAY_START + HOUR);
+    expect(d.state).toBe('unresolved');
+    expect(d.state).not.toBe('resolved');
+    expect(d.reason).toBe('resolved without a departure time');
+  });
 });
 
 describe('decideTracked - airborne', () => {
