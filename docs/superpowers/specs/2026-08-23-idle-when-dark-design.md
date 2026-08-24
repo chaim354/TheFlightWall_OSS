@@ -20,7 +20,7 @@ regardless of any device.
 |---|---|
 | What counts as "off"? | **Effective brightness 0, any cause** |
 | Waking | **Drop stale flights, fetch immediately, show the loading screen** |
-| Server | **Quiet hours on a fixed schedule**, shipped **enabled**, default **00:00–07:00** |
+| Server | **Quiet hours on a fixed schedule**, shipped **enabled**, default **00:00–06:00** |
 
 ## Device
 
@@ -76,7 +76,7 @@ fetch on wake, clears only when genuinely stale, does not touch failure counters
 
 ### Quiet hours
 
-A window checked in the refresh path, **enabled by default at 00:00–07:00**
+A window checked in the refresh path, **enabled by default at 00:00–06:00**
 America/New_York (all four boards are NYC-area). Configurable via env so it can
 be matched to the panel.
 
@@ -104,14 +104,18 @@ shouldRefresh(nowMs, lastRefreshMs, intervalMs, quiet, wasQuiet)
   -> false  otherwise
 ```
 
-This guarantees a refresh within 5 minutes of 07:00 rather than up to 2 hours,
+This guarantees a refresh within 5 minutes of 06:00 rather than up to 2 hours,
 and keeps the 2h cadence unchanged outside the window.
 
-**Documented caveat:** the default 00:00–07:00 assumes a panel that wakes at
-07:00, so the morning refresh races the wake by a few minutes. Setting quiet-end
-an hour before the panel wakes (e.g. 00:00–06:00 for a 07:00 wake) gives a fully
-warm table instead. This is a comment in the config, not logic — the server
-cannot know the device's schedule.
+**Why the window ends at 06:00, not 07:00.** The panel's night schedule ends at
+07:00. Ending the server's quiet hours an hour earlier means a refresh lands
+while it is still dark, so the table is centred on the morning and the wall wakes
+to correct routes and ETAs immediately rather than racing the refresh.
+
+That relationship is the thing to preserve if either schedule changes: **quiet
+hours must end at least one refresh interval before the panel wakes.** The server
+cannot know the device's schedule, so this is a documented invariant at the
+config site, not logic.
 
 ### Not doing
 
@@ -140,5 +144,6 @@ outside quiet hours, and the disabled case.
 
 - No `/v1/flights` requests while the panel is dark.
 - Waking shows the loading screen, then fresh flights — never a stale set.
-- No AeroDataBox refresh between 00:00 and 07:00; one within 5 minutes of 07:00.
+- No AeroDataBox refresh between 00:00 and 06:00; one within 5 minutes of 06:00,
+  i.e. a warm table an hour before the panel wakes at 07:00.
 - Both envs build, host tests pass, server suite passes.
