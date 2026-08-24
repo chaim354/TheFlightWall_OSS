@@ -1,0 +1,93 @@
+[
+  {
+    "greatCircleDistance": {
+      "meter": 5554539.94,
+      "km": 5554.54,
+      "mile": 3451.43,
+      "nm": 2999.21,
+      "feet": 18223556.23
+    },
+    "departure": {
+      "airport": {
+        "icao": "EGLL",
+        "iata": "LHR",
+        "name": "London Heathrow",
+        "shortName": "Heathrow",
+        "municipalityName": "London",
+        "location": {
+          "lat": 51.4706,
+          "lon": -0.461941
+        },
+        "countryCode": "GB",
+        "timeZone": "Europe/London"
+      },
+      "scheduledTime": {
+        "utc": "2026-08-24 11:30Z",
+        "local": "2026-08-24 12:30+01:00"
+      },
+      "revisedTime": {
+        "utc": "2026-08-24 11:57Z",
+        "local": "2026-08-24 12:57+01:00"
+      },
+      "runwayTime": {
+        "utc": "2026-08-24 11:10Z",
+        "local": "2026-08-24 12:10+01:00"
+      },
+      "terminal": "5",
+      "checkInDesk": "D",
+      "quality": [
+        "Basic",
+        "Live"
+      ]
+    },
+    "arrival": {
+      "airport": {
+        "icao": "KJFK",
+        "iata": "JFK",
+        "name": "New York John F Kennedy",
+        "shortName": "John F Kennedy",
+        "municipalityName": "New York",
+        "location": {
+          "lat": 40.6398,
+          "lon": -73.7789
+        },
+        "countryCode": "US",
+        "timeZone": "America/New_York"
+      },
+      "scheduledTime": {
+        "utc": "2026-08-24 19:20Z",
+        "local": "2026-08-24 15:20-04:00"
+      },
+      "revisedTime": {
+        "utc": "2026-08-24 19:26Z",
+        "local": "2026-08-24 15:26-04:00"
+      },
+      "runwayTime": {
+        "utc": "2026-08-24 19:23Z",
+        "local": "2026-08-24 15:23-04:00"
+      },
+      "terminal": "8",
+      "runway": "22L",
+      "quality": [
+        "Basic",
+        "Live"
+      ]
+    },
+    "lastUpdatedUtc": "2026-08-24 19:41Z",
+    "number": "BA 181",
+    "callSign": "BAW181",
+    "status": "Arrived",
+    "codeshareStatus": "IsOperator",
+    "isCargo": false,
+    "aircraft": {
+      "reg": "G-STBG",
+      "modeS": "406947",
+      "model": "Boeing 777-300ER Passenger"
+    },
+    "airline": {
+      "name": "British Airways",
+      "iata": "BA",
+      "icao": "BAW"
+    }
+  }
+]

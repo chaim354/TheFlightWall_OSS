@@ -44,6 +44,11 @@ struct FlightInfo
     bool is_helicopter = false;     // from ADS-B emitter category (rotorcraft)
     bool is_private = false;        // positive signal: no operator + registration-shaped callsign
     bool is_cargo = false;          // operator_icao is a known freight operator
+    // Server-pinned tracked flight: always shown, ahead of overhead traffic.
+    bool pinned = false;
+    // Position is a schedule projection, not an observed fix. Rendered
+    // differently so the panel never asserts a position nobody measured.
+    bool position_estimated = false;
     double distance_km = NAN;       // distance from configured center (Area mode)
 
     // Time remaining to destination. NAN = unknown, and unknown renders blank.

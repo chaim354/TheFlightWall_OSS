@@ -417,6 +417,44 @@ uint16_t Hub75Display::accentColorFor(const String &code)
 
 void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h)
 {
+    // Pinned marker: a 3px amber bar down the CARD's left edge (x=0, full
+    // _matrixHeight) -- deliberately not (x, y, h) above, which describe only
+    // the logo/badge box inside the card, not the card itself. Every layout
+    // that reaches this function renders one flight per full frame (see
+    // displayFlights()/displayFlightCard()), so the panel IS the card.
+    //
+    // Filled for a live fix, hollow (outline only) for a dead-reckoned one --
+    // the panel must never present a schedule projection the same way it
+    // presents an observation, the same rule eta_src follows for times. Below
+    // 3px, drawRect's outline and fillRect's fill render identically (no
+    // interior row is left to leave unlit), so 3px is the minimum width that
+    // actually makes hollow look hollow.
+    //
+    // Drawn BEFORE the logo/badge below, and before the rest of this card's
+    // text -- not after. The Mini and Side-by-side boxes start only 1-2px
+    // from this same edge (x=2 and x=1 respectively, at their call sites),
+    // and Mini's bottom metric rows print at x=1 too; a bar painted on top of
+    // those would nick a column out of an airline logo or a digit. Painted
+    // first instead, everything drawn afterward -- the box fill/blit below
+    // (always opaque across its own footprint) and this card's text (opaque
+    // only on each glyph's own "on" pixels, per drawTextLine()'s transparent
+    // setTextColor()) -- paints over the bar wherever it actually has
+    // content, so the bar only shows through in the margin nothing else
+    // claims. The Stacked layout's box is centered and never reaches the
+    // edge, so there the bar is simply a clean, unbroken line.
+    if (f.pinned)
+    {
+        const uint16_t amber = rgb565(255, 180, 84);
+        if (f.position_estimated)
+        {
+            _canvas->drawRect(0, 0, 3, _matrixHeight, amber);
+        }
+        else
+        {
+            _canvas->fillRect(0, 0, 3, _matrixHeight, amber);
+        }
+    }
+
     // Logo selection priority (first that loads wins):
     //   1. helicopter -> generic rotorcraft icon (must NOT fall to _PRIVATE)
     //   2. private     -> generic private-jet icon
