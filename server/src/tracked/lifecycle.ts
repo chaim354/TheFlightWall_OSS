@@ -20,6 +20,13 @@ const EXPIRE_AFTER_DATE_MS = 24 * 60 * 60_000;
 export interface TrackedDecision {
   state: TrackedState;
   action: TrackedAction;
+  /**
+   * Set when this decision moves an entry straight to `unresolved` on its
+   * own, as opposed to a resolve/reresolve attempt failing -- that path is
+   * driven by tick.ts, which records its own reason from the resolve result
+   * and does not read this field.
+   */
+  reason?: string;
 }
 
 /**
@@ -93,7 +100,17 @@ export function decideTracked(
   const arrMs = e.schedArrEpoch === null ? null : e.schedArrEpoch * 1000;
 
   if (e.state === 'resolved') {
-    if (depMs === null) return { state: 'resolved', action: 'none' };
+    if (depMs === null) {
+      // Without a departure time this entry can never reach `depMs >=
+      // nowMs` below, so it would otherwise sit as `resolved`/`none` forever
+      // -- doing nothing and telling nobody -- until the date backstop above
+      // finally swept it a day later. Bug 1's fix (leg selection in
+      // resolve.ts) should keep this from arising, but an entry that cannot
+      // progress must never sit inert regardless of why it got here, so this
+      // is terminal immediately, with a reason that surfaces on
+      // GET /v1/tracked instead of failing silently.
+      return { state: 'unresolved', action: 'none', reason: 'resolved without a departure time' };
+    }
     if (nowMs >= depMs) {
       // Nothing to poll without a hex; going airborne would guarantee an empty
       // call every tick for the length of the flight.

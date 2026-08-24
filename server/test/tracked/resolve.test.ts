@@ -21,7 +21,7 @@ const payload = [
 
 describe('parseByNumber', () => {
   it('extracts the hex, registration, route and times', () => {
-    const r = parseByNumber(payload);
+    const r = parseByNumber(payload, '2026-09-14');
     expect(r).not.toBeNull();
     // Lowercased: OpenSky's icao24 is lowercase hex and comparisons elsewhere
     // assume it.
@@ -35,11 +35,11 @@ describe('parseByNumber', () => {
   });
 
   it('accepts a bare object as well as an array', () => {
-    expect(parseByNumber(payload[0]!)!.icao24).toBe('4008f3');
+    expect(parseByNumber(payload[0]!, '2026-09-14')!.icao24).toBe('4008f3');
   });
 
   it('returns null for an empty array (flight not operating that date)', () => {
-    expect(parseByNumber([])).toBeNull();
+    expect(parseByNumber([], '2026-09-14')).toBeNull();
   });
 
   it('returns a row with a null hex rather than null, when modeS is missing', () => {
@@ -48,7 +48,7 @@ describe('parseByNumber', () => {
     // hide the spec's flagged risk that the by-number endpoint may not carry
     // modeS at all.
     const noHex = [{ ...payload[0]!, aircraft: { reg: 'G-STBA', model: 'B777' } }];
-    const r = parseByNumber(noHex);
+    const r = parseByNumber(noHex, '2026-09-14');
     expect(r).not.toBeNull();
     expect(r!.icao24).toBeNull();
     expect(r!.reg).toBe('G-STBA');
@@ -56,7 +56,7 @@ describe('parseByNumber', () => {
 
   it('tolerates missing coordinates without throwing', () => {
     const noCoord = [{ ...payload[0]!, departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-09-14 18:00Z' } } }];
-    const r = parseByNumber(noCoord);
+    const r = parseByNumber(noCoord, '2026-09-14');
     expect(r!.orig).toBeNull();
     expect(r!.origIata).toBe('JFK');
   });
@@ -70,9 +70,91 @@ describe('parseByNumber', () => {
     const real = JSON.parse(
       readFileSync(new URL('../../fixtures/aerodatabox-bynumber.json', import.meta.url), 'utf8'),
     );
-    const r = parseByNumber(real);
+    const r = parseByNumber(real, '2026-08-24');
     expect(r).not.toBeNull();
     expect(r!.icao24).toBe('406947');
+  });
+
+  it('REGRESSION: selects the en-route leg from a real multi-leg response, not the cancelled one', () => {
+    // server/fixtures/aerodatabox-bynumber-multileg.json is the genuine
+    // AeroDataBox response for DL182 on 2026-08-24. It has three rows: row 0
+    // is a cancelled JFK->FCO leg that arrived that morning (it was actually
+    // yesterday's departure), row 1 is a completely different aircraft that
+    // happens to share the flight number (departed from YYT, no arrival on
+    // file), and row 2 is the real en-route JFK->FCO leg departing that date.
+    // Before the fix, parseByNumber took rows[0] blindly, returning the
+    // cancelled leg's null departure time and leaving the whole feature inert.
+    const real = JSON.parse(
+      readFileSync(new URL('../../fixtures/aerodatabox-bynumber-multileg.json', import.meta.url), 'utf8'),
+    );
+    const r = parseByNumber(real, '2026-08-24');
+    expect(r).not.toBeNull();
+    expect(r!.icao24).toBe('ab20e7');
+    expect(r!.origIata).toBe('JFK');
+    expect(r!.destIata).toBe('FCO');
+    expect(r!.schedDepEpoch).not.toBeNull();
+  });
+
+  it('rejects a cancelled row (AeroDataBox spells it "Canceled", single-l)', () => {
+    const rows = [{
+      status: 'Canceled',
+      aircraft: { modeS: 'AB3D41' },
+      departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-24 21:20Z' } },
+      arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-25 05:55Z' } },
+    }];
+    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+  });
+
+  it('also tolerates the double-l "Cancelled" spelling', () => {
+    const rows = [{
+      status: 'Cancelled',
+      aircraft: { modeS: 'AB3D41' },
+      departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-24 21:20Z' } },
+      arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-25 05:55Z' } },
+    }];
+    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+  });
+
+  it('does not select a row whose scheduled departure falls on a different date', () => {
+    // Generalises the cancelled-leg confusion: a leg that ARRIVES on the
+    // requested date is not the same thing as one that DEPARTS on it.
+    const rows = [{
+      status: 'Arrived',
+      aircraft: { modeS: 'AB3D41' },
+      departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-23 21:20Z' } },
+      arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-24 05:55Z' } },
+    }];
+    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+  });
+
+  it('does not select a row with no arrival airport IATA', () => {
+    // A same-numbered flight on a different aircraft, with no arrival on file
+    // yet, must not be mistaken for the tracked leg.
+    const rows = [{
+      status: 'Departed',
+      aircraft: { modeS: 'A519B8' },
+      departure: { airport: { iata: 'YYT' }, scheduledTime: { utc: '2026-08-24 12:21Z' } },
+      arrival: { airport: { name: 'Unknown' } },
+    }];
+    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+  });
+
+  it('picks the earliest scheduled departure when two rows both qualify', () => {
+    const later = {
+      status: 'Scheduled',
+      aircraft: { modeS: 'AAAAAA' },
+      departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-24 21:20Z' } },
+      arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-25 05:55Z' } },
+    };
+    const earlier = {
+      status: 'Scheduled',
+      aircraft: { modeS: 'BBBBBB' },
+      departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-24 09:00Z' } },
+      arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-24 17:00Z' } },
+    };
+    const r = parseByNumber([later, earlier], '2026-08-24');
+    expect(r).not.toBeNull();
+    expect(r!.icao24).toBe('bbbbbb');
   });
 });
 

@@ -111,6 +111,18 @@ describe('runTrackedTick', () => {
     expect(store.current[0]!.state).toBe('airborne');
   });
 
+  it('persists the REASON when the lifecycle declares an entry unresolved', async () => {
+    // decideTracked can decide an entry is unresolved on its own -- e.g. it
+    // resolved without a departure time and so can never become airborne.
+    // Without carrying the reason across, GET /v1/tracked shows state
+    // 'unresolved' with reason null, which tells the user their flight is not
+    // being tracked but not the one thing they need in order to fix it.
+    const store = memStore([entry({ state: 'resolved', icao24: '406947', schedDepEpoch: null })]);
+    await runTrackedTick(store, DAY_START, { resolve: vi.fn(), position: vi.fn(), resolvesUsedToday: 0 });
+    expect(store.current[0]!.state).toBe('unresolved');
+    expect(store.current[0]!.reason).toBe('resolved without a departure time');
+  });
+
   it('drops expired entries from the store', async () => {
     const store = memStore([entry({ state: 'landed', stateAtMs: DAY_START })]);
     await runTrackedTick(store, DAY_START + 3 * 3600_000, {

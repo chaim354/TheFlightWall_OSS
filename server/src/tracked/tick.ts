@@ -54,7 +54,17 @@ export async function runTrackedTick(
       continue;
     }
 
-    let updated: TrackedEntry = d.state === before ? e : { ...e, state: d.state, stateAtMs: nowMs };
+    // Carry the lifecycle's own reason across when it has one. decideTracked can
+    // declare an entry unresolved by itself -- an entry that resolved without a
+    // departure time can never become airborne -- and that verdict arrives here
+    // rather than from a failed API call, so the resolve branch below never sees
+    // it. Without this, GET /v1/tracked reports state 'unresolved' with reason
+    // null: the user learns their flight is not being tracked but not why, which
+    // is the one thing they need in order to fix it.
+    let updated: TrackedEntry =
+      d.state === before
+        ? e
+        : { ...e, state: d.state, stateAtMs: nowMs, reason: d.reason ?? e.reason };
     if (d.state !== before) changed = true;
 
     if (d.action === 'resolve' || d.action === 'reresolve') {

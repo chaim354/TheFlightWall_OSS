@@ -30,19 +30,24 @@ const coord = (airport: unknown): LatLon | null => {
   return lat === null || lon === null ? null : { lat, lon };
 };
 
-/**
- * Map one by-number payload to a ResolvedFlight, or null if it holds no row.
- *
- * Returning a row whose `icao24` is null is NOT the same as returning null. The
- * first means "this flight exists, we just have no transponder address"; the
- * second means "no such flight that day". The caller reports them differently,
- * and the spec flags the missing-modeS case as an explicit risk to keep visible.
- */
-export function parseByNumber(payload: unknown): ResolvedFlight | null {
-  const rows = Array.isArray(payload) ? payload : [payload];
-  const row = rows[0] as Record<string, unknown> | undefined;
-  if (!row || typeof row !== 'object') return null;
+/** UTC calendar date, "YYYY-MM-DD", for a whole-seconds epoch. */
+const utcDateOf = (epochSeconds: number): string =>
+  new Date(epochSeconds * 1000).toISOString().slice(0, 10);
 
+/**
+ * AeroDataBox itself spells it "Canceled" (single-l); tolerate "Cancelled"
+ * too since that is the more common spelling and a payload variant is cheap
+ * to guard against.
+ */
+const CANCELED_STATUSES = new Set(['canceled', 'cancelled']);
+
+const isCanceled = (row: Record<string, unknown>): boolean => {
+  const status = str(row.status);
+  return status !== null && CANCELED_STATUSES.has(status.toLowerCase());
+};
+
+/** Map one qualifying row to a ResolvedFlight. */
+function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
   const aircraft = (row.aircraft ?? {}) as Record<string, unknown>;
   const dep = (row.departure ?? {}) as Record<string, unknown>;
   const arr = (row.arrival ?? {}) as Record<string, unknown>;
@@ -63,6 +68,68 @@ export function parseByNumber(payload: unknown): ResolvedFlight | null {
     schedDepEpoch: epoch((dep.scheduledTime as { utc?: unknown } | undefined)?.utc),
     schedArrEpoch: epoch((arr.scheduledTime as { utc?: unknown } | undefined)?.utc),
   };
+}
+
+/**
+ * Map a by-number payload to the ONE row it actually means, or null if none
+ * qualifies for `date`.
+ *
+ * The by-number-and-date endpoint does not return a single row: it returns
+ * every leg using that flight number that touches the date window, which in
+ * practice includes legs that are not the one a caller asking for "this
+ * flight, this date" means. A live production fixture
+ * (fixtures/aerodatabox-bynumber-multileg.json, DL182 on 2026-08-24) had
+ * three: a cancelled leg that arrived that morning (actually yesterday's
+ * departure), a same-numbered flight on a completely different aircraft, and
+ * the actual en-route leg departing that date. Taking rows[0] blindly picked
+ * the cancelled leg and its null departure time, and the whole feature sat
+ * inert forever as a result -- see decideTracked's `resolved`-with-no-
+ * departure-time handling in lifecycle.ts for the second half of that bug.
+ *
+ * Selection, in order:
+ *   1. Drop cancelled rows.
+ *   2. Require a scheduled departure time.
+ *   3. Require that departure to fall on the REQUESTED `date` (UTC) -- this is
+ *      what tells "today's departure" apart from "yesterday's departure that
+ *      lands today", which is the actual confusion in the fixture above.
+ *   4. Require both a departure and an arrival airport IATA -- this drops a
+ *      same-numbered flight on a different aircraft that has no arrival on
+ *      file yet.
+ *   5. Of what is left, take the earliest scheduled departure.
+ *
+ * Returning a row whose `icao24` is null is NOT the same as returning null.
+ * The first means "this flight exists, we just have no transponder address";
+ * the second means "no qualifying row that day". The caller reports them
+ * differently, and the spec flags the missing-modeS case as an explicit risk
+ * to keep visible.
+ */
+export function parseByNumber(payload: unknown, date: string): ResolvedFlight | null {
+  const rows = Array.isArray(payload) ? payload : [payload];
+
+  let bestRow: Record<string, unknown> | null = null;
+  let bestDepEpoch = Infinity;
+
+  for (const raw of rows) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Record<string, unknown>;
+    if (isCanceled(row)) continue;
+
+    const dep = (row.departure ?? {}) as Record<string, unknown>;
+    const arr = (row.arrival ?? {}) as Record<string, unknown>;
+    const depAirport = (dep.airport ?? null) as Record<string, unknown> | null;
+    const arrAirport = (arr.airport ?? null) as Record<string, unknown> | null;
+
+    const depEpoch = epoch((dep.scheduledTime as { utc?: unknown } | undefined)?.utc);
+    if (depEpoch === null || utcDateOf(depEpoch) !== date) continue;
+    if (!str(depAirport?.iata) || !str(arrAirport?.iata)) continue;
+
+    if (depEpoch < bestDepEpoch) {
+      bestRow = row;
+      bestDepEpoch = depEpoch;
+    }
+  }
+
+  return bestRow ? toResolvedFlight(bestRow) : null;
 }
 
 /**
@@ -101,7 +168,7 @@ export async function resolveFlight(
     return { ok: false, retryable: false, reason: 'unparseable response' };
   }
 
-  const flight = parseByNumber(payload);
+  const flight = parseByNumber(payload, date);
   if (!flight) {
     return { ok: false, retryable: false, reason: `not operating ${date}` };
   }
