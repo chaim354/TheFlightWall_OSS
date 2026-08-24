@@ -2035,11 +2035,12 @@ In `startServer`, alongside the existing `/v1/flights` branch (~line 164):
 Alongside the existing `refreshTick` interval:
 
 ```typescript
-  // 60s: fast enough that a pinned card tracks usefully, slow enough that a
-  // single flight costs ~480 OpenSky requests over an 8h crossing. Retune from
-  // the credit measurement in
+  // 120s, not 60s. MEASURED: a single-icao24 query costs FOUR credits against
+  // an authenticated allowance of 4000/day, so the real budget is 1000 queries
+  // a day -- and 60s would spend 1920 of them on four concurrent eight-hour
+  // flights. At 120s the same four cost 960 and fit. See
   // docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md.
-  const TRACKED_TICK_MS = 60_000;
+  const TRACKED_TICK_MS = 120_000;
   let resolvesUsedToday = 0;
   let resolveDay = new Date().getUTCDate();
 

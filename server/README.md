@@ -75,6 +75,34 @@ regardless of the 2h cadence, so the margin you need is minutes; the hour the
 breaks is ending the window at or after the wake time. The default assumes a
 panel whose night schedule ends at 07:00 -- change both together.
 
+### Tracked flights
+
+`POST /v1/tracked` with `{"number":"BA181","date":"2026-09-14"}` adds one
+journey. `GET /v1/tracked` lists them; `DELETE /v1/tracked/{id}` removes one.
+The flight is resolved to its aircraft via AeroDataBox, then followed live via
+OpenSky and pinned to the top of the panel until it lands.
+
+**This endpoint is UNAUTHENTICATED by deliberate choice.** Anyone who knows the
+URL can add entries and read which flights are being followed. Four guards bound
+what that costs, and they are load-bearing rather than cosmetic -- do not relax
+any of them without adding auth first:
+
+- at most 20 stored entries
+- dates restricted to today-1 .. today+14
+- at most 50 AeroDataBox resolutions per day for this feature
+- entries expire on their own (2h after landing, 24h after an unresolved miss)
+
+Requires `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET`. Without them the tick
+never starts and the routes 404, so the feature is inert rather than broken.
+
+**On the OpenSky budget.** Authentication is OAuth2 client credentials, NOT HTTP
+Basic -- Basic returns 200 with real data while being served from the anonymous
+400/day tier instead of the authenticated 4000/day one, a tenfold error that
+produces no error. A single-`icao24` query costs FOUR credits, so the real budget
+is ~1000 queries/day. The 120s tick is sized for four concurrent eight-hour
+flights (960 queries). Raise the interval before tracking more than that; see
+`docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md`.
+
 ## Docker
 
 ```sh

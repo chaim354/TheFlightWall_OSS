@@ -81,27 +81,53 @@ headers: x-rapidapi-key: <key>
 The plan originally specified `prod.api.market/api/v1/aedbx/aerodatabox` with an
 `x-magicapi-key` header. Both were wrong and are corrected in the plan.
 
-## 4. OpenSky credit cost — NOT MEASURED, BLOCKED
+## 4. OpenSky — MEASURED 2026-08-24, and both findings change the design
 
-No OpenSky credentials exist:
+### 4a. Basic auth does not authenticate. It silently serves the anonymous tier.
 
-- `server/.kamal/secrets` has no `OPENSKY_*` entry.
-- The device holds `openSkyClientId = chaim354@gmail.com-api-client` but reports
-  `openSkyClientSecretSet = false`, so the secret was never stored there either.
+The implementation shipped in Task 7 used HTTP Basic. Against the current API
+that returns HTTP 200 with real data while being billed as anonymous:
 
-**What this blocks:** only the poll-cadence tuning and the live end-to-end check
-(Task 14 step 3). It does NOT block implementation -- `src/tracked/opensky.ts`
-is unit-tested against a mocked `fetch`, so Task 7 proceeds as written.
+| Scheme | `x-rate-limit-remaining` | Tier |
+|---|---|---|
+| `Authorization: Basic base64(id:secret)` | **395** | anonymous, 400/day |
+| `Authorization: Bearer <token>` | **3999** | authenticated, 4000/day |
 
-**Until measured, the 60s cadence in Task 11 is an assumption**, resting on 1
-credit per single-`icao24` query. If the real cost is higher the cadence must
-rise before the feature ships, or one long-haul will exhaust the daily
-allowance. Re-run this when a secret exists:
+A tenfold budget error producing no error and no wrong data -- only a tenth of
+the quota, which surfaces weeks later as unexplained throttling. Fixed: OAuth2
+client credentials against
 
-```bash
-curl -s -u "$OPENSKY_CLIENT_ID:$OPENSKY_CLIENT_SECRET" -D /tmp/h.txt \
-  "https://opensky-network.org/api/states/all?icao24=406947" -o /dev/null
-grep -i "x-rate-limit" /tmp/h.txt
+```
+POST https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token
+     grant_type=client_credentials&client_id=<id>&client_secret=<secret>
+  -> {"access_token": "<~1486 chars>", "expires_in": 1800, "token_type": "Bearer"}
 ```
 
-Call it twice; the delta in `X-Rate-Limit-Remaining` is the per-query cost.
+An invalid or expired token returns **401** rather than falling back to
+anonymous, so that failure at least IS visible. The token is cached and refreshed
+60s early; a 401 clears the cache.
+
+### 4b. A single-icao24 query costs FOUR credits, not one.
+
+Measured across three consecutive calls: remaining went 3995 -> 3991 -> 3987.
+
+That is the number the spec's cadence rested on, and it was wrong by 4x. The
+budget is therefore **1,000 queries/day, not 4,000**:
+
+```
+concurrent_flights x airborne_hours x 3600 / cadence_seconds  <=  1000
+```
+
+| Cadence | 1 flight x 8h | 2 x 8h | 4 x 8h |
+|---|---|---|---|
+| 60s (the plan's original) | 480 | 960 | 1920 **over** |
+| **120s (adopted)** | 240 | 480 | **960 fits** |
+
+So the spec's claim of "4-6 concurrent long-hauls" at 60s was wrong on two
+counts at once -- the tier was 10x smaller than assumed AND each query costs 4x
+more than assumed. **Task 11 uses 120s**, which supports four concurrent
+eight-hour flights inside the authenticated allowance.
+
+Note the daily allowance is shared with nothing else today: no other code path in
+this repo calls OpenSky. The device holds an `openSkyClientId` but its secret was
+never set, so the firmware has never authenticated against it.
