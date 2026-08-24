@@ -70,6 +70,8 @@ env:
     REFRESH_QUIET_TZ: "America/New_York"
   secret:
     - AERODATABOX_KEY
+    - OPENSKY_CLIENT_ID
+    - OPENSKY_CLIENT_SECRET
 
 # The schedule table (server writes it to SCHEDULE_PATH, which the
 # Dockerfile defaults to /app/data/schedule.json) needs to survive a

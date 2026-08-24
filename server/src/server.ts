@@ -4,6 +4,11 @@ import { fileStorage } from './schedule/fileStorage';
 import { refreshSchedule, refreshPanynj, BOARD_FETCH_DELAY_MS } from './schedule/refresh';
 import { PAGE_DELAY_MS } from './schedule/panynj';
 import { parseQuietHours, inQuietHours, shouldRefresh, type QuietWindow } from './schedule/quietHours';
+import { handleTracked } from './tracked/routes';
+import { fileTrackedStorage } from './tracked/store';
+import { runTrackedTick } from './tracked/tick';
+import { resolveFlight } from './tracked/resolve';
+import { fetchPosition } from './tracked/opensky';
 
 /** Everything server.ts needs, read from process.env with a default for
  * every var except the API key -- there is no sensible default for that. */
@@ -54,11 +59,28 @@ export interface ServerConfig {
    * tests can pass 0 and run fast instead of waiting out real 1.5s gaps.
    */
   boardFetchDelayMs: number;
+  /**
+   * OpenSky OAuth2 client-credentials pair used to poll tracked-flight
+   * positions (see src/tracked/opensky.ts).
+   *
+   * Optional, unlike aerodataboxKey -- every ServerConfig literal that
+   * predates this feature (this file's own tests included) must keep
+   * compiling without naming it. Absent (either one) disables tracked
+   * flights entirely: handleRequest 404s /v1/tracked and the tick below
+   * never starts. That is also the Cloudflare Worker's permanent state --
+   * it shares src/tracked/serve.ts's read path but runs no server.ts and
+   * has no tracked store at all.
+   */
+  openSkyClientId?: string;
+  openSkyClientSecret?: string;
+  /** Where tracked-flight entries are persisted; see src/tracked/store.ts. */
+  trackedPath?: string;
 }
 
 const DEFAULT_PORT = 8787;
 const DEFAULT_BOARDS = 'KJFK,KLGA,KEWR,KBOS';
 const DEFAULT_SCHEDULE_PATH = './data/schedule.json';
+const DEFAULT_TRACKED_PATH = './data/tracked.json';
 /**
  * AeroDataBox refresh cadence.
  *
@@ -144,6 +166,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     boardFetchDelayMs: BOARD_FETCH_DELAY_MS,
     panynjIntervalMs: PANYNJ_DISABLED,
     panynjPageDelayMs: PAGE_DELAY_MS,
+    openSkyClientId: env.OPENSKY_CLIENT_ID ?? '',
+    openSkyClientSecret: env.OPENSKY_CLIENT_SECRET ?? '',
+    trackedPath: env.TRACKED_PATH ?? DEFAULT_TRACKED_PATH,
   };
 }
 
@@ -163,6 +188,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, env: Env
 
   if (url.pathname === '/v1/flights') {
     const response = await handleFlights(url, env, Date.now());
+    const body = await response.text();
+    res.writeHead(response.status, { 'content-type': response.headers.get('content-type') ?? 'application/json' });
+    res.end(body);
+    return;
+  }
+
+  if (url.pathname === '/v1/tracked' || url.pathname.startsWith('/v1/tracked/')) {
+    // env.TRACKED is only set when OPENSKY_CLIENT_ID/SECRET are configured
+    // (see startServer) -- absent, this 404s rather than accepting entries
+    // a tick that will never run can't ever resolve or poll.
+    if (!env.TRACKED) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const response = await handleTracked(
+      req.method ?? 'GET',
+      url,
+      Buffer.concat(chunks).toString('utf8'),
+      env.TRACKED,
+      Date.now(),
+    );
     const body = await response.text();
     res.writeHead(response.status, { 'content-type': response.headers.get('content-type') ?? 'application/json' });
     res.end(body);
@@ -189,9 +238,20 @@ export interface RunningServer {
  */
 export function startServer(config: ServerConfig): Promise<RunningServer> {
   const storage = fileStorage(config.schedulePath);
+  // Coerced to plain strings once, here, so every use below (the route guard's
+  // closure included) sees `string`, not `string | undefined` -- config's
+  // fields are optional only so pre-existing ServerConfig literals elsewhere
+  // keep compiling without naming a feature they don't exercise.
+  const openSkyClientId = config.openSkyClientId ?? '';
+  const openSkyClientSecret = config.openSkyClientSecret ?? '';
+  const trackedPath = config.trackedPath ?? DEFAULT_TRACKED_PATH;
+  // Absent credentials keep the feature entirely inert: no storage is wired
+  // into env (so /v1/tracked 404s, see handleRequest) and, further down, no
+  // tick timer is created either.
+  const trackedStorage = openSkyClientId ? fileTrackedStorage(trackedPath) : undefined;
   // Only what handleFlights reads. It used to be handed the board list and a
   // paid-API secret it has no use for, on a per-request read-only path.
-  const env: Env = { SCHEDULE: storage };
+  const env: Env = { SCHEDULE: storage, TRACKED: trackedStorage };
   const boards = config.boards.split(',').map((s) => s.trim()).filter(Boolean);
 
   if (!config.aerodataboxKey) {
@@ -311,6 +371,33 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
     ? setInterval(() => void runPanynj(), config.panynjIntervalMs)
     : undefined;
 
+  // 120s, not 60s. MEASURED: a single-icao24 query costs FOUR credits against
+  // an authenticated allowance of 4000/day, so the real budget is 1000 queries
+  // a day -- and 60s would spend 1920 of them on four concurrent eight-hour
+  // flights. At 120s the same four cost 960 and fit. See
+  // docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md.
+  const TRACKED_TICK_MS = 120_000;
+  let resolvesUsedToday = 0;
+  let resolveDay = new Date().getUTCDate();
+
+  const trackedTimer = trackedStorage
+    ? setInterval(() => {
+        const today = new Date().getUTCDate();
+        if (today !== resolveDay) {
+          resolveDay = today;
+          resolvesUsedToday = 0;
+        }
+        void runTrackedTick(trackedStorage, Date.now(), {
+          resolve: async (n, d) => {
+            resolvesUsedToday++;
+            return resolveFlight(n, d, config.aerodataboxKey);
+          },
+          position: (hex) => fetchPosition(hex, openSkyClientId, openSkyClientSecret),
+          resolvesUsedToday,
+        }).catch((e) => console.error('tracked tick failed:', e instanceof Error ? e.message : String(e)));
+      }, TRACKED_TICK_MS)
+    : undefined;
+
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
       handleRequest(req, res, env).catch((err) => {
@@ -334,6 +421,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
         settled = true;
         clearInterval(timer);
         clearInterval(panynjTimer);
+        clearInterval(trackedTimer);
         reject(err);
       }
     });
@@ -347,6 +435,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
         new Promise((resolveClose, rejectClose) => {
           clearInterval(timer);
           clearInterval(panynjTimer);
+          clearInterval(trackedTimer);
           server.close((err) => (err ? rejectClose(err) : resolveClose()));
           // Force idle keep-alive sockets closed immediately rather than
           // waiting out their keep-alive timeout -- otherwise server.close()
