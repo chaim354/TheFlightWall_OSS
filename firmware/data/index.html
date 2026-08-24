@@ -172,7 +172,9 @@
     <div class="row">
       <div><label>Brightness (0–255)</label><input id="brightness" type="number" min="0" max="255" /></div>
       <div><label>Text color</label><input id="textColor" type="color" /></div>
+      <div><label>Seconds per flight</label><input id="cycleSeconds" type="number" min="1" /></div>
     </div>
+    <small class="help">Seconds per flight is how long each card holds the panel before the carousel moves on. How many flights it cycles through is <b>Max flights</b>, under Advanced.</small>
     <div class="row">
       <div><label>When no flights</label>
         <select id="noFlightsMode">
@@ -238,10 +240,9 @@
     <div class="sec">Flight list</div>
     <div class="row">
       <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
-      <div><label>Cycle seconds</label><input id="cycleSeconds" type="number" min="1" /></div>
       <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
     </div>
-    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit.</small>
+    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit. Seconds per flight now lives under Display.</small>
 
     <div class="sec">Light sensor (auto-off in the dark)</div>
     <span class="check" style="margin-top:0"><input type="checkbox" id="lightSensorEnabled"><label>Enable ambient light sensor</label></span>
@@ -320,6 +321,30 @@ function secretField(id,isSet){
   const el=$(id); el.value='';
   el.placeholder = isSet ? 'stored — leave blank to keep' : 'not set';
 }
+// Assign a stored value to a <select>, KEEPING it when the dropdown has no
+// option for it. Setting .value to something unlisted silently leaves .value
+// as "" -- so the field renders blank and the next Save POSTs that empty
+// string straight over the stored setting.
+//
+// Used for exactly the four fields Settings::fromJson stores VERBATIM, which
+// are the only ones that can hold a value this page has no option for:
+// schedule.timezone (every POSIX TZ string there is, against ten listed here),
+// layout.noFlightsMode, hardware.panelDriverChip and hardware.panelI2sSpeedMhz.
+// The other dropdowns -- position source, enrichment source, light sensor type,
+// tracking mode -- go through a *FromString mapper on the device, so an
+// unrecognised value never reaches storage and cannot come back out of it.
+//
+// The timezone is where this actually bit: a zone set over /api/settings, or by
+// a future firmware with a longer list, was wiped by any Save from this page,
+// taking the clock and the night window with it.
+function selectValue(id,value,label){
+  const el=$(id), v=(value==null?'':String(value));
+  el.value=v;
+  if(el.value===v||v==='') return;
+  const opt=document.createElement('option');
+  opt.value=v; opt.textContent=(label||'Custom')+' — '+v;
+  el.appendChild(opt); el.value=v;
+}
 function rgbToHex(r,g,b){return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
@@ -376,7 +401,7 @@ async function loadSettings(){
 
   for (const k of ['showAirlineFlight','showRoute','showEta','showAircraft','showAltitude','showSpeed','showHeading','showVerticalRate','flightNumberOverVr'])
     $(k).checked = !!s.layout[k];
-  $('noFlightsMode').value = s.layout.noFlightsMode || 'dots';
+  selectValue('noFlightsMode', s.layout.noFlightsMode || 'dots', 'Stored');
 
   $('minAltitudeFt').value = s.filters.minAltitudeFt;
   $('maxAltitudeFt').value = s.filters.maxAltitudeFt;
@@ -390,7 +415,7 @@ async function loadSettings(){
   $('nightBrightness').value = s.schedule.nightBrightness;
   $('nightStartHour').value = s.schedule.nightStartHour;
   $('nightEndHour').value = s.schedule.nightEndHour;
-  $('timezone').value = s.schedule.timezone || 'UTC0';
+  selectValue('timezone', s.schedule.timezone || 'UTC0', 'Stored');
 
   $('buttonsEnabled').checked = !!(s.buttons && s.buttons.enabled);
   $('lightSensorEnabled').checked = !!s.light.enabled;
@@ -405,8 +430,8 @@ async function loadSettings(){
   $('panelResY').value = s.hardware.panelResY;
   $('panelChain').value = s.hardware.panelChain;
   $('panelClkPhase').checked = s.hardware.panelClkPhase !== false;
-  $('panelDriverChip').value = s.hardware.panelDriverChip || 'shift';
-  $('panelI2sSpeedMhz').value = s.hardware.panelI2sSpeedMhz || 8;
+  selectValue('panelDriverChip', s.hardware.panelDriverChip || 'shift', 'Stored');
+  selectValue('panelI2sSpeedMhz', s.hardware.panelI2sSpeedMhz || 8, 'Stored');
   $('panelLatchBlanking').value = s.hardware.panelLatchBlanking || 1;
 
   toggleMode();

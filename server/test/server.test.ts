@@ -11,6 +11,7 @@ vi.mock('../src/schedule/aerodatabox', () => ({ fetchBoard: vi.fn() }));
 import { fetchAircraft } from '../src/adsblol';
 import { fetchBoard } from '../src/schedule/aerodatabox';
 import { startServer, configFromEnv, type RunningServer } from '../src/server';
+import { MAX_ENTRIES, WINDOW_FUTURE_DAYS } from '../src/tracked/routes';
 
 let dir: string;
 let running: RunningServer | undefined;
@@ -114,6 +115,41 @@ describe('startServer', () => {
     // A missing key must short-circuit the refresh entirely, not silently
     // attempt (and presumably fail) a real board fetch.
     expect(fetchBoard).not.toHaveBeenCalled();
+  });
+
+  it('serves the watched-flights page at / even with tracked flights unconfigured', async () => {
+    running = await startServer({
+      port: 0,
+      // No openSkyClientId, so /v1/tracked 404s and no tick runs. The PAGE
+      // must still be served: it reads that 404 itself and names the two
+      // missing env vars, which a 404 at the root of your own server cannot.
+      aerodataboxKey: '',
+      boards: 'KJFK',
+      schedulePath: join(dir, 'schedule.json'),
+      panynjIntervalMs: 0,
+      panynjPageDelayMs: 0,
+      refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null,
+      quietHoursTimeZone: 'America/New_York',
+      boardFetchDelayMs: 0,
+    });
+    const base = `http://127.0.0.1:${running.port}`;
+
+    const page = await fetch(`${base}/`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toMatch(/text\/html/);
+    const html = await page.text();
+    expect(html).toContain('watched flights');
+
+    // The cap and the date window are interpolated from routes.ts, not restated
+    // in the page: the picker must not offer a date, or a slot, that the POST it
+    // feeds would then reject. Asserted so that hardcoding them back is a test
+    // failure rather than a drift nobody notices until a form stops working.
+    expect(html).toContain(`var MAX = ${MAX_ENTRIES};`);
+    expect(html).toContain(`var WINDOW_FUTURE_DAYS = ${WINDOW_FUTURE_DAYS};`);
+
+    // Unconfigured means the API is absent, not broken.
+    expect((await fetch(`${base}/v1/tracked`)).status).toBe(404);
   });
 
   it('still answers /v1/flights (with no routes) when AERODATABOX_KEY is missing', async () => {

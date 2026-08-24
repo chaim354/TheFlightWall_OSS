@@ -14,8 +14,8 @@ import { startOfUtcDay } from './lifecycle';
  */
 export const MAX_ENTRIES = 20;
 const DAY_MS = 24 * 60 * 60_000;
-const WINDOW_PAST_DAYS = 1;
-const WINDOW_FUTURE_DAYS = 14;
+export const WINDOW_PAST_DAYS = 1;
+export const WINDOW_FUTURE_DAYS = 14;
 
 /**
  * Carrier prefix (2-3 alphanumerics, e.g. "9W" or "BA") then 1-4 digits.

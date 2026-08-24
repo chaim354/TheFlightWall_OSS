@@ -5,6 +5,7 @@ import { refreshSchedule, refreshPanynj, BOARD_FETCH_DELAY_MS } from './schedule
 import { PAGE_DELAY_MS } from './schedule/panynj';
 import { parseQuietHours, inQuietHours, shouldRefresh, type QuietWindow } from './schedule/quietHours';
 import { handleTracked } from './tracked/routes';
+import { trackedPage } from './tracked/page';
 import { fileTrackedStorage } from './tracked/store';
 import { runTrackedTick } from './tracked/tick';
 import { resolveFlight } from './tracked/resolve';
@@ -183,6 +184,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, env: Env
     // serving perfectly good flight data.
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+
+  if (url.pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) {
+    // The watched-flights page. Served whether or not the feature is
+    // configured, unlike /v1/tracked below, which 404s without OpenSky
+    // credentials -- a 404 at the root of your own server is a puzzle, whereas
+    // the page states plainly which two env vars are missing. It discovers that
+    // for itself, from the 404 its first fetch gets.
+    //
+    // no-cache rather than a max-age: this is one small string with no
+    // fingerprint in its URL, so a cached copy after a redeploy is a page whose
+    // embedded constants disagree with the server it is talking to.
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-cache',
+    });
+    // Node drops the body itself on a HEAD response.
+    res.end(trackedPage);
     return;
   }
 

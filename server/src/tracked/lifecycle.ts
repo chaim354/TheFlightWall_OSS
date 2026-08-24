@@ -5,8 +5,8 @@ const RERESOLVE_LEAD_MS = 60 * 60_000;
 /** How long after scheduled arrival to keep polling when nothing says landed. */
 const ARRIVAL_GRACE_MS = 30 * 60_000;
 /** Terminal-state expiry timers. */
-const EXPIRE_AFTER_LANDED_MS = 2 * 60 * 60_000;
-const EXPIRE_AFTER_UNRESOLVED_MS = 24 * 60 * 60_000;
+export const EXPIRE_AFTER_LANDED_MS = 2 * 60 * 60_000;
+export const EXPIRE_AFTER_UNRESOLVED_MS = 24 * 60 * 60_000;
 /**
  * Absolute cap on how long an entry may stay airborne when we have a departure
  * time but no arrival time. The longest scheduled commercial flight is about

@@ -29,6 +29,12 @@
 //   ?ssid=...          SSID reported by /api/status
 //   ?heap=0            omit largestInternal/largestDma/freeInternal/freePsram,
 //                      as firmware from before those were added would
+//   ?tz=...            the POSIX TZ string /api/settings reports. Set it to a
+//                      zone the page's dropdown does NOT list to exercise the
+//                      unlisted-value path (see F-FW05-D below)
+//   ?unlisted=1        report a value no dropdown lists for ALL FOUR fields the
+//                      firmware stores verbatim -- timezone, noFlightsMode,
+//                      panelDriverChip, panelI2sSpeedMhz
 //
 // GET /__probe   what the harness saw: POST bodies, request counts, and the
 //                peak number of concurrent /api/status requests
@@ -54,6 +60,24 @@
 //     open  /?heap=1   -> expect pills for largest / dma / int / psram
 //     open  /?heap=0   -> expect those pills absent, and NOT "undefinedk"
 //
+//   F-FW05-D  a <select> silently discards a value it has no option for
+//     open  /?tz=AEST-10AEDT,M10.1.0,M4.1.0/3     // not in the ten listed
+//     then  document.getElementById('timezone').value      // must be that string,
+//                                                          // not ""
+//           JSON.parse(JSON.stringify(collect())).schedule.timezone
+//                                                          // must round-trip
+//     Unfixed, .value reads "" and Save POSTs that empty string over a
+//     perfectly good zone -- the clock and the night window go with it.
+//
+//     open  /?unlisted=1                          // all four verbatim fields
+//     then  const c = JSON.parse(JSON.stringify(collect()));
+//           [c.schedule.timezone, c.layout.noFlightsMode,
+//            c.hardware.panelDriverChip, c.hardware.panelI2sSpeedMhz]
+//                                                 // none may be "" or 0
+//     Settings::fromJson stores those four exactly as sent; the rest of the
+//     dropdowns map through a *FromString on the device, so an unlisted value
+//     can never come back out of storage for them.
+//
 //   F-FW05-B  overlapping polls
 //     open  /?statusDelay=7000, wait ~25s, read /__probe statusPeak (want 1)
 //     then  for (let i=0;i<5;i++) { loadAll(); await new Promise(r=>setTimeout(r,150)); }
@@ -77,7 +101,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PAGE = process.env.WEBUI_PAGE ?? path.join(HERE, '..', 'firmware', 'data', 'index.html');
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 8099);
 
-const knobs = { settingsDelay: 0, settingsFail: 0, statusDelay: 0, statusFail: 0, ssid: 'HomeWiFi', heap: 1 };
+const knobs = { settingsDelay: 0, settingsFail: 0, statusDelay: 0, statusFail: 0, ssid: 'HomeWiFi', heap: 1, tz: '', unlisted: 0 };
 const probe = { posts: [], settingsGets: 0, statusGets: 0, flightGets: 0, statusInFlight: 0, statusPeak: 0 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -173,7 +197,7 @@ createServer(async (req, res) => {
   for (const k of Object.keys(knobs)) {
     if (url.searchParams.has(k)) {
       const v = url.searchParams.get(k);
-      knobs[k] = k === 'ssid' ? v : Number(v);
+      knobs[k] = (k === 'ssid' || k === 'tz') ? v : Number(v);
     }
   }
 
@@ -202,7 +226,19 @@ createServer(async (req, res) => {
     probe.settingsGets++;
     if (knobs.settingsDelay) await sleep(knobs.settingsDelay);
     if (knobs.settingsFail) return json(res, { error: 'stubbed failure' }, 500);
-    return json(res, SETTINGS);
+    // Overrides are layered onto a copy, so the rest of the document -- and
+    // the coverage check above, which reads SETTINGS itself -- is untouched.
+    let out = SETTINGS;
+    if (knobs.unlisted) {
+      out = {
+        ...out,
+        schedule: { ...out.schedule, timezone: 'AEST-10AEDT,M10.1.0,M4.1.0/3' },
+        layout: { ...out.layout, noFlightsMode: 'aurora' },
+        hardware: { ...out.hardware, panelDriverChip: 'fm6047', panelI2sSpeedMhz: 10 },
+      };
+    }
+    if (knobs.tz) out = { ...out, schedule: { ...out.schedule, timezone: knobs.tz } };
+    return json(res, out);
   }
 
   if (url.pathname === '/api/status') {

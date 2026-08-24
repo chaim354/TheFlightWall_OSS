@@ -154,6 +154,7 @@ Other commands: `status`, `opensky <id> <secret>`, `aeroapi <key>`, `enrich <ads
 - **Tracking mode**:
   - **Area** — show everything within a radius of a center point (your home/window). An **Auto-detect** button fills the center from IP geolocation (free, no key, approximate — review before saving), with an optional "auto-detect on every boot" toggle.
   - **Flights** — track a specific list of flights by flight number, callsign, or tail.
+  - *(Separately, if you run a FlightWall server: **watched flights**. Open the server in a browser — its home page is a form for "follow BA181 on this date". That flight is resolved to its actual aircraft, followed worldwide, and pinned to the top of the wall while it is in the air, whether or not it ever comes near you. Configured on the server, not on the device; see [`server/README.md`](server/README.md).)*
 - **Display** — brightness, text color, max flights to cycle, seconds per flight, fetch interval, which **fields** appear on each card (airline+flight, route, **ETA**, aircraft, altitude, speed, heading, vertical rate), and the **no-flights screen** (clock / aviation fun facts). ETA only ever renders for FlightWall-server flights with a resolved destination — blank otherwise, same as an unfilled route.
 - **Filters** — altitude band, hide aircraft on the ground, and an airline allow-list.
 - **Brightness schedule** — separate day/night brightness with configurable night hours, using a **POSIX timezone string** (e.g. `EST5EDT,M3.2.0,M11.1.0`) so daylight-saving transitions are handled automatically.
