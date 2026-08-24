@@ -45,6 +45,7 @@ Run loop:
 #include "adapters/LightSensor.h"
 #include "adapters/Buttons.h"
 #include "utils/FetchCadence.h"
+#include "utils/IdleWhenDark.h"
 #include "utils/BrightnessLadder.h"
 #include "adapters/GeoLocator.h"
 
@@ -90,6 +91,9 @@ static int g_appliedBrightness = -1;
 static std::vector<FlightInfo> g_lastFlights;
 static uint8_t g_consecutiveFailures = 0;      // drives the fetch backoff
 static unsigned long g_lastGoodFetchMs = 0;    // for the stale-data cutoff
+// Whether the previous loop pass suppressed fetching because the panel was dark.
+// Only used to detect the WAKE edge; see utils/IdleWhenDark.h.
+static bool g_fetchSuppressed = false;
 static uint8_t g_consecutiveEmpty = 0;         // successful fetches that returned nothing
 
 // How many consecutive empty-but-successful fetches to see before believing the sky
@@ -708,6 +712,52 @@ void loop()
     {
         delay(5);
         return;
+    }
+
+    // Don't fetch into a dark panel. g_appliedBrightness is applyBrightness()'s
+    // resolved output -- base setting, night schedule, ambient sensor, button
+    // ramp and the off toggle all folded in -- so this covers every reason the
+    // panel is off. The night schedule is where the volume is: ~960 fetches per
+    // dark night, each a TLS handshake on a link the 2026-08-23 RF work showed
+    // to be fragile.
+    //
+    // This MUST sit after applyBrightness() earlier in loop(), or it reads a
+    // stale brightness on the very pass where it changes -- the wake pass.
+    {
+        const uint32_t staleMs = (uint32_t)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
+        // Pass g_appliedBrightness straight through. It is an int whose -1 means
+        // "not applied yet", and decideIdle treats any negative as LIT -- do NOT
+        // clamp it to 0 here. Clamping to 0 would mark the pass suppressed, and
+        // the NEXT pass would then force a fetch AND discard the held flights,
+        // blanking the wall from a momentary sentinel. main.cpp:355 resolves the
+        // same sentinel the same way, to a lit value.
+        const IdleDecision idle = decideIdle(
+            g_appliedBrightness, g_fetchSuppressed,
+            (uint32_t)g_lastGoodFetchMs, (uint32_t)millis(), staleMs);
+        // suppressFetch IS the next pass's wasSuppressed -- one bit, not two.
+        g_fetchSuppressed = idle.suppressFetch;
+
+        if (idle.discardFlights && !g_lastFlights.empty())
+        {
+            // Woke to a set older than the stale window. Clearing shows the
+            // loading screen for a second rather than aircraft that have landed.
+            Serial.println("Woke with stale flights; clearing and refetching");
+            g_lastFlights.clear();
+            g_display.markFlightsUpdated();
+            g_display.displayFlights(g_lastFlights);
+            g_web.setServerStale(false);
+        }
+        if (idle.forceFetch)
+            g_lastFetchMs = 0; // fetch on this pass rather than waiting out the interval
+
+        if (idle.suppressFetch)
+        {
+            // Deliberately does NOT touch g_consecutiveFailures/g_consecutiveEmpty:
+            // suppression is not failure, and polluting them would start the first
+            // fetch after a dark night at the 300s backoff cap.
+            delay(5);
+            return;
+        }
     }
 
     // Both pressure signals, combined by max() rather than precedence -- see
