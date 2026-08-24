@@ -1,8 +1,9 @@
 # FlightWall OSS — Handoff Notes
 
-Status snapshot for the next agent. Branch `flightwall-mini-parity`, fork
-`chaim354/TheFlightWall_OSS` (`origin`). Read §0 and §2 before touching anything.
-Local `HEAD` == `origin/flightwall-mini-parity` as of this writing.
+Status snapshot for the next agent. Fork `chaim354/TheFlightWall_OSS` (`origin`).
+Read §0 and §2 before touching anything, and §5 FIRST if you are about to push.
+As of 2026-08-24 the current line of work is `main` at `eec3cb2`; earlier work is
+on `flightwall-mini-parity`.
 
 ---
 
@@ -20,14 +21,18 @@ Most of what earlier handoffs called "never run on hardware" now IS device-verif
 | 6-bit colour-depth fix (`4218dc0`) | **Device-verified but on ONE ping sample per condition** — see §3. The fault swings ~32× between identical back-to-back runs, so treat the 75%→0% result as strong-but-not-proven. |
 | Clock / timezone / new defaults (`eea030d`) | **COMPILE + HOST-TEST ONLY.** The board dropped off USB before it could be flashed. The ONLY unverified commit from this session. |
 | Audit remediation, Tiers 1-6 (branch `claude/audit-priority-list-d3dbf5`, 30 commits) | **DEVICE-VERIFIED, 2026-08-23.** Flashed (firmware + `uploadfs`) and the server deployed. Confirmed on hardware: ETAs render on the panel; `/api/settings` no longer returns any secret in plaintext (`wifiPasswordSet` booleans only); `adc1Min/Max` now advertises `1-3`, not the `1-10` that included seven HUB75 data lines; `seedDefaults()` reads its config constants (`tile cache capacity=15 (maxFlights=12)`); the setup AP no longer absorbs (no reboot loop with no credentials stored). Held pending the `-DCORE_DEBUG_LEVEL=4` measurement run: F-FW09-A (TLS keep-alive branch choice) and F-FW12-A's 13-site FR24 migration. |
+| Idle-when-dark + server quiet hours (`14e0647`..`01ae579`), merged as `eec3cb2` | **DEVICE-VERIFIED, 2026-08-24.** Flashed APP-ONLY (`-t upload`, deliberately NOT `uploadfs`) -- settings survived, device rejoined on its own. Gate confirmed on hardware: brightness 0 -> `/api/status` note `panel dark - fetch paused`, held across a full 60s interval with the 12 held flights RETAINED (70s < the 360s stale window), then `fetch ok` within one cycle of restoring brightness. Server deployed (`eec3cb2f09ea`, healthy) with `REFRESH_QUIET_HOURS=0-6` live; its boot log `schedule: 3144 rows from 4/4 boards` IS the cold-start refresh added this session. NOT exercised: the stale-discard path (needs >6min dark) and the quiet window itself (needs 00:00-06:00 ET). Note the device half is INERT as configured -- `schedule.enabled=false`, `nightBrightness=5`, `light.enabled=false` mean nothing reaches brightness 0. |
 | `WiFi.setSleep(false)` (`d010d8d`) | **A DISPROVEN NO-OP.** Modem sleep was already off (verified in core source). Harmless but the message frames it as a fix; revert or amend when convenient. |
 
 Both envs (`esp32dev`, `esp32s3`) build clean. Host tests all pass:
 `cd firmware && ./run_host_tests.sh`
 
-`main` is stale. The audit remediation lives on `claude/audit-priority-list-d3dbf5`
-(30 commits, branched from `main` at `d58ed83`) and is what is currently flashed
-and deployed; earlier work lives on `flightwall-mini-parity`.
+`main` is CURRENT as of 2026-08-24, not stale: the audit remediation AND the
+idle-when-dark work are merged into it as `eec3cb2` (48 commits from
+`claude/audit-priority-list-d3dbf5`, which branched at `d58ed83`). That is exactly
+what is flashed to the device and deployed to the server. `main` is 208 commits
+ahead of `upstream/main` and NOT pushed; `origin/main` sits on a different commit.
+Earlier work lives on `flightwall-mini-parity`.
 
 The plan those 30 commits execute is `docs/superpowers/audits/2026-08-23-priority-list.md`,
 derived from `docs/superpowers/audits/2026-08-23-simplification-audit.md` (which lives on
@@ -39,6 +44,29 @@ only one still unanswered, at its documented default: defer.
 ---
 
 ## 1. THE BIG FINDING — 8-bit HUB75 DMA was starving the WiFi radio
+
+> **SUPERSEDED IN PART (2026-08-23 and 2026-08-24). Read this before acting on the
+> section below.** The DIRECTION is right -- the panel's I2S DMA does degrade the
+> radio -- but the stated MECHANISM and the stated next lever are both wrong. Measured
+> since with 100- and 120-packet runs, not the single ~10s sample this section warns
+> about:
+>   - **Colour depth does NOT matter.** 4-bit was no better than 6-bit. This is what
+>     refutes "saturated the memory bus": depth is exactly what changes bus load, and
+>     changing it changed nothing.
+>   - **I2S clock rate DOES.** 16 MHz measured 7.5 / 35.8 / 40% loss across runs.
+>   - **RIBBON SEATING DOMINATES EVERYTHING ELSE.** Reseating took 11-35% -> 0-1.7%
+>     the first time, and **21.0% -> 0.0% (528ms -> 7.2ms avg RTT)** on 2026-08-24,
+>     with RSSI at -46 throughout -- so not a range problem, and the router answered
+>     at 0% / 2.9ms in the same runs. It has now degraded TWICE, both times shortly
+>     after the device was physically handled, which points at MECHANICAL RETENTION
+>     rather than a one-off seating error.
+>
+> Practical rule: when fetches start failing, **ping the device for 100 packets and
+> reseat the ribbon BEFORE touching firmware.** At ~21% per-packet loss a TLS
+> handshake needs ~10 packets to survive and each retransmit costs seconds against
+> `FlightWallServerFetcher`'s 4s budget, so it essentially cannot complete -- which
+> presents as "the server is broken" when the server is fine. Keep 6-bit; it costs
+> little. The 4-bit suggestion below has been tried and did not help.
 
 Nearly every fault chased across this session was ONE root cause: at 8-bit colour
 depth the panel's continuous I2S DMA saturated the memory bus and starved WiFi of
@@ -157,6 +185,17 @@ sensor is face-down / shadowed / seeing the panel. `id=0x00` means nothing on th
 reseat 41/42/3V3/GND. Chip-ID check correctly fail-safes to "lit" so the panel stays on. Also tie
 the breakout's `LED` pad to GND (onboard illumination LED poisons the reading).
 
+**RAISED STAKES since 2026-08-24:** this is no longer only a brightness bug. The
+idle-when-dark gate suppresses ALL fetching at effective brightness 0, and the
+ambient sensor is a default-on path to 0 (`lightSensorEnabled=true` with
+`lightSensorDimInstead=false` -> blank, not dim). So a mis-sited sensor reading ~24
+against the 500-count threshold would now blank the panel AND stop it fetching in a
+lit room. It is currently disabled on the wall device (`light.enabled=false`), so
+this is latent -- but DO NOT enable the sensor until it is reseated and reading
+sanely. `/api/status` keeps serving through suppression and reports
+`lightLevel`/`lightDark` plus the note `panel dark - fetch paused`, so the cause is
+visible rather than looking like a hang.
+
 **`showGeneralAviation:false`** hides GA/private tails (N-numbers). The plane visibly overhead near
 JFK is often a GA aircraft the two-pass filter drops. Flip it on if the user wants those.
 
@@ -185,9 +224,39 @@ deliberately NOT stripped on 2026-08-23, because the pending `-DCORE_DEBUG_LEVEL
 to produce a heap baseline and the web UI only just started rendering these numbers. Removing the
 instrumentation immediately before the measurement it exists for is the wrong order.
 
+**Serial console is dark (NEW, 2026-08-24, unexplained).** Three reads of
+`/dev/cu.usbmodem1101` at 115200 (30s, 30s, 100s) returned ZERO lines while the
+device was healthy and answering HTTP on the same boot, and while a fetch cycle
+(60s) definitely elapsed. That is the native-USB CDC port this env targets
+(`-DARDUINO_USB_CDC_ON_BOOT=1`), and it is the only `usbmodem` present -- flashing
+over it works. Not urgent while the device is reachable over the network, but it is
+exactly the channel you would reach for when it ISN'T, so fix it before you need it.
+Suspects not yet eliminated: DTR/RTS handling on open, a port held by another
+process, or CDC re-enumeration after reset.
+
 ---
 
 ## 4. This session's commits (newest first)
+
+**2026-08-24 --- merged to `main` as `eec3cb2` (48 commits), flashed and deployed.**
+
+```
+01ae579  docs(schedule): correct quiet-hours invariant + budgets  [see below]
+631f6eb  fix(schedule): survive a bad REFRESH_QUIET_TZ, cold start [both were real bugs]
+6128c0e  feat(schedule): pause the refresh between 00:00 and 06:00
+e99129c  feat(schedule): quiet-hours and refresh-decision predicates
+be431d0  feat(fetch): stop fetching while the panel is dark        [DEVICE-VERIFIED]
+14e0647  feat(fetch): pure helper for the dark-panel decision
+```
+
+Two defects a whole-feature review caught that per-task review had not:
+`REFRESH_QUIET_TZ` fed an unguarded `Intl.DateTimeFormat` on a floating promise, so
+a one-character typo in `deploy.yml` killed the WHOLE server process (reproduced
+against the built bundle: exit 1, `/up` gone); and `shouldRefresh` checked `quiet`
+before the cold start, so a server booting inside the window with no table served
+routeless flights until 06:00. Both fixed and re-verified.
+
+Earlier session:
 
 ```
 eea030d  feat(clock): real time zones with DST, 12-hour display   [COMPILE-ONLY, unflashed]
@@ -214,12 +283,34 @@ Pins now reported in `/api/status`: `i2cSda/i2cScl/adc1Min/adc1Max/buttonAPin/bu
 
 ---
 
-## 5. Logos (IMPORTANT policy — unchanged)
+## 5. Logos — ⚠️ THE POLICY BELOW IS ALREADY VIOLATED. READ BEFORE PUSHING.
 
-- **Real airline logo tiles are LOCAL-ONLY — never commit them.** 131 `ICAO.rgb565` files in
-  `firmware/data/logos/` are modified locally (the user's trademarked FlightAware/radarbox set)
-  and MUST stay uncommitted. Only ever `git add` logo files **by explicit path**; NEVER
-  `git add firmware/data/logos/` or `git add -A`. (100 generated badges ARE tracked and fine.)
+> **The trademarked tiles ARE committed, and they ARE on the public fork.** Found
+> 2026-08-24 while cleaning duplicate files. Commit **`22cb724`** ("assets(logos):
+> add and refresh bundled airline logo tiles", 2026-07-20, Charles Schwartz) added
+> **exactly 131 tiles** -- the same count this policy says must never be committed --
+> and it is an ancestor of `origin/main`, `origin/flightwall-mini-parity` and
+> `origin/readme-fork-framing` on `github.com/chaim354/TheFlightWall_OSS`. So the set
+> has been published for roughly a month.
+>
+> Corroborating counts: **153** `.rgb565` are tracked at HEAD against the ~100
+> generated badges this section expects, and **nothing in that directory is locally
+> modified any more** -- so the "modified locally, stays uncommitted" arrangement the
+> policy describes no longer exists on disk either. (The 72 untracked `NAME 2.rgb565`
+> files removed on 2026-08-24 were byte-identical copies of tracked originals; no
+> artwork was lost with them.)
+>
+> **MAINTAINER DECISION NEEDED -- do not let an agent do this unprompted.** Undoing it
+> means rewriting already-pushed history across at least three remote branches, or
+> making the fork private, or deciding the exposure is acceptable. All three are the
+> maintainer's call. Until one is made, treat the rules below as the INTENT, not as a
+> description of the repository's actual state.
+
+- **Real airline logo tiles are meant to be LOCAL-ONLY — never commit them.** The
+  intent: the user's trademarked FlightAware/radarbox set stays uncommitted. Only ever
+  `git add` logo files **by explicit path**; NEVER `git add firmware/data/logos/` or
+  `git add -A`. (Generated badges ARE fine to track.) See the box above for why this
+  currently does not match reality.
 - Tools in `tools/`: `gen_*_logos.py`, `png_to_rgb565.py`, `convert_logo_folder.py`. Pillow in `.venv`.
 
 ---
