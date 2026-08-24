@@ -4,6 +4,8 @@ import { resolveGatedRoute } from './routes/routeLookup';
 import { callsignKey } from './join';
 import { loadSchedule, isStale, lookupRows, lookupByCallsign, type ScheduleStorage } from './schedule/store';
 import { KM_PER_NM } from './geo';
+import { trackedCards } from './tracked/serve';
+import type { TrackedStorage } from './tracked/store';
 import type { Flight, ScheduleRow } from './types';
 
 /**
@@ -14,6 +16,8 @@ import type { Flight, ScheduleRow } from './types';
  */
 export interface Env {
   SCHEDULE: ScheduleStorage;
+  /** Optional: absent on the Worker, which has no tracked-flight store. */
+  TRACKED?: TrackedStorage;
 }
 
 /** Hard ceiling on `max`, so a caller cannot ask us to serialise the whole sky. */
@@ -113,7 +117,16 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
   // routeLookup.ts, including why a 32%-wrong source is safe behind the gate.
   await fillMissingRoutes(top, nowMs);
 
-  return json({ ok: true, ts, stale, flights: top.map((p) => p.f) });
+  const flights = top.map((p) => p.f);
+
+  // Pinned first, ahead of the nearest-first area ordering. The cap is applied
+  // AFTER prepending so a tracked flight can never be pushed off the end by
+  // ordinary traffic -- being crowded out by a jet that happens to be closer is
+  // exactly the failure this feature exists to prevent.
+  const pinned = env.TRACKED ? trackedCards(await env.TRACKED.read(), nowMs) : [];
+  const merged = [...pinned, ...flights].slice(0, max);
+
+  return json({ ok: true, ts, stale, flights: merged });
 }
 
 /**
