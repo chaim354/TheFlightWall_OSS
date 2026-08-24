@@ -293,11 +293,18 @@ Immediately AFTER that block's closing brace, insert:
     // This MUST sit after applyBrightness() earlier in loop(), or it reads a
     // stale brightness on the very pass where it changes -- the wake pass.
     {
-        const unsigned long staleMs = (unsigned long)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
+        const uint32_t staleMs = (uint32_t)g_settings.fetchIntervalSeconds * 1000UL * 6UL;
+        // Pass g_appliedBrightness straight through. It is an int whose -1 means
+        // "not applied yet", and decideIdle treats any negative as LIT -- do NOT
+        // clamp it to 0 here. Clamping to 0 would mark the pass suppressed, and
+        // the NEXT pass would then force a fetch AND discard the held flights,
+        // blanking the wall from a momentary sentinel. main.cpp:355 resolves the
+        // same sentinel the same way, to a lit value.
         const IdleDecision idle = decideIdle(
-            (uint8_t)(g_appliedBrightness < 0 ? 0 : g_appliedBrightness),
-            g_fetchSuppressed, g_lastGoodFetchMs, millis(), staleMs);
-        g_fetchSuppressed = idle.nowSuppressed;
+            g_appliedBrightness, g_fetchSuppressed,
+            (uint32_t)g_lastGoodFetchMs, (uint32_t)millis(), staleMs);
+        // suppressFetch IS the next pass's wasSuppressed -- one bit, not two.
+        g_fetchSuppressed = idle.suppressFetch;
 
         if (idle.discardFlights && !g_lastFlights.empty())
         {
