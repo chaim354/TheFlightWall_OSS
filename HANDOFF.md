@@ -224,15 +224,32 @@ deliberately NOT stripped on 2026-08-23, because the pending `-DCORE_DEBUG_LEVEL
 to produce a heap baseline and the web UI only just started rendering these numbers. Removing the
 instrumentation immediately before the measurement it exists for is the wrong order.
 
-**Serial console is dark (NEW, 2026-08-24, unexplained).** Three reads of
-`/dev/cu.usbmodem1101` at 115200 (30s, 30s, 100s) returned ZERO lines while the
-device was healthy and answering HTTP on the same boot, and while a fetch cycle
-(60s) definitely elapsed. That is the native-USB CDC port this env targets
-(`-DARDUINO_USB_CDC_ON_BOOT=1`), and it is the only `usbmodem` present -- flashing
-over it works. Not urgent while the device is reachable over the network, but it is
-exactly the channel you would reach for when it ISN'T, so fix it before you need it.
-Suspects not yet eliminated: DTR/RTS handling on open, a port held by another
-process, or CDC re-enumeration after reset.
+**Serial console: NOT broken — the earlier entry here was wrong.** A previous
+version of this file claimed the console was dark. It is not, and the claim was
+retracted the same day after testing properly. What actually happened: reads used
+pyserial's constructor form (`serial.Serial(port, 115200, timeout=1)`), which leaves
+DTR at the hardware default, and the windows were shorter than the device's output
+interval.
+
+**How to read it reliably** — set DTR/RTS explicitly BEFORE `open()`:
+
+```python
+s = serial.Serial(); s.port='/dev/cu.usbmodem1101'; s.baudrate=115200
+s.dtr = True; s.rts = False          # dtr=False RESETS the board
+s.open()
+```
+
+Verified 2026-08-24: writing `help\n` returns the full 15-command list, and a
+passive 80s listen captured `[heapdiag] cycle-start`, `[fetch] server: 12 flights`,
+`Enriched flights: 12`.
+
+Two traps that made this look dead:
+- **The device is nearly silent by design.** In steady state it emits ~3 lines per
+  fetch cycle (60s at the shipped interval). Any window under ~70s can legitimately
+  return nothing. Send `help` to prove liveness instead of waiting.
+- **`dtr=False` resets the board.** If your capture begins with `[boot] PSRAM:`, you
+  rebooted the device rather than attaching to it, and you are reading a boot burst,
+  not steady state. This also makes a DTR A/B look decisive when it is not.
 
 ---
 
