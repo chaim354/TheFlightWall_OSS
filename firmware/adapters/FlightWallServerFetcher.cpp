@@ -1,6 +1,7 @@
 #include "adapters/FlightWallServerFetcher.h"
 #include "core/Settings.h"
 #include "utils/JsonOptional.h"
+#include "utils/PinSort.h"
 
 // Distance arrives in the unit we requested. We request imperial, so dst is in
 // NAUTICAL MILES, while FlightInfo::distance_km is kilometres by name and is
@@ -181,8 +182,18 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         info.eta_minutes = optNum(f, "eta_min");
         info.eta_text = optStr(f, "eta_text");
 
+        info.pinned = f["pin"] | false;
+        // Absent means live: only the tracked path ever sets this, so an
+        // ordinary area card must not be labelled an estimate by omission.
+        info.position_estimated = (optStr(f, "pos_src") == "estimated");
+
         outFlights.push_back(info);
     }
+
+    // Server already sends nearest-first; re-sorting here would discard that.
+    // stablePinFirst only moves pinned cards to the front of their existing
+    // positions (see utils/PinSort.h), so the area ordering survives intact.
+    stablePinFirst(outFlights, [](const FlightInfo &f) { return f.pinned; });
 
     Serial.printf("[fetch] server: %u flights%s\n",
                   (unsigned)outFlights.size(), outStale ? " (stale schedule)" : "");
