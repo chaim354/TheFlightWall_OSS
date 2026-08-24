@@ -4,6 +4,7 @@ Purpose: Implementation of the on-device configuration & control web server.
 #include "core/WebConfigServer.h"
 #include "esp_heap_caps.h"
 #include "core/Settings.h"
+#include "utils/HtmlEscape.h"
 #include "config/HardwareConfiguration.h" // board-guarded pins reported in /api/status
 #include "adapters/GeoLocator.h"
 #include "utils/ServerJson.h" // renderable()
@@ -86,6 +87,10 @@ void WebConfigServer::registerRoutes()
                { handleWifiScan(); });
     _server.on("/api/restart", HTTP_POST, [this]()
                { handleRestart(); });
+    _server.on("/setup", HTTP_GET, [this]()
+               { handleSetupGet(); });
+    _server.on("/setup", HTTP_POST, [this]()
+               { handleSetupPost(); });
     _server.onNotFound([this]()
                        { handleNotFound(); });
 }
@@ -353,12 +358,130 @@ void WebConfigServer::handleRestart()
     _restartRequested = true;
 }
 
+// ~1KB, no script, no external asset, one form. Everything about this page is
+// chosen for the browser it will actually be read in: the captive-portal sheet a
+// phone opens when it joins an open network. That sheet is a stripped WebView
+// which may restrict scripting, has no back button worth the name, and closes
+// itself the moment the OS decides the network is "working" -- and here it is
+// also talking over the setup AP, on a radio the HUB75 panel is degrading (see
+// HANDOFF 1). Every byte and every round trip is a chance to lose the session,
+// so this page has no <script>, no <img>, and no second request.
+void WebConfigServer::handleSetupPage(const char *banner)
+{
+    String html;
+    html.reserve(1400);
+    html += F("<!doctype html><html><head><meta charset=utf-8>"
+              "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+              "<title>FlightWall setup</title><style>"
+              "body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:1.5em;"
+              "background:#111;color:#eee}h1{font-size:1.15em;margin:0 0 .8em}"
+              "label{display:block;margin:1em 0 .3em;font-size:.9em}"
+              "input{width:100%;box-sizing:border-box;padding:.7em;font-size:1em;"
+              "border:1px solid #555;border-radius:5px;background:#222;color:#eee}"
+              "button{margin-top:1.3em;width:100%;padding:.85em;font-size:1em;border:0;"
+              "border-radius:5px;background:#2a8;color:#fff}"
+              "p{color:#9a9a9a;font-size:.82em;line-height:1.4}"
+              "b{color:#ffb454}</style></head><body><h1>FlightWall Wi-Fi setup</h1>");
+    if (banner != nullptr)
+    {
+        html += F("<p><b>");
+        appendHtmlEscaped(html, banner);
+        html += F("</b></p>");
+    }
+    // action is relative on purpose. In AP mode the phone may have reached us
+    // through the captive-portal redirect at 192.168.4.1, but on the LAN the
+    // same page is served at the STA address and via flightwall.local -- an
+    // absolute action would post the form back to the wrong host in two of
+    // those three cases.
+    html += F("<form method=POST action=\"/setup\">"
+              "<label for=s>Network name</label>"
+              "<input id=s name=ssid autocapitalize=none autocorrect=off spellcheck=false value=\"");
+    appendHtmlEscaped(html, g_settings.wifiSsid.c_str());
+    html += F("\"><label for=p>Password</label>"
+              "<input id=p name=pw type=password autocapitalize=none autocorrect=off spellcheck=false>"
+              "<p>Leave the password blank to keep the one already stored. "
+              "The device restarts after saving and joins the network.</p>"
+              "<button type=submit>Save and restart</button></form>"
+              "<p><a href=\"/\" style=\"color:#7bf\">Full settings page</a></p>"
+              "</body></html>");
+    _server.send(200, "text/html", html);
+}
+
+void WebConfigServer::handleSetupGet()
+{
+    handleSetupPage(nullptr);
+}
+
+void WebConfigServer::handleSetupPost()
+{
+    String ssid = _server.arg("ssid");
+    ssid.trim();
+    if (ssid.length() == 0)
+    {
+        // Re-render rather than 400. This form's user is standing at a wall
+        // panel with no network, inside a WebView whose back button may not
+        // return them here -- an error page they cannot navigate away from
+        // ends the setup session.
+        handleSetupPage("Enter a network name.");
+        return;
+    }
+
+    g_settings.wifiSsid = ssid;
+
+    // An EMPTY password means "unchanged", matching Settings::fromJson -- see
+    // the long comment there. The page says so out loud, because the field is
+    // never pre-filled (the password is not served to any client) and a blank
+    // box would otherwise read as "no password".
+    const String pw = _server.arg("pw");
+    if (pw.length() > 0)
+        g_settings.wifiPassword = pw;
+
+    const bool saved = g_settings.save();
+    _settingsChanged = true;
+
+    String html;
+    html.reserve(700);
+    html += F("<!doctype html><html><head><meta charset=utf-8>"
+              "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+              "<title>FlightWall setup</title><style>"
+              "body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:1.5em;"
+              "background:#111;color:#eee}p{line-height:1.5}b{color:#ffb454}"
+              "</style></head><body>");
+    if (saved)
+    {
+        html += F("<p>Saved. Restarting and joining <b>");
+        appendHtmlEscaped(html, g_settings.wifiSsid.c_str());
+        html += F("</b>.</p><p>This page will stop responding -- the setup network "
+                  "is shutting down. Rejoin your normal Wi-Fi; the panel shows its "
+                  "address once connected.</p>");
+    }
+    else
+    {
+        html += F("<p><b>Could not write settings.</b> Nothing was changed. "
+                  "Reload and try again.</p>");
+    }
+    html += F("</body></html>");
+    _server.send(saved ? 200 : 500, "text/html", html);
+
+    // Only reboot on a successful write. Restarting after a failed save drops
+    // the user's input AND the AP they were talking to, leaving them with no
+    // way to find out that nothing was stored.
+    if (saved)
+        _restartRequested = true;
+}
+
 void WebConfigServer::handleNotFound()
 {
-    // In AP/captive-portal mode, send unknown hosts to the config page.
+    // In AP/captive-portal mode, send unknown hosts to the SETUP page, not to
+    // "/". This is the probe a phone fires on joining an open network, so the
+    // page it lands on is the one the captive-portal WebView has to render --
+    // and that WebView is the worst browser in the house. /setup is ~1KB of
+    // plain form with no script; "/" is ~11KB gzipped that does everything
+    // through fetch(). Anyone who wants the full UI can still reach it, both
+    // from the link on /setup and by typing the address.
     if (_apMode)
     {
-        _server.sendHeader("Location", String("http://") + _ip + "/", true);
+        _server.sendHeader("Location", String("http://") + _ip + "/setup", true);
         _server.send(302, "text/plain", "");
         return;
     }
