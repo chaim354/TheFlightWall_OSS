@@ -27,6 +27,7 @@ describe('parseByNumber', () => {
     // assume it.
     expect(r!.icao24).toBe('4008f3');
     expect(r!.reg).toBe('G-STBA');
+    expect(r!.aircraftModel).toBe('Boeing 777');
     expect(r!.origIata).toBe('JFK');
     expect(r!.destIata).toBe('LHR');
     expect(r!.orig).toEqual({ lat: 40.6413, lon: -73.7781 });
@@ -73,6 +74,9 @@ describe('parseByNumber', () => {
     const r = parseByNumber(real, '2026-08-24');
     expect(r).not.toBeNull();
     expect(r!.icao24).toBe('406947');
+    // The real payload's aircraft.model is "Boeing 777-300ER Passenger" --
+    // this is what serve.ts's `ac` field renders on a pinned card.
+    expect(r!.aircraftModel).toBe('Boeing 777-300ER Passenger');
   });
 
   it('REGRESSION: selects the en-route leg from a real multi-leg response, not the cancelled one', () => {

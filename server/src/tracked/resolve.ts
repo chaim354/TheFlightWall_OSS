@@ -61,6 +61,7 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
     // downstream assumes it.
     icao24: modeS ? modeS.toLowerCase() : null,
     reg: str(aircraft.reg),
+    aircraftModel: str(aircraft.model),
     origIata: str(depAirport?.iata),
     destIata: str(arrAirport?.iata),
     orig: coord(depAirport),

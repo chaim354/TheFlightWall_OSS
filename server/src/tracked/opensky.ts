@@ -17,6 +17,10 @@ export interface OpenSkyPosition {
   lon: number;
   altitudeFt: number | null;
   headingDeg: number | null;
+  /** Ground speed, knots -- converted from OpenSky's velocity (m/s). */
+  groundspeedKt: number | null;
+  /** Vertical rate, feet/min -- converted from OpenSky's vertical_rate (m/s). */
+  verticalRateFpm: number | null;
   onGround: boolean;
   seenAtEpoch: number | null;
 }
@@ -29,6 +33,10 @@ const num = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : null;
 
 const M_TO_FT = 3.280839895;
+/** m/s -> kt. */
+const MPS_TO_KT = 1.943844;
+/** m/s -> ft/min. */
+const MPS_TO_FPM = 196.8504;
 
 /**
  * Map an OpenSky /states/all body to one position, or null if nobody is
@@ -57,11 +65,21 @@ export function parseStates(body: unknown): OpenSkyPosition | null {
   if (lat === null || lon === null) return null;
 
   const altM = num(s[7]);
+  // index 9: velocity, m/s. index 11: vertical_rate, m/s. Both rounded here
+  // (same as altitudeFt above) rather than at display time, so every reader
+  // of a stored TrackedEntry sees the same whole-unit value. A field OpenSky
+  // did not report stays null -- num() already returns null for anything
+  // that isn't a finite number, and null * anything must stay null, never
+  // coerce to 0 and read as "not moving" or "level".
+  const velocityMps = num(s[9]);
+  const vertRateMps = num(s[11]);
   return {
     lat,
     lon,
     altitudeFt: altM === null ? null : Math.round(altM * M_TO_FT),
     headingDeg: num(s[10]),
+    groundspeedKt: velocityMps === null ? null : Math.round(velocityMps * MPS_TO_KT),
+    verticalRateFpm: vertRateMps === null ? null : Math.round(vertRateMps * MPS_TO_FPM),
     onGround: s[8] === true,
     seenAtEpoch: num(s[3]),
   };

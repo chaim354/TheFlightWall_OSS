@@ -20,6 +20,8 @@ export interface LatLon {
 export interface ResolvedFlight {
   icao24: string | null;
   reg: string | null;
+  /** e.g. "Boeing 777-300ER Passenger" -- AeroDataBox's aircraft.model. */
+  aircraftModel: string | null;
   origIata: string | null;
   destIata: string | null;
   orig: LatLon | null;
@@ -45,6 +47,7 @@ export interface TrackedEntry {
   reresolved: boolean;
   icao24: string | null;
   reg: string | null;
+  aircraftModel: string | null;
   origIata: string | null;
   destIata: string | null;
   orig: LatLon | null;
@@ -55,4 +58,16 @@ export interface TrackedEntry {
   lastLat: number | null;
   lastLon: number | null;
   lastPosAtMs: number | null;
+  /**
+   * Last values OpenSky reported alongside lastLat/lastLon, from the same
+   * poll (see tick.ts). Independent nulls, not one all-or-nothing flag:
+   * OpenSky's own state vector nulls each field separately when a receiver
+   * has some data but not all of it, and collapsing that into a single
+   * "have dynamics" bit would either invent a value for a field that was
+   * genuinely absent or discard a field that was genuinely present.
+   */
+  lastAltFt: number | null;
+  lastGroundspeedKt: number | null;
+  lastHeadingDeg: number | null;
+  lastVerticalRateFpm: number | null;
 }

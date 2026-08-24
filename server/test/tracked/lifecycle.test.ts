@@ -18,6 +18,7 @@ function entry(over: Partial<TrackedEntry> = {}): TrackedEntry {
     reresolved: false,
     icao24: null,
     reg: null,
+    aircraftModel: null,
     origIata: null,
     destIata: null,
     orig: null,
@@ -27,6 +28,10 @@ function entry(over: Partial<TrackedEntry> = {}): TrackedEntry {
     lastLat: null,
     lastLon: null,
     lastPosAtMs: null,
+    lastAltFt: null,
+    lastGroundspeedKt: null,
+    lastHeadingDeg: null,
+    lastVerticalRateFpm: null,
     ...over,
   };
 }

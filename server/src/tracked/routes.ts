@@ -87,6 +87,7 @@ export function newEntry(number: string, date: string, nowMs: number): TrackedEn
     reresolved: false,
     icao24: null,
     reg: null,
+    aircraftModel: null,
     origIata: null,
     destIata: null,
     orig: null,
@@ -96,6 +97,10 @@ export function newEntry(number: string, date: string, nowMs: number): TrackedEn
     lastLat: null,
     lastLon: null,
     lastPosAtMs: null,
+    lastAltFt: null,
+    lastGroundspeedKt: null,
+    lastHeadingDeg: null,
+    lastVerticalRateFpm: null,
   };
 }
 

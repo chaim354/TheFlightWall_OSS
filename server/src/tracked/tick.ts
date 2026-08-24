@@ -123,6 +123,15 @@ export async function runTrackedTick(
           lastLat: p.position.lat,
           lastLon: p.position.lon,
           lastPosAtMs: nowMs,
+          // Stored alongside the position, from the same poll -- serve.ts
+          // reads these straight through onto the card. A card blanked
+          // altitude/speed/heading/vs entirely until this wiring existed;
+          // see serve.ts's own comment on trackedCards for the user-visible
+          // half of that bug.
+          lastAltFt: p.position.altitudeFt,
+          lastGroundspeedKt: p.position.groundspeedKt,
+          lastHeadingDeg: p.position.headingDeg,
+          lastVerticalRateFpm: p.position.verticalRateFpm,
         };
       }
       // p.position === null is the ocean gap: leave the entry airborne and let
