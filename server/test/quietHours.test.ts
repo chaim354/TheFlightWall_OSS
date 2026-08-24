@@ -65,7 +65,13 @@ describe('shouldRefresh', () => {
     expect(shouldRefresh({ nowMs: 0, lastRefreshMs: null, intervalMs: TWO_H, quiet: false, wasQuiet: false })).toBe(true);
   });
 
-  it('does not refresh at boot if boot lands inside quiet hours', () => {
-    expect(shouldRefresh({ nowMs: 0, lastRefreshMs: null, intervalMs: TWO_H, quiet: true, wasQuiet: false })).toBe(false);
+  // A cold start is not cadence. lastRefreshMs starts null on every boot and the
+  // table lives in memory, so skipping here serves routeless flights until the
+  // window ends -- up to six hours after a first deploy, or after the named
+  // volume in config/deploy.yml is lost. Quiet hours exist to drop REDUNDANT
+  // refreshes; the one that populates an empty table is the opposite of
+  // redundant. Costs one refresh per restart against the three a night saved.
+  it('refreshes at boot even when boot lands inside quiet hours', () => {
+    expect(shouldRefresh({ nowMs: 0, lastRefreshMs: null, intervalMs: TWO_H, quiet: true, wasQuiet: false })).toBe(true);
   });
 });

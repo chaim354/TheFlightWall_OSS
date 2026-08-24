@@ -104,6 +104,30 @@ const PANYNJ_DISABLED = 0;
 const DEFAULT_QUIET_HOURS = '0-6';
 const DEFAULT_QUIET_TZ = 'America/New_York';
 
+/**
+ * The zone if we can actually format with it, else the default.
+ *
+ * The refresh path feeds this straight to `new Intl.DateTimeFormat`, which
+ * throws RangeError on a zone it does not know -- from inside a floating
+ * `void refreshTick()`, where under Node's default --unhandled-rejections=throw
+ * it takes the process down. REFRESH_QUIET_TZ is a plain-text value in
+ * config/deploy.yml, so without this a one-character typo is an outage of the
+ * entire service, positions and /up included, rather than of the refresh it was
+ * meant to configure. Probing once at startup turns that into a log line, the
+ * same refusal-to-guess parseQuietHours applies to a malformed window.
+ */
+function usableTimeZone(tz: string): string {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric' }).format(new Date());
+    return tz;
+  } catch {
+    console.error(
+      `REFRESH_QUIET_TZ="${tz}" is not a usable IANA zone; falling back to ${DEFAULT_QUIET_TZ}`,
+    );
+    return DEFAULT_QUIET_TZ;
+  }
+}
+
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     port: Number(env.PORT) || DEFAULT_PORT,
@@ -112,7 +136,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     schedulePath: env.SCHEDULE_PATH ?? DEFAULT_SCHEDULE_PATH,
     refreshIntervalMs: TWO_HOURS_MS,
     quietHours: parseQuietHours(env.REFRESH_QUIET_HOURS ?? DEFAULT_QUIET_HOURS),
-    quietHoursTimeZone: env.REFRESH_QUIET_TZ ?? DEFAULT_QUIET_TZ,
+    quietHoursTimeZone: usableTimeZone(env.REFRESH_QUIET_TZ ?? DEFAULT_QUIET_TZ),
     boardFetchDelayMs: BOARD_FETCH_DELAY_MS,
     panynjIntervalMs: PANYNJ_DISABLED,
     panynjPageDelayMs: PAGE_DELAY_MS,
@@ -238,6 +262,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
   const REFRESH_CHECK_MS = 5 * 60 * 1000;
   let lastRefreshMs: number | null = null;
   let wasQuiet = false;
+  let quietLogged = false;
 
   const localHour = (): number =>
     Number(
@@ -257,13 +282,21 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
       quiet,
       wasQuiet,
     });
-    if (quiet && !wasQuiet) {
-      // Logged, not silent: a refresh that stops happening must say so, or it is
-      // indistinguishable from an upstream outage.
-      console.log(`schedule: entering quiet hours (${config.quietHours!.startHour}-${config.quietHours!.endHour} ${config.quietHoursTimeZone}); refresh paused`);
-    }
     wasQuiet = quiet;
-    if (!go) return;
+    if (!go) {
+      // Logged, not silent: a refresh that stops happening must say so, or it is
+      // indistinguishable from an upstream outage. Keyed to the first tick
+      // actually SKIPPED rather than to the quiet edge, because a cold start
+      // inside the window refreshes anyway (see shouldRefresh) -- announcing a
+      // pause on the tick that refreshes would be exactly the plausible-looking
+      // wrong statement this line exists to prevent.
+      if (quiet && !quietLogged) {
+        console.log(`schedule: quiet hours (${config.quietHours!.startHour}-${config.quietHours!.endHour} ${config.quietHoursTimeZone}); refresh paused until the window ends`);
+        quietLogged = true;
+      }
+      return;
+    }
+    quietLogged = false;
     lastRefreshMs = Date.now();
     await runBoth();
   };

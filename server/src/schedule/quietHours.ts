@@ -115,8 +115,15 @@ export interface RefreshCheck {
  * elapsed since the last refresh.
  */
 export function shouldRefresh(c: RefreshCheck): boolean {
+  // Cold start FIRST, ahead of the quiet check. lastRefreshMs starts null on
+  // every boot and the table is held in memory, so a process that starts inside
+  // the window with nothing loaded would serve routeless flights until the
+  // window ends -- up to six hours, on a first deploy or after the named volume
+  // in config/deploy.yml is lost. Quiet hours drop REDUNDANT refreshes; the one
+  // that populates an empty table is the opposite of redundant. The cost is one
+  // refresh per restart, against the three a night the window saves.
+  if (c.lastRefreshMs === null) return true;
   if (c.quiet) return false;
   if (c.wasQuiet) return true;
-  if (c.lastRefreshMs === null) return true;
   return c.nowMs - c.lastRefreshMs >= c.intervalMs;
 }
