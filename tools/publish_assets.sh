@@ -153,19 +153,29 @@ publish_firmware() {
     [ -f "$d/$f" ] || { echo "no $d/$f -- run tools/sign_firmware.sh first" >&2; return 1; }
   done
 
-  # Re-verify the signature locally before it goes anywhere. Publishing an
-  # image the device will refuse wastes a 1.2MB download and looks, from the
-  # wall, exactly like an attack.
+  # Re-verify the signature before it goes anywhere. Publishing an image the
+  # device will refuse wastes a 1.2MB download and looks, from the wall,
+  # exactly like an attack -- indistinguishable from the tampering this whole
+  # mechanism exists to catch.
+  #
+  # Checked against the PUBLIC key compiled into the firmware, not against the
+  # private key's public half. That is deliberate on two counts: this needs no
+  # secret at all, so it runs anywhere; and it asks the question the DEVICE will
+  # ask -- "does this verify under the key the wall actually holds" -- which
+  # catches signing with the wrong key, something a private-key check cannot.
   local pub; pub="$(mktemp)"
   trap 'rm -f "$pub"' RETURN
-  local key="${FLIGHTWALL_SIGNING_KEY:-$HOME/.flightwall/fw-signing-key.pem}"
-  if [ -f "$key" ] && openssl ec -in "$key" -pubout -out "$pub" 2>/dev/null; then
-    if ! openssl dgst -sha256 -verify "$pub" -signature "$d/firmware.sig" "$d/firmware.bin" >/dev/null 2>&1; then
-      echo "  firmware  REFUSING TO PUBLISH: signature does not verify locally" >&2
-      return 1
-    fi
-  else
-    echo "  firmware  (no signing key here; skipping the local signature re-check)"
+  # The trailing ";" on the final line is part of the C declaration, not the
+  # PEM -- omitting it from the pattern silently drops "-----END PUBLIC KEY-----"
+  # and openssl then rejects a key that is perfectly fine.
+  sed -n 's/^ *"\(.*\)\\n";\{0,1\}$/\1/p' firmware/config/FirmwareSigningKey.h > "$pub"
+  if ! grep -q "BEGIN PUBLIC KEY" "$pub"; then
+    echo "  firmware  cannot read the public key from firmware/config/FirmwareSigningKey.h" >&2
+    return 1
+  fi
+  if ! openssl dgst -sha256 -verify "$pub" -signature "$d/firmware.sig" "$d/firmware.bin" >/dev/null 2>&1; then
+    echo "  firmware  REFUSING TO PUBLISH: signature does not verify under the key the device holds" >&2
+    return 1
   fi
 
   ensure_dirs
