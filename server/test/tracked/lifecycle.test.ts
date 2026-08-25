@@ -127,6 +127,34 @@ describe('decideTracked - resolved', () => {
   });
 });
 
+describe('decideTracked - the date backstop against a local date', () => {
+  // REGRESSION, observed in production. `date` is the calendar date at the
+  // DEPARTURE AIRPORT, so west of Greenwich it both starts and ENDS after
+  // 00:00 UTC -- at UTC-12 the date runs to 12:00Z the following day.
+  //
+  // DL1732 was added on the evening of the 24th in New York for local date
+  // 2026-08-24, departing 00:55Z on the 25th. Keyed on dayStart + 24h alone,
+  // the backstop fired at 00:00Z on the 25th, 55 minutes BEFORE pushback: the
+  // first tick after the entry was stored swept it as expired and dropped it,
+  // and the store just read empty with nothing saying why.
+  const HOURS = (n: number) => n * HOUR;
+
+  it('does NOT expire a pending entry whose local date has not departed yet', () => {
+    // 02:00Z on the 25th -- the moment the real entry was killed.
+    expect(decideTracked(entry(), DAY_START + HOURS(26))).toEqual({
+      state: 'pending', action: 'resolve',
+    });
+    // and right up to the end of the date at UTC-12, plus its 24h of grace
+    expect(decideTracked(entry(), DAY_START + HOURS(35)).state).not.toBe('expired');
+  });
+
+  it('still expires an entry once even UTC-12 has run out of date', () => {
+    expect(decideTracked(entry(), DAY_START + HOURS(37))).toEqual({
+      state: 'expired', action: 'drop',
+    });
+  });
+});
+
 describe('decideTracked - airborne', () => {
   const dep = DAY_START + 18 * HOUR;
   const arr = dep + 7 * HOUR;

@@ -36,6 +36,26 @@ const EXPIRE_AFTER_DATE_MS = 24 * 60 * 60_000;
  */
 export const MAX_TZ_LEAD_MS = 14 * 60 * 60_000;
 
+/**
+ * How far AFTER 00:00 UTC on the entry's date the local date can still be
+ * running -- the other half of MAX_TZ_LEAD_MS above, and just as load-bearing.
+ *
+ * A local date does not merely start late west of Greenwich, it also ENDS late:
+ * at UTC-12 the calendar date runs from 12:00Z on the day itself to 12:00Z the
+ * next day. So a backstop keyed on 00:00 UTC + 24h can fire while the date the
+ * user typed has not finished, or in the case that produced this constant, has
+ * not even reached its departure.
+ *
+ * MEASURED, not hypothetical: DL1732 was added on the evening of the 24th in
+ * New York for local date 2026-08-24. It departs 00:55Z on the 25th. The
+ * backstop fired at 00:00Z on the 25th -- 55 minutes before pushback -- so the
+ * very first tick after the entry was stored swept it as `expired` and dropped
+ * it, and the store simply read empty with nothing anywhere saying why.
+ *
+ * 12 hours is the largest westward offset there is (UTC-12).
+ */
+const MAX_TZ_LAG_MS = 12 * 60 * 60_000;
+
 export interface TrackedDecision {
   state: TrackedState;
   action: TrackedAction;
@@ -104,7 +124,11 @@ export function decideTracked(
   // must still apply or the entry polls forever.
   const airborneHasTimes =
     e.state === 'airborne' && (e.schedDepEpoch !== null || e.schedArrEpoch !== null);
-  if (!airborneHasTimes && !Number.isNaN(dayStart) && nowMs >= dayStart + EXPIRE_AFTER_DATE_MS) {
+  if (
+    !airborneHasTimes &&
+    !Number.isNaN(dayStart) &&
+    nowMs >= dayStart + MAX_TZ_LAG_MS + EXPIRE_AFTER_DATE_MS
+  ) {
     return { state: 'expired', action: 'drop' };
   }
 
