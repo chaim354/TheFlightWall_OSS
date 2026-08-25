@@ -249,6 +249,18 @@
       overwritten — it is what you get if the download fails its checksum or the server is unreachable,
       and <b>Use built-in</b> goes back to it at any time.</small>
 
+    <div class="sec">Firmware</div>
+    <small class="help" id="fwState">…</small>
+    <div class="bar" style="margin-top:8px">
+      <button class="ghost" type="button" onclick="checkFirmware()">Check for update</button>
+      <button class="warn" type="button" onclick="installFirmware()">Install update</button>
+    </div>
+    <small class="help">Updates are <b>signed</b>. The device downloads the image into its spare
+      partition and checks the signature against a key built into the firmware before anything is made
+      bootable — so a server that has been tampered with, or a network that intercepts the download,
+      cannot make the wall run code you did not sign. If the new image boots but cannot reach the
+      network, the bootloader puts the old one back by itself.</small>
+
     <div class="sec">Flight list</div>
     <div class="row">
       <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
@@ -512,6 +524,30 @@ async function save(){
   toast(j.ok ? 'Saved ✓' : ('Error: '+(j.error||'failed')));
 }
 
+async function checkFirmware(){
+  const el = $('fwState');
+  el.textContent = 'Checking…';
+  try{
+    const j = await (await fetch('/api/firmware')).json();
+    if(!j.ok){ el.innerHTML = `Running <b>${esc(j.running)}</b>. ${esc(j.error||'no update available')}`; return; }
+    el.innerHTML = j.differs
+      ? `Running <b>${esc(j.running)}</b> — server offers <b>${esc(j.available)}</b> (${Math.round(j.size/1024)}KB).`
+      : `Running <b>${esc(j.running)}</b> — already the version the server offers.`;
+  }catch(e){ el.textContent = 'Could not reach the device.'; }
+}
+
+async function installFirmware(){
+  if(!confirm('Download, verify and install the firmware from your server? The wall reboots if it passes.')) return;
+  const el = $('fwState');
+  try{
+    const j = await (await fetch('/api/firmware',{method:'POST'})).json();
+    if(!j.ok){ el.innerHTML = 'Update refused: '+esc(j.error||'unknown'); return; }
+    // The device answers BEFORE downloading, then reboots on success -- so a
+    // dropped connection here is the good outcome, not the bad one.
+    el.innerHTML = `Downloading and verifying <b>${esc(j.staging)}</b>. The wall reboots if the signature passes; this page will stop responding for a minute.`;
+  }catch(e){ el.textContent = 'Could not reach the device.'; }
+}
+
 async function updateUi(){
   toast('Checking the server…');
   try{
@@ -606,6 +642,12 @@ async function loadStatus(){
       ('manualBrightness' in s && s.manualBrightness >= 0
         ? `<span class="pill">manual brightness ${s.manualBrightness}</span>` : '');
     // Board-specific pins, reported by the device (the ESP32 and S3 maps differ).
+    if('fwVersion' in s){
+      const el=$('fwState');
+      if(el && el.textContent === '…')
+        el.innerHTML = `Running <b>${esc(s.fwVersion)}</b>.` +
+          (s.fwPendingVerify ? ' <b>Awaiting validation</b> — reverts on reboot until a fetch succeeds.' : '');
+    }
     if('uiSource' in s){
       const el=$('uiSource');
       if(el) el.innerHTML = s.uiSource === 'server'

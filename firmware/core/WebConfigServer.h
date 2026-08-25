@@ -113,6 +113,8 @@ private:
     void appendScanList(String &html);
     void handleUpdateUi();
     void handleClearUi();
+    void handleFirmwareCheck();
+    void handleFirmwareApply();
     void handleSetupGet();
     void handleSetupPost();
     void handleNotFound();

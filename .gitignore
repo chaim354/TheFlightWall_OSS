@@ -21,3 +21,7 @@ server/node_modules
 # Python bytecode (tools/ + their host tests)
 __pycache__/
 *.pyc
+
+# Signed firmware artifacts produced by tools/sign_firmware.sh -- never committed:
+# these are build outputs, and the .bin is 1.2MB.
+/dist/

@@ -108,10 +108,58 @@ const json = (body: unknown, status = 200): Response =>
  * uploaded yet is a normal state, and the device already knows what to do with
  * "nothing available" -- keep serving what it has.
  */
+export interface FirmwareInfo extends AssetInfo {
+  version: string;
+  /** base64 DER ECDSA-P256 signature over the image's SHA-256. */
+  sig: string;
+}
+
+/**
+ * The firmware entry, assembled from the three files tools/sign_firmware.sh
+ * lays down together: the image, its detached signature, and the version.
+ *
+ * size and sha256 are computed from the BYTES rather than read from anything
+ * the uploader wrote, so the manifest cannot claim a hash the file does not
+ * have. The signature is passed through verbatim -- this server does not check
+ * it and could not meaningfully do so, since the entire point is that the
+ * DEVICE verifies against a key this server has never held. A server that has
+ * been compromised can serve any manifest it likes and still cannot make the
+ * wall run unsigned code.
+ *
+ * Any of the three missing yields null: a half-uploaded firmware directory is
+ * an incomplete offer, not a broken one, and the device is told there is
+ * nothing to install rather than being handed something it cannot verify.
+ */
+async function firmwareEntry(root: string): Promise<FirmwareInfo | null> {
+  const binPath = resolveAssetPath(root, 'firmware/firmware.bin');
+  const sigPath = resolveAssetPath(root, 'firmware/firmware.sig');
+  const verPath = resolveAssetPath(root, 'firmware/version.txt');
+  if (!binPath || !sigPath || !verPath) return null;
+
+  const info = await assetInfo(binPath);
+  if (!info) return null;
+
+  let sig: string;
+  let version: string;
+  try {
+    // Buffer.from() around the read: the signature is BINARY DER, and taking
+    // the string-returning overload here would mangle it through a text decode
+    // before it ever reached base64.
+    sig = Buffer.from(await readFile(sigPath)).toString('base64');
+    version = Buffer.from(await readFile(verPath)).toString('utf8').trim();
+  } catch {
+    return null;
+  }
+  if (!sig || !version) return null;
+
+  return { ...info, version, sig };
+}
+
 export async function assetManifest(root: string): Promise<Response> {
   const uiPath = resolveAssetPath(root, 'index.html.gz');
   const ui = uiPath ? await assetInfo(uiPath) : null;
-  return json({ ok: true, ui });
+  const firmware = await firmwareEntry(root);
+  return json({ ok: true, ui, firmware });
 }
 
 /** Content types are advisory here -- the device stores bytes -- so octet-stream
