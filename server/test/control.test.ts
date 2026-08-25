@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   handleControl,
+  redactStatus,
   stripProtected,
   MAX_QUEUE,
   type ControlState,
@@ -217,7 +218,33 @@ describe('changing the ui password', () => {
   });
 });
 
+describe('redactStatus', () => {
+  it('drops the wall\'s network settings from what it reports', () => {
+    // The device redacts the Wi-Fi PASSWORD; the SSID is the name of the
+    // reader's home network and has no business on an internet-facing page.
+    const status = {
+      fwVersion: 'x',
+      settings: { network: { wifiSsid: 'chaim354', wifiPasswordSet: true }, display: { brightness: 5 } },
+    };
+    expect(redactStatus(status)).toEqual({ fwVersion: 'x', settings: { display: { brightness: 5 } } });
+  });
+
+  it('leaves a status without settings alone', () => {
+    expect(redactStatus({ fwVersion: 'x' })).toEqual({ fwVersion: 'x' });
+    expect(redactStatus({ fwVersion: 'x', settings: { display: {} } }))
+      .toEqual({ fwVersion: 'x', settings: { display: {} } });
+  });
+});
+
 describe('checkin and queueing', () => {
+  it('never writes the network section to the state file', async () => {
+    // On arrival, not on display: a leak that exists only on disk is a leak.
+    await call('POST', '/v1/control/checkin',
+      JSON.stringify({ settings: { network: { wifiSsid: 'chaim354' }, display: { brightness: 1 } } }), DEVICE);
+    expect(JSON.stringify(state.status)).not.toContain('chaim354');
+    expect(JSON.stringify(state.status)).not.toContain('network');
+  });
+
   it('drains the queue on check-in and records the status', async () => {
     await call('POST', '/v1/control/command', JSON.stringify({ set: { display: { brightness: 3 } } }));
     const res = await call('POST', '/v1/control/checkin', JSON.stringify({ fwVersion: 'x' }), DEVICE);

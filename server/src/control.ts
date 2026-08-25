@@ -176,6 +176,32 @@ const UNAUTHORISED = (): Response =>
   });
 
 /**
+ * What the wall reports about itself, minus the part nobody browsing needs.
+ *
+ * `network` carries the home Wi-Fi SSID. The device already redacts the
+ * password, but the SSID is the name of the reader's house network, and this
+ * page is reachable from the internet behind a password that ships with a
+ * public default -- so the SSID would be readable by anyone who found the URL
+ * before the password was ever changed.
+ *
+ * Stripped on ARRIVAL rather than on display, so it is never written to the
+ * state file either. A leak that only exists on disk is still a leak, and the
+ * page is not the only thing that reads that file.
+ *
+ * The mirror image of stripProtected(): that one keeps network settings from
+ * travelling server -> device, this one keeps them from travelling
+ * device -> browser.
+ */
+export function redactStatus(status: Record<string, unknown>): Record<string, unknown> {
+  const settings = status.settings;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return status;
+  const rest = { ...(settings as Record<string, unknown>) };
+  if (!('network' in rest)) return status;
+  delete rest.network;
+  return { ...status, settings: rest };
+}
+
+/**
  * GET /v1/control, POST /v1/control/{checkin,command,password}.
  *
  * `nowMs` is a parameter rather than a Date.now() call so the age arithmetic is
@@ -220,7 +246,7 @@ export async function handleControl(
       return json({ ok: false, error: 'body must be JSON' }, 400);
     }
     const commands = state.queue;
-    await storage.write({ ...state, status, statusAtMs: nowMs, queue: [] });
+    await storage.write({ ...state, status: redactStatus(status), statusAtMs: nowMs, queue: [] });
     return json({ ok: true, commands });
   }
 
