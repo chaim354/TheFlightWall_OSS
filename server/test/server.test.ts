@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -150,6 +150,48 @@ describe('startServer', () => {
 
     // Unconfigured means the API is absent, not broken.
     expect((await fetch(`${base}/v1/tracked`)).status).toBe(404);
+  });
+
+  it('serves the asset manifest and the asset bytes from the assets directory', async () => {
+    const assets = join(dir, 'assets');
+    mkdirSync(join(assets, 'logos'), { recursive: true });
+    writeFileSync(join(assets, 'index.html.gz'), 'PAGE');
+    writeFileSync(join(assets, 'logos', 'JZA.rgb565'), 'TILE');
+
+    running = await startServer({
+      port: 0,
+      aerodataboxKey: '',
+      boards: 'KJFK',
+      schedulePath: join(dir, 'schedule.json'),
+      assetsPath: assets,
+      panynjIntervalMs: 0,
+      panynjPageDelayMs: 0,
+      refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null,
+      quietHoursTimeZone: 'America/New_York',
+      boardFetchDelayMs: 0,
+    });
+    const base = `http://127.0.0.1:${running.port}`;
+
+    const man = await fetch(`${base}/v1/assets/manifest`);
+    expect(man.status).toBe(200);
+    const body = (await man.json()) as { ok: boolean; ui: { sha256: string; size: number } | null };
+    expect(body.ok).toBe(true);
+    expect(body.ui!.size).toBe(4);
+
+    // The bytes, and the same hash the manifest just promised -- the device
+    // decides whether to download by comparing exactly these two.
+    const page = await fetch(`${base}/assets/index.html.gz`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe('PAGE');
+    expect(page.headers.get('x-asset-sha256')).toBe(body.ui!.sha256);
+
+    // Nested, for the logo tiles phase 2 fetches by name.
+    expect(await (await fetch(`${base}/assets/logos/JZA.rgb565`)).text()).toBe('TILE');
+
+    // A miss and an escape are indistinguishable from outside, deliberately.
+    expect((await fetch(`${base}/assets/nope.bin`)).status).toBe(404);
+    expect((await fetch(`${base}/assets/..%2f..%2fetc%2fpasswd`)).status).toBe(404);
   });
 
   it('still answers /v1/flights (with no routes) when AERODATABOX_KEY is missing', async () => {

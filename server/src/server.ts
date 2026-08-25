@@ -10,6 +10,7 @@ import { fileTrackedStorage } from './tracked/store';
 import { runTrackedTick } from './tracked/tick';
 import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
+import { assetManifest, serveAsset } from './assets';
 
 /** Everything server.ts needs, read from process.env with a default for
  * every var except the API key -- there is no sensible default for that. */
@@ -76,12 +77,19 @@ export interface ServerConfig {
   openSkyClientSecret?: string;
   /** Where tracked-flight entries are persisted; see src/tracked/store.ts. */
   trackedPath?: string;
+  /**
+   * Directory the device downloads its web UI (and later logo tiles and
+   * firmware) from. On the VOLUME rather than in the image, so adding one logo
+   * does not require a redeploy -- see src/assets.ts.
+   */
+  assetsPath?: string;
 }
 
 const DEFAULT_PORT = 8787;
 const DEFAULT_BOARDS = 'KJFK,KLGA,KEWR,KBOS';
 const DEFAULT_SCHEDULE_PATH = './data/schedule.json';
 const DEFAULT_TRACKED_PATH = './data/tracked.json';
+const DEFAULT_ASSETS_PATH = './data/assets';
 /**
  * AeroDataBox refresh cadence.
  *
@@ -170,10 +178,16 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     openSkyClientId: env.OPENSKY_CLIENT_ID ?? '',
     openSkyClientSecret: env.OPENSKY_CLIENT_SECRET ?? '',
     trackedPath: env.TRACKED_PATH ?? DEFAULT_TRACKED_PATH,
+    assetsPath: env.ASSETS_PATH ?? DEFAULT_ASSETS_PATH,
   };
 }
 
-async function handleRequest(req: IncomingMessage, res: ServerResponse, env: Env): Promise<void> {
+async function handleRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  env: Env,
+  assetsRoot: string,
+): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
   if (url.pathname === '/up') {
@@ -203,6 +217,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, env: Env
     });
     // Node drops the body itself on a HEAD response.
     res.end(trackedPage);
+    return;
+  }
+
+  if (url.pathname === '/v1/assets/manifest') {
+    const response = await assetManifest(assetsRoot);
+    const body = await response.text();
+    res.writeHead(response.status, { 'content-type': 'application/json' });
+    res.end(body);
+    return;
+  }
+
+  if (url.pathname.startsWith('/assets/')) {
+    // Read-only, and only of files someone deliberately put in the asset
+    // directory. Unauthenticated like the rest of this server: the device has
+    // no credential to present, and these are the same bytes the firmware
+    // repository already publishes.
+    const response = await serveAsset(assetsRoot, url.pathname.slice('/assets/'.length));
+    const buf = Buffer.from(await response.arrayBuffer());
+    const headers: Record<string, string> = { 'content-type': response.headers.get('content-type') ?? 'application/octet-stream' };
+    const sha = response.headers.get('x-asset-sha256');
+    if (sha) headers['x-asset-sha256'] = sha;
+    headers['cache-control'] = 'no-cache';
+    res.writeHead(response.status, headers);
+    res.end(buf);
     return;
   }
 
@@ -433,7 +471,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
-      handleRequest(req, res, env).catch((err) => {
+      handleRequest(req, res, env, config.assetsPath ?? DEFAULT_ASSETS_PATH).catch((err) => {
         console.error('request handler error:', err instanceof Error ? err.message : String(err));
         if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
         res.end('internal error');
