@@ -160,7 +160,8 @@
       <div><label>Max altitude (ft)</label><input id="maxAltitudeFt" type="number" /></div>
     </div>
     <span class="check"><input type="checkbox" id="excludeOnGround"><label>Hide aircraft on the ground</label></span>
-    <span class="check"><input type="checkbox" id="showGeneralAviation"><label>Show general aviation / private flights (fills leftover slots)</label></span>
+    <span class="check"><input type="checkbox" id="showGeneralAviation"><label>Show general aviation / private flights</label></span>
+    <small class="help">Unchecked hides them on <b>every</b> position source — anything whose callsign isn't airline-format (a tail number like N172SP, or a non-airline callsign). Checked, they fill whatever slots airliners leave over. A flight you're watching from the FlightWall server is always shown either way: you asked for that one by name.</small>
     <span class="check"><input type="checkbox" id="hideCargo"><label>Hide cargo / freight flights</label></span>
     <label>Airline allow-list (comma separated ICAO/IATA, blank = all)</label>
     <input id="airlineAllowList" type="text" placeholder="UAL, DAL, AAL" />

@@ -171,6 +171,24 @@ bool FlightDataFetcher::classifyAndFilter(FlightInfo &info, const String &callsi
     if (g_settings.filters.hideCargo && info.is_cargo)
         return false; // optional cargo hide
 
+    // General aviation, hidden unless opted in.
+    //
+    // Area mode expresses the same rule structurally, by only running its
+    // GA pass when the setting is on, so this is INERT there: pass 1 never
+    // offers a GA callsign and pass 2 never runs while the setting is off.
+    // It exists for the FlightWall-server path, which hands back a finished
+    // list with no two-pass point to express it at -- that path applied
+    // hideCargo and the allow-list but not this, so unchecking the setting
+    // did nothing for anyone using a server as their position source.
+    //
+    // A PINNED flight is exempt. It is on the panel because someone named
+    // that exact flight on the watched-flights page, and a private jet is a
+    // very ordinary thing to want to follow; dropping it here would answer a
+    // direct request with silence and no way to tell why.
+    if (!g_settings.filters.showGeneralAviation && !info.pinned &&
+        isGeneralAviation(callsign.c_str()))
+        return false;
+
     if (!passesAirlineAllowList(info))
         return false;
 
@@ -464,8 +482,7 @@ size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
     {
         if (outFlights.size() >= g_settings.maxFlights)
             break;
-        char p[4];
-        if (!parseAirlineIcao(s.callsign.c_str(), p))
+        if (isGeneralAviation(s.callsign.c_str()))
             continue; // non-airline -> pass 2
         consider(s);
     }
@@ -478,8 +495,7 @@ size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
         {
             if (outFlights.size() >= g_settings.maxFlights)
                 break;
-            char p[4];
-            if (parseAirlineIcao(s.callsign.c_str(), p))
+            if (!isGeneralAviation(s.callsign.c_str()))
                 continue; // already handled in pass 1
             consider(s);
         }

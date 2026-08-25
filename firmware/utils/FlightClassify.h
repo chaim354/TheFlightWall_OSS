@@ -56,6 +56,27 @@ inline bool isTailNumber(const char *callsign)
     return false;
 }
 
+// isGeneralAviation: the GA/private side of the airline split, as ONE named
+// predicate.
+//
+// "General aviation" here means exactly what Area mode's two-pass carousel has
+// always meant by it: the callsign is not airline-format. That is deliberately
+// BROADER than isTailNumber above -- a tail number is GA, but so is a
+// non-airline callsign that is not registration-shaped either, and both belong
+// on the same side of the split. Naming it once is what stops the two passes
+// and the FlightWall-server path from drifting into different answers for the
+// same aircraft, which is precisely what had happened: the server path applied
+// hideCargo and the airline allow-list but never this rule, so a device set to
+// that source showed GA traffic no matter how the setting was left.
+//
+// Takes the CALLSIGN, not a classified flight, so it stays usable at the point
+// in Area mode where nothing has been enriched yet.
+inline bool isGeneralAviation(const char *callsign)
+{
+    char icao[4];
+    return !parseAirlineIcao(callsign, icao);
+}
+
 // isCargoOperator: membership in a curated freight-operator ICAO set
 // (case-insensitive 3-letter compare).
 inline bool isCargoOperator(const char *icao)
