@@ -27,6 +27,12 @@ public:
     // next reboot -- the library is explicit about that -- so this is not a
     // display feature, it is a way to take the panel's DMA traffic off the bus
     // entirely. See main.cpp's setup-AP branch for the one caller and why.
+    // Re-read one logo tile from the filesystem, replacing whatever the cache
+    // holds for it -- including a cached MISS. Called after that tile has just
+    // been downloaded; without it the operator stays logo-less until the w==0
+    // sentinel happens to be evicted.
+    void reloadTile(const String &key);
+
     void stopOutput();
 
     // Resume it. The panel comes back BLANK -- stopping cleared the
@@ -178,6 +184,7 @@ private:
     // otherwise the returned tile may be a negative entry (w==0 == "no tile").
     // The pointer is valid until the next tileFor() call.
     const LogoTile *tileFor(const String &key);
+    const LogoTile *loadTile(const String &key);
     uint16_t accentColorFor(const String &code);
     // Draws the logo (auto-fit to the box by integer scale) or a code badge fallback.
     void drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h);
