@@ -80,6 +80,43 @@ static unsigned long g_wifiDownSinceMs = 0; // for the runtime reconnect/AP-fall
 // "not counting" -- either we are not in AP mode, or there are no credentials to
 // retry with and the AP must stay up indefinitely.
 static unsigned long g_apSinceMs = 0;
+// When the setup AP came up, and whether its panel DMA has been stopped yet.
+// Separate from g_apSinceMs above, which is the bounded-retry watchdog and gets
+// zeroed the moment there are no credentials -- exactly the case this runs in.
+static unsigned long g_apStartedMs = 0;
+static bool g_apDmaStopped = false;
+// How long the CURRENT lit period lasts. Starts at the 30s opener and becomes a
+// full minute for every later one; see the duty-cycle block in loop().
+static unsigned long g_apPanelLitMs = 0;
+// Last countdown redraw, so the lit panel ticks once a second.
+static unsigned long g_apCountdownMs = 0;
+// How long the panel keeps showing the setup instructions before its DMA is
+// halted.
+//
+// The panel is the only place the AP name is written down, so it has to be
+// readable first -- but the HUB75 DMA is also the prime suspect for why clients
+// cannot associate. This project has already caught that DMA starving the radio
+// once (commit 4218dc0, where it was corrupting TLS in station mode), and the
+// setup AP is worse off than station mode: it has to beacon and answer auth
+// frames on a schedule it does not control. Measured from a laptop beside the
+// wall, the AP appeared in roughly one scan in three -- a healthy AP is in all
+// of them.
+//
+// 30s: long enough to read a short SSID and an IP off the wall, short enough
+// that nobody is standing there waiting.
+static const unsigned long kApDmaOffAfterMs = 30UL * 1000UL;
+// ...then the panel comes BACK for a minute out of every six, so the wall is
+// never permanently blank while someone is trying to set it up. A dark panel
+// with no explanation is indistinguishable from a dead one, which is why the
+// screen says what it is doing rather than just going out.
+//
+// Five minutes dark is the part that matters: that is when the radio has the
+// bus to itself and a client can actually associate. The minute of light is
+// for a person who walked up late and needs the network name again -- it will
+// make joining hard for that minute, and the on-screen note says so.
+static const unsigned long kApPanelDarkMs = 5UL * 60UL * 1000UL;
+static const unsigned long kApPanelLitMs = 60UL * 1000UL;
+
 // How long the setup AP may hold a device that HAS credentials before rebooting
 // to retry STA. Long enough to finish provisioning by hand, short enough that a
 // router that came up late does not strand the panel for the evening.
@@ -107,18 +144,52 @@ static uint8_t g_consecutiveEmpty = 0;         // successful fetches that return
 
 static const char *kSetupApSsid = "FlightWall-Setup";
 
+// What the wall says while it is waiting to be set up. Kept to <=21 columns a
+// line (128px / 6px per char) so nothing is truncated.
+static String setupScreenText(unsigned long secsToDark)
+{
+    String out = String("Join wifi:\n") + kSetupApSsid + "\nhttp://192.168.4.1\n";
+    // A countdown rather than a static "sleeps in a bit": the panel going black
+    // is the single most alarming thing this device does, and someone standing
+    // in front of it needs to know it is about to happen, not be told
+    // afterwards that it was deliberate.
+    out += (secsToDark > 0) ? ("dark in " + String(secsToDark) + "s") : String("going dark now");
+    out += "\n(dark = wifi works)";
+    return out;
+}
+
+
 // ---- Helpers --------------------------------------------------------------
 
-// Allow 2.4GHz channels 1-13 (US default is 1-11) so the device can see and join
-// a router whose auto-channel landed on 12/13. MANUAL policy honors nchan=13.
-static void applyWifiRegion()
+// 2.4GHz regulatory domain. The channel COUNT differs by role, and that
+// difference is the whole reason this takes a parameter.
+//
+// As a STATION, 13: the device must be able to see and join a router whose
+// auto-channel landed on 12 or 13. Nothing is transmitted there unprompted --
+// the router is the one beaconing -- and US routers do occasionally land there.
+//
+// As an ACCESS POINT, 11. Under POLICY_MANUAL this country info goes into our
+// OWN beacons, and "US" advertising 13 channels is not a valid US regulatory
+// domain: the US permits 1-11. A client that enforces country IEs (Apple's do,
+// strictly) can refuse or badly delay association to an AP whose beacon
+// contradicts itself -- and the device cannot see that happening. From here the
+// AP is up, healthy, serving, and simply nobody arrives; both an iPhone and a
+// laptop took minutes or timed out against the 13-channel beacon.
+//
+// The AP channel itself was never the problem, which is what the previous
+// comment here reasoned about ("AP defaults to a 1-11 channel anyway") -- true,
+// and beside the point, because what the beacon ADVERTISES is the country IE.
+static const uint8_t kStaChannels = 13; // join a router on 12/13
+static const uint8_t kApChannels = 11;  // beacon a domain the US actually has
+
+static void applyWifiRegion(uint8_t nchan)
 {
     wifi_country_t ctry = {};
     ctry.cc[0] = 'U';
     ctry.cc[1] = 'S';
     ctry.cc[2] = '\0';
     ctry.schan = 1;
-    ctry.nchan = 13;
+    ctry.nchan = nchan;
     ctry.policy = WIFI_COUNTRY_POLICY_MANUAL;
     esp_wifi_set_country(&ctry);
 }
@@ -132,7 +203,7 @@ static bool connectWifiSta()
         return false;
 
     WiFi.mode(WIFI_STA);
-    applyWifiRegion();           // unlock ch 12-13 before associating
+    applyWifiRegion(kStaChannels); // unlock ch 12-13 before associating
     WiFi.setAutoReconnect(true); // recover transient drops without a reboot
     WiFi.persistent(false);
     // Modem sleep OFF. arduino-esp32 defaults _sleepEnabled to WIFI_PS_MIN_MODEM on
@@ -223,14 +294,29 @@ static void startSetupAp()
 {
     g_apMode = true;
     WiFi.mode(WIFI_AP);
-    applyWifiRegion(); // keep region consistent (AP defaults to a 1-11 channel anyway)
+    applyWifiRegion(kApChannels); // a valid US domain in our own beacon -- see above
     WiFi.softAP(kSetupApSsid);
+    // HT20, not HT40. MEASURED: with the default the AP beacons "Channel 1
+    // (2GHz, 40MHz)" -- a 40MHz channel on 2.4GHz spans roughly channels 1-5,
+    // and this band is not empty (neighbours on 1, 6, 7 and 11). Clients saw
+    // the network and then timed out associating: an iPhone took minutes, a
+    // laptop gave up entirely, while the device reported a perfectly healthy AP
+    // the whole time, because from its side nothing had failed -- nobody had
+    // arrived. 40MHz on 2.4GHz buys throughput this AP has no use for; it
+    // serves a 1KB form.
+    //
+    // Set AFTER softAP(): the interface has to exist before its bandwidth can
+    // be configured.
+    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
     IPAddress ip = WiFi.softAPIP();
     Serial.print("Setup AP started. Connect to '");
     Serial.print(kSetupApSsid);
     Serial.print("' then browse to http://");
     Serial.println(ip);
-    g_display.displayMessage(String("Setup: ") + kSetupApSsid);
+    g_display.displayMessage(setupScreenText(kApDmaOffAfterMs / 1000));
+    g_apStartedMs = millis();
+    g_apDmaStopped = false;
+    g_apPanelLitMs = kApDmaOffAfterMs; // the 30s opener; later lit periods are a minute
 }
 
 // Compute the local hour [0-23] using NTP UTC + the configured offset.
@@ -809,6 +895,47 @@ void loop()
     // In AP setup mode we only serve the web UI (no network for fetching).
     if (g_apMode || WiFi.status() != WL_CONNECTED)
     {
+        // Duty-cycle the panel against the radio. The HUB75 DMA starves the
+        // WiFi peripheral badly enough that clients cannot associate at all
+        // (measured: the AP appeared in 1 scan in 3 with the panel running, 6
+        // of 6 with it stopped), so the panel spends most of setup dark -- but
+        // not all of it, or the wall just looks broken. See the constants.
+        if (g_apMode && g_apStartedMs != 0)
+        {
+            const unsigned long lit = g_apDmaStopped ? kApPanelDarkMs : g_apPanelLitMs;
+            // Tick the countdown once a second while the panel is lit. Cheap --
+            // one canvas render against a loop that is otherwise doing nothing
+            // but serving a 1KB form -- and it is the only feedback there is
+            // that the blackout is a timer rather than a failure.
+            if (!g_apDmaStopped && millis() - g_apCountdownMs >= 1000UL)
+            {
+                g_apCountdownMs = millis();
+                const unsigned long elapsed = millis() - g_apStartedMs;
+                const unsigned long left = (elapsed >= lit) ? 0UL : (lit - elapsed);
+                g_display.displayMessage(setupScreenText((left + 999UL) / 1000UL));
+            }
+            if (millis() - g_apStartedMs >= lit)
+            {
+                g_apStartedMs = millis();
+                if (!g_apDmaStopped)
+                {
+                    g_apDmaStopped = true;
+                    Serial.println("[setup] panel dark; radio has the bus");
+                    g_display.stopOutput();
+                }
+                else
+                {
+                    g_apDmaStopped = false;
+                    // Every lit period after the first one is a full minute:
+                    // the 30s opener exists only so the first look is quick.
+                    g_apPanelLitMs = kApPanelLitMs;
+                    Serial.println("[setup] panel lit for a minute; wifi will struggle until it is dark again");
+                    g_display.startOutput();
+                    g_apCountdownMs = 0; // force an immediate countdown redraw
+                    g_display.displayMessage(setupScreenText(kApPanelLitMs / 1000)); // resumes blank
+                }
+            }
+        }
         delay(5);
         return;
     }

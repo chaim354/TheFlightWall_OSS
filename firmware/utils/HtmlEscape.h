@@ -59,3 +59,42 @@ inline void appendHtmlEscaped(Str &out, const char *in)
         }
     }
 }
+
+// Percent-encode text for interpolation into a URL QUERY value.
+//
+// A sibling of appendHtmlEscaped rather than a reuse of it, because the two
+// escape for different parsers and neither is a superset of the other: HTML
+// escaping leaves a space and an `&` as themselves once entity-encoded, and
+// both of those END a query parameter. The setup page's network picker puts
+// scanned SSIDs into `?ssid=`, and those names are chosen by whoever owns the
+// neighbouring router -- "Bob & Jane's Wi-Fi" has to survive the round trip and
+// come back as the same string, not as "Bob ".
+//
+// Unreserved set per RFC 3986 (ALPHA / DIGIT / "-" / "." / "_" / "~"); every
+// other byte, including each byte of a multi-byte UTF-8 sequence, goes out as
+// %XX. Same append-into-caller shape and same null tolerance as above.
+template <typename Str>
+inline void appendUrlEncoded(Str &out, const char *in)
+{
+    if (in == nullptr)
+        return;
+
+    static const char *kHex = "0123456789ABCDEF";
+    for (const char *p = in; *p != '\0'; ++p)
+    {
+        const unsigned char c = (unsigned char)*p;
+        const bool unreserved = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                                (c >= '0' && c <= '9') || c == '-' || c == '.' ||
+                                c == '_' || c == '~';
+        if (unreserved)
+        {
+            out += (char)c;
+        }
+        else
+        {
+            out += '%';
+            out += kHex[(c >> 4) & 0x0F];
+            out += kHex[c & 0x0F];
+        }
+    }
+}

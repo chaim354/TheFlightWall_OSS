@@ -70,6 +70,33 @@ int main() {
     // them here would corrupt every non-ASCII network name.
     CHECK(esc("Caf\xc3\xa9") == "Caf\xc3\xa9");
 
+    // ---- appendUrlEncoded: SSIDs into ?ssid= on the setup page's picker ----
+    auto url = [](const char *in) { std::string o; appendUrlEncoded(o, in); return o; };
+
+    // Unreserved set passes through untouched (RFC 3986).
+    CHECK(url("HomeWiFi-5G_2.4~x") == "HomeWiFi-5G_2.4~x");
+
+    // The two characters that make this a DIFFERENT problem from HTML escaping:
+    // both end a query parameter, and HTML escaping leaves both intact.
+    CHECK(url("Bob & Jane") == "Bob%20%26%20Jane");
+    CHECK(url("a=b") == "a%3Db");
+
+    // A real-world apostrophe SSID, and a '+' that must NOT be read as a space.
+    CHECK(url("Jane's Net") == "Jane%27s%20Net");
+    CHECK(url("a+b") == "a%2Bb");
+
+    // Percent itself is encoded, or a decoder would read the next two
+    // characters as a hex escape.
+    CHECK(url("100%") == "100%25");
+
+    // Multi-byte UTF-8 goes out byte by byte -- "Café" is 5 bytes, not 4.
+    CHECK(url("Caf\xc3\xa9") == "Caf%C3%A9");
+
+    // Hex digits are uppercase, and null is an absent value, as above.
+    CHECK(url("\x1f") == "%1F");
+    std::string un; appendUrlEncoded(un, nullptr);
+    CHECK(un == "");
+
     if (failures == 0) { printf("ALL PASS\n"); return 0; }
     printf("%d FAILURES\n", failures);
     return 1;

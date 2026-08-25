@@ -91,6 +91,7 @@ private:
     void handleRestart();
     void handleRoot();
     void handleSetupPage(const char *banner);
+    void appendScanList(String &html);
     void handleSetupGet();
     void handleSetupPost();
     void handleNotFound();
