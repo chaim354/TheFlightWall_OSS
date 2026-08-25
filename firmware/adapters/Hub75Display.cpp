@@ -31,6 +31,18 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
     return ((uint16_t)(r & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (b >> 3);
 }
 
+// Exposes the DMA restart the base class does not.
+//
+// dma_bus is protected, and the library says outright that its protected members
+// "might be useful for child classes" -- so this is the sanctioned seam rather
+// than a reach into private state. Nothing else is added or overridden.
+class RestartablePanel : public MatrixPanel_I2S_DMA
+{
+public:
+    explicit RestartablePanel(const HUB75_I2S_CFG &cfg) : MatrixPanel_I2S_DMA(cfg) {}
+    void resumeDMAoutput() { dma_bus.dma_transfer_start(); }
+};
+
 Hub75Display::Hub75Display() {}
 
 Hub75Display::~Hub75Display()
@@ -98,7 +110,11 @@ bool Hub75Display::initialize()
     // suspect for the contiguous-internal-RAM shortage that breaks TLS handshakes.
     size_t intBeforePanel = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t dmaBeforePanel = heap_caps_get_free_size(MALLOC_CAP_DMA);
-    _panel = new MatrixPanel_I2S_DMA(mxconfig);
+    // RestartablePanel, not MatrixPanel_I2S_DMA: stopOutput()/startOutput()
+    // below need dma_bus, which the base class keeps protected -- deliberately
+    // available to child classes, per its own comment. Every construction of
+    // _panel must use this type; startOutput() downcasts on that promise.
+    _panel = new RestartablePanel(mxconfig);
     _panel->begin();
     size_t intAfterPanel = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t dmaAfterPanel = heap_caps_get_free_size(MALLOC_CAP_DMA);
@@ -556,6 +572,29 @@ void Hub75Display::drawTrackedChrome()
     const int16_t x = trackedLabelX();
     if (x >= 0)
         drawTextLine(x, 1, String(TRACKED_LABEL), white);
+}
+
+void Hub75Display::stopOutput()
+{
+    if (!_panel)
+        return;
+    _panel->stopDMAoutput();
+}
+
+void Hub75Display::startOutput()
+{
+    if (!_panel)
+        return;
+    // Safe because begin() only ever constructs a RestartablePanel.
+    //
+    // The base class documents stopDMAoutput() as permanent ("black until next
+    // ESP reboot") and offers no resume, but on the S3 the two halves are
+    // symmetric: dma_transfer_stop() is gdma_stop(), and dma_transfer_start()
+    // is gdma_start() over the SAME descriptor chain, which stopping never
+    // freed. What stopping does discard is the framebuffer contents
+    // (resetbuffers()), so a caller must redraw after this -- it resumes an
+    // empty screen, not the one that was there before.
+    static_cast<RestartablePanel *>(_panel)->resumeDMAoutput();
 }
 
 void Hub75Display::displayFlightCard(const FlightInfo &f)
@@ -1361,14 +1400,38 @@ void Hub75Display::displayMessage(const String &message)
 
     const int charWidth = 6;
     const int charHeight = 6;
+    const int lineSpacing = 3;
+    const int maxCols = _matrixWidth / charWidth;
 
-    const int innerWidth = _matrixWidth;
-    const int maxCols = innerWidth / charWidth;
-    String line = truncateToColumns(message, maxCols);
+    // Split on '\n' so a caller can pass several lines. It used to render one
+    // truncated line, which silently cut its only real caller: "Setup: " plus
+    // the AP name is 23 characters against the 21 that fit, so the setup screen
+    // read "Setup: FlightWall-Set" -- a network name that does not exist.
+    std::vector<String> lines;
+    int start = 0;
+    while (start <= (int)message.length())
+    {
+        int nl = message.indexOf('\n', start);
+        if (nl < 0)
+        {
+            lines.push_back(message.substring(start));
+            break;
+        }
+        lines.push_back(message.substring(start, nl));
+        start = nl + 1;
+    }
 
-    const int16_t x = 0;
-    const int16_t y = (_matrixHeight - charHeight) / 2;
-    drawTextLine(x, y, line, textColor());
+    const int n = (int)lines.size();
+    const int blockH = n * charHeight + (n - 1) * lineSpacing;
+    int16_t y = (int16_t)((_matrixHeight - blockH) / 2);
+    if (y < 0)
+        y = 0;
+
+    for (const String &ln : lines)
+    {
+        drawTextLine(0, y, truncateToColumns(ln, maxCols), textColor());
+        y += (int16_t)(charHeight + lineSpacing);
+    }
     present();
 }
 

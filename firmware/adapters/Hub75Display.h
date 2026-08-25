@@ -22,6 +22,16 @@ public:
     void clear() override;
     void displayFlights(const std::vector<FlightInfo> &flights) override;
     void displayMessage(const String &message);
+
+    // Halt the HUB75 DMA engine. The panel goes dark and STAYS dark until the
+    // next reboot -- the library is explicit about that -- so this is not a
+    // display feature, it is a way to take the panel's DMA traffic off the bus
+    // entirely. See main.cpp's setup-AP branch for the one caller and why.
+    void stopOutput();
+
+    // Resume it. The panel comes back BLANK -- stopping cleared the
+    // framebuffer -- so redraw immediately after calling this.
+    void startOutput();
     void displaySplash(); // branded boot screen: wordmark + plane glyph + tagline
     void showLoading();
 
