@@ -2,7 +2,7 @@
 
 Status snapshot for the next agent. Fork `chaim354/TheFlightWall_OSS` (`origin`).
 Read §0 and §2 before touching anything, and §5 FIRST if you are about to push.
-As of 2026-08-24 the current line of work is `main` at `eec3cb2`; earlier work is
+As of 2026-08-25 the current line of work is `main` at `bdb7362`; earlier work is
 on `flightwall-mini-parity`.
 
 ---
@@ -22,6 +22,7 @@ Most of what earlier handoffs called "never run on hardware" now IS device-verif
 | Clock / timezone / new defaults (`eea030d`) | **COMPILE + HOST-TEST ONLY.** The board dropped off USB before it could be flashed. The ONLY unverified commit from this session. |
 | Audit remediation, Tiers 1-6 (branch `claude/audit-priority-list-d3dbf5`, 30 commits) | **DEVICE-VERIFIED, 2026-08-23.** Flashed (firmware + `uploadfs`) and the server deployed. Confirmed on hardware: ETAs render on the panel; `/api/settings` no longer returns any secret in plaintext (`wifiPasswordSet` booleans only); `adc1Min/Max` now advertises `1-3`, not the `1-10` that included seven HUB75 data lines; `seedDefaults()` reads its config constants (`tile cache capacity=15 (maxFlights=12)`); the setup AP no longer absorbs (no reboot loop with no credentials stored). Held pending the `-DCORE_DEBUG_LEVEL=4` measurement run: F-FW09-A (TLS keep-alive branch choice) and F-FW12-A's 13-site FR24 migration. |
 | Idle-when-dark + server quiet hours (`14e0647`..`01ae579`), merged as `eec3cb2` | **DEVICE-VERIFIED, 2026-08-24.** Flashed APP-ONLY (`-t upload`, deliberately NOT `uploadfs`) -- settings survived, device rejoined on its own. Gate confirmed on hardware: brightness 0 -> `/api/status` note `panel dark - fetch paused`, held across a full 60s interval with the 12 held flights RETAINED (70s < the 360s stale window), then `fetch ok` within one cycle of restoring brightness. Server deployed (`eec3cb2f09ea`, healthy) with `REFRESH_QUIET_HOURS=0-6` live; its boot log `schedule: 3144 rows from 4/4 boards` IS the cold-start refresh added this session. NOT exercised: the stale-discard path (needs >6min dark) and the quiet window itself (needs 00:00-06:00 ET). Note the device half is INERT as configured -- `schedule.enabled=false`, `nightBrightness=5`, `light.enabled=false` mean nothing reaches brightness 0. |
+| Calendar sync for tracked flights (`5cb0596`..`bdb7362`) | **DEPLOYED 2026-08-25, AND INERT BY DESIGN.** Live on `flightwall.tinkerex.com` (container `bdb73626`, healthy; boot log `schedule: 2640 rows from 4/4 boards`). `TRACKED_ICS_URL` is deliberately UNSET, so the sync never runs and the tracked tick behaves exactly as before -- deploy.yml lists the var commented-out because Kamal fails a deploy on a secret it cannot resolve. Verified live: `/up` 200, the page serves the new calendar/by-hand provenance markers, no calendar lines in the boot log. NOT exercised anywhere but tests: the hourly gate, and every parser regex against a REAL Flighty feed -- the carrier pattern (2-char IATA, case-sensitive) is written against the expected format, not an observed one, and is the thing to check first when a flight fails to appear. 583 host tests pass. |
 | No-JS `/setup` form (`b7ba300`) | **DEVICE-VERIFIED, 2026-08-24.** First-time provisioning had no `<form>` at all: `/` is ~11KB gzipped and posts via `fetch()`, but the browser that opens on joining an open network is a restricted captive-portal WebView -- so with scripting limited there was no way to submit credentials, which is the "could not set WiFi from the AP" failure. `/setup` is 1227 bytes as served, no `<script>`, no `<img>`, one plain form; the AP captive redirect now points there instead of `/`. Confirmed on hardware: renders the stored SSID, an empty-SSID POST re-renders with a banner WITHOUT restarting or altering settings, and a POST of the current SSID with a blank password saves, reboots and rejoins -- which is also what proves blank-password-means-unchanged preserves the credential. NOT exercised: the actual captive-portal sheet on a phone (would require clearing credentials, and the password is not recoverable from `/api/settings` by design). |
 | Tracked flights, server side (`claude/tracked-flights` + `claude/tracked-wiring`) | **LIVE-VERIFIED end to end, 2026-08-24, against the real APIs.** `POST /v1/tracked {number,date}` -> the tick resolves it through AeroDataBox within one 120s cycle: observed `pending` -> `resolved` with `icao24=406947`, `reg=G-STBG`, `LHR->JFK`. 417 server tests. TWO measured findings the design had wrong: OpenSky **Basic auth does not authenticate** -- it returns 200 with real data from the anonymous 400/day tier (`x-rate-limit-remaining` 395 vs 3999 on Bearer), now OAuth2 client credentials with a cached token; and a single-`icao24` query costs **4 credits, not 1**, so the budget is ~1000 queries/day and the tick is 120s, not the planned 60s. NOT yet verified: the panel marker on real hardware (built, not flashed), and no tracked flight has yet been followed through an actual airborne window. |
 | `WiFi.setSleep(false)` (`d010d8d`) | **A DISPROVEN NO-OP.** Modem sleep was already off (verified in core source). Harmless but the message frames it as a fix; revert or amend when convenient. |
@@ -29,12 +30,14 @@ Most of what earlier handoffs called "never run on hardware" now IS device-verif
 Both envs (`esp32dev`, `esp32s3`) build clean. Host tests all pass:
 `cd firmware && ./run_host_tests.sh`
 
-`main` is CURRENT as of 2026-08-24, not stale: the audit remediation AND the
+`main` is CURRENT as of 2026-08-25, not stale: the audit remediation AND the
 idle-when-dark work are merged into it as `eec3cb2` (48 commits from
-`claude/audit-priority-list-d3dbf5`, which branched at `d58ed83`). That is exactly
-what is flashed to the device and deployed to the server. `main` is 208 commits
-ahead of `upstream/main` and NOT pushed; `origin/main` sits on a different commit.
-Earlier work lives on `flightwall-mini-parity`.
+`claude/audit-priority-list-d3dbf5`, which branched at `d58ed83`), and the calendar
+sync as `bdb7362`. That is exactly what is flashed to the device and deployed to
+the server. **`origin/main` NOW MATCHES `main`** -- pushed 2026-08-25 at `bdb7362`,
+which earlier handoffs said was not the case, so the two are no longer diverged.
+`upstream/main` (`AxisNimble`) is untouched and must stay that way. Earlier work
+lives on `flightwall-mini-parity`.
 
 The plan those 30 commits execute is `docs/superpowers/audits/2026-08-23-priority-list.md`,
 derived from `docs/superpowers/audits/2026-08-23-simplification-audit.md` (which lives on
