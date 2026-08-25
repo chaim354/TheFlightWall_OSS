@@ -160,11 +160,12 @@ export const trackedPage = `<!doctype html>
         between the internet and your living room.</div>
     </div>
 
-    <div class="card">
-      <h2>What the wall last reported</h2>
+    <div class="card" data-tier="admin">
+      <h2>What the wall last reported <span class="pill" data-lock>admin</span></h2>
       <div id="wallStatus"></div>
-      <small class="help" id="ctlNote"></small>
     </div>
+
+    <small class="help" id="ctlNote" style="text-align:center"></small>
 
     <div class="card" data-tier="ui">
       <h2>Brightness</h2>
@@ -176,12 +177,24 @@ export const trackedPage = `<!doctype html>
       <div class="row">
         <div><label>Night starts (0–23)</label><input id="f_schedule_nightStartHour" type="number" min="0" max="23" /></div>
         <div><label>Night ends (0–23)</label><input id="f_schedule_nightEndHour" type="number" min="0" max="23" /></div>
-        <div><label>Time zone</label><input id="f_schedule_timezone" placeholder="America/New_York" /></div>
+        <div><label>Time zone</label>
+          <select id="f_schedule_timezone">
+            <option value="UTC0">UTC</option>
+            <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (New York)</option>
+            <option value="CST6CDT,M3.2.0,M11.1.0">US Central (Chicago)</option>
+            <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (Denver)</option>
+            <option value="MST7">US Arizona (no DST)</option>
+            <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (Los Angeles)</option>
+            <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska</option>
+            <option value="HST10">US Hawaii (no DST)</option>
+            <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (London)</option>
+            <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (Berlin/Paris)</option>
+          </select></div>
       </div>
       <span class="check"><input type="checkbox" id="f_schedule_enabled" /> Day/night schedule enabled</span>
       <small class="help">With the schedule on, day and night win over the base value — so changing the
         base alone can look like nothing happened.</small>
-      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="display,schedule">Queue brightness</button></div></div>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="display,schedule">Save</button></div></div>
     </div>
 
     <div class="card" data-tier="ui">
@@ -210,7 +223,7 @@ export const trackedPage = `<!doctype html>
         <div style="flex:0 0 150px"><label>Text colour</label><input id="f_display_textColor" type="color" /></div>
         <div><span class="check" style="margin-top:18px"><input type="checkbox" id="f_buttons_enabled" /> Physical buttons enabled</span></div>
       </div>
-      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="display,layout,buttons">Queue display</button></div></div>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="display,layout,buttons">Save</button></div></div>
     </div>
 
     <div class="card" data-tier="ui">
@@ -232,7 +245,7 @@ export const trackedPage = `<!doctype html>
       <span class="check"><input type="checkbox" id="f_filters_excludeOnGround" /> Hide aircraft on the ground</span>
       <span class="check"><input type="checkbox" id="f_filters_showGeneralAviation" /> Show general aviation / private</span>
       <span class="check"><input type="checkbox" id="f_filters_hideCargo" /> Hide cargo / freight</span>
-      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="tracking,filters">Queue tracking</button></div></div>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="tracking,filters">Save</button></div></div>
     </div>
 
     <div class="card" data-tier="admin">
@@ -259,7 +272,7 @@ export const trackedPage = `<!doctype html>
       <span class="check"><input type="checkbox" id="f_api_enrichmentFallbackToAeroApi" /> Use AeroAPI as backup when adsbdb misses</span>
       <small class="help">These decide where data comes from and what it costs. The fetch interval is also
         how long a queued change waits before the wall collects it.</small>
-      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="api,display">Queue sources</button></div></div>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="api,display">Save</button></div></div>
     </div>
 
     <div class="card" data-tier="admin">
@@ -280,7 +293,7 @@ export const trackedPage = `<!doctype html>
       <span class="check"><input type="checkbox" id="f_light_dimInstead" /> Dim instead of switching off</span>
       <small class="help">A mis-set threshold blanks the panel and pauses fetching, which looks exactly
         like a dead device from here.</small>
-      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="light">Queue light sensor</button></div></div>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="light">Save</button></div></div>
     </div>
 
     <div class="card" data-tier="admin">
@@ -303,7 +316,7 @@ export const trackedPage = `<!doctype html>
       <span class="check"><input type="checkbox" id="f_hardware_panelClkPhase" /> Clock phase</span>
       <small class="help"><b>Wrong values blank or scramble the display</b>, and they only take effect after a
         restart — so a mistake here is a dark wall until someone walks over to it.</small>
-      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="hardware">Queue panel</button></div></div>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="hardware">Save</button></div></div>
     </div>
 
     <div class="card" data-tier="admin">
@@ -734,6 +747,25 @@ function populate(settings) {
 
     var v = section[path[1]];
     if (v === undefined || v === null) continue;
+
+    if (el.tagName === 'SELECT') {
+      // Assigning a value a <select> has no option for silently leaves it on
+      // the first option -- and the next Save would then write THAT, replacing
+      // the wall's real setting with the top of a list nobody chose. The
+      // device stores these four verbatim (timezone, no-flights mode, driver
+      // chip, I2S clock), so its value can legitimately be one this page has
+      // never heard of. Keep it, labelled, exactly as the LAN page does.
+      el.value = String(v);
+      if (el.value !== String(v)) {
+        var opt = document.createElement('option');
+        opt.value = String(v);
+        opt.textContent = 'Custom — ' + String(v);
+        el.appendChild(opt);
+        el.value = String(v);
+      }
+      continue;
+    }
+
     if (el.type === 'checkbox') el.checked = !!v;
     // A stored secret comes back redacted or absent; leaving the box empty
     // is what makes "blank means keep it" true rather than destructive.
@@ -856,7 +888,11 @@ function applyTier(adminAvailable, hasSettings) {
     // not see it, or the wall has never said what to put in it. Deciding them
     // in two functions meant whichever ran last won, and renderStatus ran last.
     var isAdmin = cards[i].getAttribute('data-tier') === 'admin';
-    cards[i].hidden = (isAdmin && locked) || !hasSettings;
+    // The second rule applies only to cards that WOULD be populated. The
+    // status card has no fields, and "the wall has not checked in yet" is
+    // exactly what an admin needs to see when there are no settings.
+    var needsSettings = cards[i].querySelector('[id^="f_"]') !== null;
+    cards[i].hidden = (isAdmin && locked) || (needsSettings && !hasSettings);
     var pill = cards[i].querySelector('[data-lock]');
     if (pill) { pill.textContent = 'admin'; pill.className = 'pill on'; }
   }
@@ -899,8 +935,7 @@ function renderStatus(st, ageMs) {
   if (st.note) html += '<div class="line" style="margin-top:8px">' + esc(st.note) + '</div>';
   $('wallStatus').innerHTML = html;
 
-  $('ctlNote').textContent = st.settings ? ''
-    : 'This wall has not reported its settings, so the controls are hidden — sending a form full of blanks would overwrite real values with guesses.';
+
 }
 
 function fmtAge(ms) {
@@ -950,7 +985,10 @@ async function pollCtl() {
   for (var h = 0; h < HEADER_BITS.length; h++) $(HEADER_BITS[h]).hidden = false;
   if (!polling) { polling = true; poll(); }
   $('defaultWarn').hidden = !j.usingDefaultUiPassword;
-  applyTier(!!j.adminAvailable, !!(j.status && j.status.settings));
+  var hasSettings = !!(j.status && j.status.settings);
+  $('ctlNote').textContent = hasSettings ? ''
+    : 'The wall has not reported its settings yet, so its controls are hidden — sending a form full of blanks would overwrite real values with guesses.';
+  applyTier(!!j.adminAvailable, hasSettings);
   renderStatus(j.status, j.statusAgeMs);
   if (j.status && j.status.settings) populate(j.status.settings);
   renderPending(j.pending);

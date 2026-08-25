@@ -119,6 +119,37 @@ describe('the merged watched-flights and control page', () => {
     }
   });
 
+  it('offers the timezone as named zones, not a POSIX string to type', () => {
+    // The device stores a POSIX TZ spec. A free-text box invited an IANA name
+    // like "America/New_York", which libc cannot parse -- the wall would fall
+    // back to UTC and the day/night schedule would drift by hours with nothing
+    // on screen to say why.
+    const tz = /<select id="f_schedule_timezone">([\s\S]*?)<\/select>/.exec(trackedPage);
+    expect(tz, 'timezone is not a select').not.toBeNull();
+    const values = [...tz![1]!.matchAll(/value="([^"]*)"/g)].map((m) => m[1]!);
+    expect(values).toContain('EST5EDT,M3.2.0,M11.1.0');
+    expect(values.length).toBeGreaterThanOrEqual(10);
+    // No IANA names. A slash alone does not distinguish them -- a POSIX spec
+    // uses one for the DST transition hour, as in "M3.5.0/1" -- so match the
+    // Area/City shape instead.
+    for (const v of values) expect(v, `${v} looks like an IANA name`).not.toMatch(/^[A-Za-z_]+\/[A-Za-z_]+$/);
+  });
+
+  it('keeps a select value the page has no option for', () => {
+    // Assigning an unknown value to a <select> silently leaves it on the first
+    // option, and the next Save writes THAT -- replacing the wall's real
+    // setting with the top of a list nobody chose. Four fields are stored
+    // verbatim by the device and can hold values this page never listed.
+    expect(trackedPage).toContain("if (el.value !== String(v))");
+    expect(trackedPage).toContain("'Custom — '");
+  });
+
+  it('keeps the wall status behind the admin tier', () => {
+    const card = trackedPage.split(/<div class="card"/).find((c) => c.includes('What the wall last reported'));
+    expect(card).toBeDefined();
+    expect(card, 'status card is not admin-gated').toContain('data-tier="admin"');
+  });
+
   it('says the default password out loud rather than only in a header', () => {
     expect(trackedPage).toContain('flightwall123');
     expect(trackedPage).toContain('id="defaultWarn"');

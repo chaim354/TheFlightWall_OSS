@@ -99,6 +99,7 @@ resetting the password would change nothing at all.
 Everything that can break the wall or spend money:
 
 - **Actions**: `restart`, `updateui`, `updatefw`
+- **The wall's reported status** — firmware version, IP, signal, uptime
 - **Sections**: `hardware` (HUB75 geometry, driver chip, I2S clock), `light`
   (sensor type, pin, thresholds, hysteresis)
 - **Keys**: `display.fetchIntervalSeconds`; `api.positionSource`,
@@ -172,6 +173,20 @@ gets 403, since it is not a browser that forgot its password but something using
 the wrong key. Absent `CONTROL_TOKEN` there is no password mechanism at all, so
 the route stays open rather than locking everyone out of a server with no way to
 let them back in.
+
+**Selects preserve a value they have no option for.** Assigning an unknown
+value to a `<select>` silently leaves it on the first option, and the next save
+writes *that* — replacing the wall's real setting with the top of a list nobody
+chose. Four fields are stored verbatim by the device and can legitimately hold a
+value this page never listed: the POSIX timezone, the no-flights mode, the panel
+driver chip and the I2S clock. An unlisted value is kept and labelled
+`Custom — <value>`, exactly as the device's own page does.
+
+The timezone in particular is a **named dropdown, not a text box**. The device
+wants a POSIX TZ spec like `EST5EDT,M3.2.0,M11.1.0`; a free-text field invited an
+IANA name like `America/New_York`, which libc cannot parse — the wall would fall
+back to UTC and the day/night schedule would drift by hours with nothing on
+screen to say why.
 
 **Admin sections are absent, not greyed out**, unless the password signed in with
 was the admin one. Disabling them still rendered every field, and the values were
