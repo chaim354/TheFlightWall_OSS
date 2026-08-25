@@ -30,6 +30,13 @@ void SerialConsole::begin()
     Serial.println("FlightWall serial console ready. Type 'help' for commands.");
 }
 
+int SerialConsole::consumePanelOutputRequest()
+{
+    const int r = _panelOutputRequest;
+    _panelOutputRequest = -1;
+    return r;
+}
+
 bool SerialConsole::consumeSettingsChanged()
 {
     if (_settingsChanged)
@@ -151,6 +158,7 @@ void SerialConsole::printHelp()
         "  set <json>                    apply a settings JSON document\n"
         "  save                          persist settings\n"
         "  erase                         reset to defaults\n"
+        "  panel <on|off>                start/stop panel DMA (diagnostic)\n"
         "  restart                       reboot"));
 }
 
@@ -358,6 +366,25 @@ void SerialConsole::handleLine(String line)
         g_settings.save();
         _settingsChanged = true;
         Serial.println(F("Settings reset to defaults. Type 'restart'."));
+    }
+    else if (cmd == "panel")
+    {
+        args.trim();
+        args.toLowerCase();
+        if (args == "off")
+        {
+            _panelOutputRequest = 0;
+            Serial.println(F("Panel DMA will stop. The radio has the bus; the display goes dark."));
+        }
+        else if (args == "on")
+        {
+            _panelOutputRequest = 1;
+            Serial.println(F("Panel DMA will restart."));
+        }
+        else
+        {
+            Serial.println(F("usage: panel <on|off>   (diagnostic; not persisted, a reboot restores it)"));
+        }
     }
     else if (cmd == "restart")
     {

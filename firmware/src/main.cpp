@@ -1054,6 +1054,22 @@ void loop()
     // Publish the RESOLVED state right after it is computed, so the API can
     // explain a dark panel instead of merely showing settings that say it
     // should be lit.
+    // Diagnostic panel-DMA toggle from the serial console. Halts the I2S
+    // output rather than the brightness, so it is the only way to measure the
+    // radio with the panel's DMA genuinely off -- see SerialConsole.h for why
+    // that measurement was needed. Not persisted; a reboot restores output.
+    const int panelReq = g_console.consumePanelOutputRequest();
+    if (panelReq == 0)
+    {
+        Serial.println("[diag] panel DMA stopped; radio has the bus");
+        g_display.stopOutput();
+    }
+    else if (panelReq == 1)
+    {
+        Serial.println("[diag] panel DMA restarted");
+        g_display.startOutput();
+    }
+
     g_web.setPanelState(g_appliedBrightness, g_panelOff, g_manualBrightness);
 
     // Self-heal: in STA mode, if WiFi stays down for >60s (auto-reconnect failed,
