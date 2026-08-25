@@ -629,8 +629,23 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
     }
   };
 
-  const trackedTimer = trackedStorage
-    ? setInterval(() => {
+  /**
+   * One tracked pass: calendar sync, then the lifecycle tick.
+   *
+   * Named and called at boot as well as on the interval, mirroring
+   * refreshTick above. Without the boot call every redeploy cost up to a full
+   * TRACKED_TICK_MS of tracking, because setInterval does not fire until the
+   * first period has elapsed -- so a flight added minutes before a deploy sat
+   * correct-but-unexecuted, looking indistinguishable from a broken feature.
+   * Observed twice on 2026-08-25 while shipping other fixes, on AA3964 and
+   * FZ965; in both cases decideTracked was already returning the right action
+   * and nothing had run it. It also means a redeploy picks the calendar up at
+   * once rather than an hour later.
+   */
+  const trackedPass = (): void => {
+    // Also what narrows trackedStorage for the closure below; the inline
+    // version this replaced got that from the ternary it lived in.
+    if (!trackedStorage) return;
         const today = new Date().getUTCDate();
         if (today !== resolveDay) {
           resolveDay = today;
@@ -669,8 +684,10 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
             }),
           )
           .catch((e) => console.error('tracked tick failed:', e instanceof Error ? e.message : String(e)));
-      }, TRACKED_TICK_MS)
-    : undefined;
+  };
+
+  trackedPass(); // once at boot, like refreshTick; no-ops without storage
+  const trackedTimer = trackedStorage ? setInterval(trackedPass, TRACKED_TICK_MS) : undefined;
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
