@@ -366,6 +366,65 @@ void WebConfigServer::handleRestart()
 // also talking over the setup AP, on a radio the HUB75 panel is degrading (see
 // HANDOFF 1). Every byte and every round trip is a chance to lose the session,
 // so this page has no <script>, no <img>, and no second request.
+// Runs a scan and appends the results as links into `html`.
+//
+// Scanning needs the STA interface up, and in setup mode only the AP is. Going
+// through AP_STA rather than STA keeps the access point serving the very page
+// that asked for this -- switching to plain STA would tear it down and take the
+// request with it. The interface is left enabled afterwards: flipping it back
+// off is another radio transition for no benefit, and the next thing this page
+// does is reboot into STA anyway.
+void WebConfigServer::appendScanList(String &html)
+{
+    if (_apMode)
+        WiFi.mode(WIFI_AP_STA);
+
+    const int n = WiFi.scanNetworks();
+    if (n <= 0)
+    {
+        html += F("<p><b>No networks found.</b> Type the name in below, or "
+                  "<a href=\"/setup?scan=1\" style=\"color:#7bf\">scan again</a>.</p>");
+        WiFi.scanDelete();
+        return;
+    }
+
+    std::vector<int> idx;
+    for (int i = 0; i < n; ++i)
+        idx.push_back(i);
+    std::sort(idx.begin(), idx.end(), [](int a, int b)
+              { return WiFi.RSSI(a) > WiFi.RSSI(b); });
+
+    html += F("<p>Tap a network to fill it in:</p><p style=\"line-height:2\">");
+    std::vector<String> seen;
+    for (int i : idx)
+    {
+        if (seen.size() >= 15) // a captive WebView is not the place for 40 rows
+            break;
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0)
+            continue; // hidden
+        bool dup = false;
+        for (auto &sn : seen)
+            if (sn == ssid)
+            {
+                dup = true;
+                break;
+            }
+        if (dup)
+            continue; // band-steered duplicates
+        seen.push_back(ssid);
+
+        html += F("<a style=\"color:#7bf;display:block\" href=\"/setup?ssid=");
+        appendUrlEncoded(html, ssid.c_str());
+        html += F("\">");
+        appendHtmlEscaped(html, ssid.c_str());
+        html += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? F(" (open)") : F("");
+        html += F("</a>");
+    }
+    html += F("</p>");
+    WiFi.scanDelete();
+}
+
 void WebConfigServer::handleSetupPage(const char *banner)
 {
     String html;
@@ -393,10 +452,38 @@ void WebConfigServer::handleSetupPage(const char *banner)
     // same page is served at the STA address and via flightwall.local -- an
     // absolute action would post the form back to the wrong host in two of
     // those three cases.
+    // Network picker, server-rendered. No JavaScript on purpose: this page is
+    // the one the captive-portal WebView has to cope with, and the whole reason
+    // it is separate from "/" is that the WebView cannot be trusted with
+    // fetch(). So "scan" is a plain link back to this page, and each result is
+    // a plain link that prefills the field below.
+    //
+    // The scan is NOT free: it puts the radio on other channels for a couple of
+    // seconds, and the AP's own beacons stop while that happens. On a device
+    // whose association is already marginal that can drop the very client
+    // asking for the list, which is why it happens only when someone asks.
+    {
+        const bool wantScan = _server.hasArg("scan");
+        if (wantScan)
+        {
+            html += F("<p>Scanning...</p>");
+            appendScanList(html);
+        }
+        else
+        {
+            html += F("<p><a href=\"/setup?scan=1\" style=\"color:#7bf\">Scan for networks</a>"
+                      " &mdash; takes a few seconds, and the setup network drops out while it runs.</p>");
+        }
+    }
+
     html += F("<form method=POST action=\"/setup\">"
               "<label for=s>Network name</label>"
               "<input id=s name=ssid autocapitalize=none autocorrect=off spellcheck=false value=\"");
-    appendHtmlEscaped(html, g_settings.wifiSsid.c_str());
+    // A picked network prefills the field; otherwise the stored SSID does.
+    if (_server.hasArg("ssid"))
+        appendHtmlEscaped(html, _server.arg("ssid").c_str());
+    else
+        appendHtmlEscaped(html, g_settings.wifiSsid.c_str());
     html += F("\"><label for=p>Password</label>"
               "<input id=p name=pw type=password autocapitalize=none autocorrect=off spellcheck=false>"
               "<p>Leave the password blank to keep the one already stored. "
@@ -481,8 +568,24 @@ void WebConfigServer::handleNotFound()
     // from the link on /setup and by typing the address.
     if (_apMode)
     {
-        _server.sendHeader("Location", String("http://") + _ip + "/setup", true);
-        _server.send(302, "text/plain", "");
+        // Serve the form ITSELF, 200, rather than redirecting to it.
+        //
+        // This is the request a phone fires on joining an open network --
+        // captive.apple.com/hotspot-detect.html on iOS/macOS, /generate_204 on
+        // Android, /connecttest.txt on Windows -- and every one of them decides
+        // "this network is captive" by getting back something OTHER than the
+        // exact success response it expected. A 302 qualifies, and iOS does
+        // follow it, but that is one extra round trip inside the captive
+        // WebView before anything is on screen, on a device whose association
+        // has already been slow. Answering with the page directly makes the
+        // sheet open showing the form.
+        //
+        // No-store because a probe response that gets cached is a portal that
+        // stops appearing on the next join -- and the client would then believe
+        // it already has internet.
+        _server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        _server.sendHeader("Pragma", "no-cache");
+        handleSetupPage(nullptr);
         return;
     }
     handleRoot();
