@@ -26,6 +26,12 @@ const NAMES: Readonly<Record<string, string>> = {
   LA: 'LATAM', CM: 'Copa', TP: 'TAP', SK: 'SAS', AY: 'Finnair', LX: 'SWISS',
   OS: 'Austrian', SN: 'Brussels', AZ: 'ITA', VY: 'Vueling', FR: 'Ryanair',
   U2: 'easyJet', WS: 'WestJet', PD: 'Porter', FX: 'FedEx', '5X': 'UPS',
+  // Norse Atlantic UK (ICAO UBT), which flies LGW-JFK daily and rendered with
+  // a route and no airline. It falls through BOTH tables: absent here, and the
+  // device's operating-carrier table carries NBT -- Norse Atlantic Airways,
+  // the Norwegian AOC -- but not UBT, its UK sibling. Adding it here rather
+  // than only on the device also means no flash to fix a name.
+  Z0: 'Norse Atlantic',
 };
 
 export function airlineName(carrierIata: string): string | null {
