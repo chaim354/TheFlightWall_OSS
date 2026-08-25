@@ -314,6 +314,24 @@ this is not an exposure, but it breaks the convention -- move them into op when
 convenient. Note the original `credentials (1).json` may still be in
 `~/Downloads`.
 
+**An entry's `date` changed meaning on 2026-08-24: it is now the calendar date
+at the DEPARTURE AIRPORT, not in UTC.** Entries written under the old convention
+carry a UTC date and nothing rewrites them, so a pre-change entry that has not
+yet resolved can match the wrong leg -- for an evening departure west of
+Greenwich the two dates are a day apart, and the local reading of a UTC-dated
+entry is the NEXT day's flight. Harmless in practice this time: the store was
+empty when it deployed, and the only entry since was added under the new rule.
+It is recorded because the same hazard returns for anyone restoring an old
+tracked.json from a backup -- delete and re-add is the fix, as it is for every
+other missing-field case below.
+
+Two smaller shape changes landed with it, both additive: a card's `cs` is now
+the ICAO callsign (`DAL1732`) rather than the IATA number typed into the form,
+which is what lets the device find an airline logo tile at all; and
+`aircraftType` (hexdb.io's ICAO type code, e.g. `B752`) is preferred over
+`aircraftModel` for the card's aircraft line, falling back to the model name
+when hexdb has nothing.
+
 **No schema migration for stored entries.** A `TrackedEntry` written before a
 field existed simply lacks it, and nothing backfills. This bit once already:
 entries resolved before `aircraftModel` was added served a card with no aircraft
