@@ -257,3 +257,53 @@ describe('decideTracked - terminal states expire', () => {
     expect(decideTracked(entry({ state: 'expired' }), DAY_START)).toEqual({ state: 'expired', action: 'drop' });
   });
 });
+
+describe('hexless past departure: sweep live ADS-B before giving up', () => {
+  // Local to this block; the `dep` above belongs to another describe.
+  const dep = DAY_START + 18 * HOUR;
+  // AeroDataBox has no aircraft for many regional flights, so the entry
+  // resolves with a route and nothing to poll. Rather than declaring it dead,
+  // ask live ADS-B where the flight number is -- see findHex.ts for why the
+  // digits are the only derivable link from AA3964 to ENY3964.
+  const withRoute = (over = {}) =>
+    entry({
+      state: 'resolved', icao24: null, reresolved: true,
+      schedDepEpoch: dep / 1000, schedArrEpoch: (dep + 3 * HOUR) / 1000,
+      orig: { lat: 41.067, lon: -73.7076 }, dest: { lat: 41.9786, lon: -87.9048 },
+      ...over,
+    });
+
+  it('asks ADS-B for the hex once the flight should be airborne', () => {
+    expect(decideTracked(withRoute(), dep + 5 * 60_000)).toEqual({
+      state: 'resolved',
+      action: 'findhex',
+    });
+  });
+
+  it('gives up with a reason once the flight should have landed', () => {
+    // Past arrival there is nothing left to find in the air, so this stops
+    // sweeping rather than searching an empty sky until the date backstop.
+    expect(decideTracked(withRoute(), dep + 4 * HOUR)).toEqual({
+      state: 'unresolved',
+      action: 'none',
+      reason: 'no aircraft broadcasting this flight number could be found',
+    });
+  });
+
+  it('does not sweep without a route to estimate a position from', () => {
+    // searchCentre needs both ends and both times; half a route gives a
+    // position worse than no position, so there is nothing to search near.
+    expect(decideTracked(withRoute({ dest: null }), dep + 5 * 60_000)).toEqual({
+      state: 'unresolved',
+      action: 'none',
+      reason: 'resolved without an aircraft to follow (no Mode S hex)',
+    });
+  });
+
+  it('polls normally the moment a hex is known', () => {
+    expect(decideTracked(withRoute({ icao24: '4008f3' }), dep + 5 * 60_000)).toEqual({
+      state: 'airborne',
+      action: 'poll',
+    });
+  });
+});

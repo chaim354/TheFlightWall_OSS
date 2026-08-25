@@ -245,3 +245,55 @@ describe('the OpenSky budget is a CONCURRENCY limit, not a store-size one', () =
     expect(last.state).toBe('airborne');
   });
 });
+
+describe('performing the ADS-B hex sweep', () => {
+  const dep = DAY_START + 18 * 3600_000;
+  const hexless = entry({
+    state: 'resolved', icao24: null, reresolved: true,
+    schedDepEpoch: dep / 1000, schedArrEpoch: (dep + 3 * 3600_000) / 1000,
+    orig: { lat: 41.067, lon: -73.7076 }, dest: { lat: 41.9786, lon: -87.9048 },
+  });
+
+  it('adopts the hex it finds and goes airborne on the same tick', async () => {
+    const store = memStore([hexless]);
+    const findHex = vi.fn().mockResolvedValue({
+      hex: 'a23138', callsign: 'ENY3964', registration: 'N240NN', typeIcao: 'E75L',
+    });
+    await runTrackedTick(store, dep + 5 * 60_000, {
+      resolve: vi.fn(), position: vi.fn(), resolvesUsedToday: 0, findHex,
+    });
+    const e = store.current[0]!;
+    expect(e.icao24).toBe('a23138');
+    expect(e.callsign).toBe('ENY3964');
+    expect(e.reg).toBe('N240NN');
+    expect(e.aircraftType).toBe('E75L');
+  });
+
+  it('leaves the entry alone when nothing is broadcasting that number', async () => {
+    // Not a failure: the flight may be out of receiver coverage, or late. It
+    // stays resolved and the next tick sweeps again until arrival passes.
+    const store = memStore([hexless]);
+    await runTrackedTick(store, dep + 5 * 60_000, {
+      resolve: vi.fn(), position: vi.fn(), resolvesUsedToday: 0,
+      findHex: vi.fn().mockResolvedValue(null),
+    });
+    const e = store.current[0]!;
+    expect(e.state).toBe('resolved');
+    expect(e.icao24).toBeNull();
+  });
+
+  it('survives a sweep that throws, without killing the tick', async () => {
+    // The second entry is deliberately inert (landed, well inside its 2h
+    // expiry) so this test measures ONE thing: that a throwing sweep does not
+    // stop the tick reaching the entries after it.
+    const store = memStore([
+      hexless,
+      entry({ id: 'other', number: 'BA181', state: 'landed', stateAtMs: dep + 5 * 60_000 }),
+    ]);
+    await runTrackedTick(store, dep + 5 * 60_000, {
+      resolve: vi.fn(), position: vi.fn(), resolvesUsedToday: 0,
+      findHex: vi.fn().mockRejectedValue(new Error('adsb.lol down')),
+    });
+    expect(store.current).toHaveLength(2);
+  });
+});

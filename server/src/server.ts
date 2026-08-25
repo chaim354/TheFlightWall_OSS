@@ -12,6 +12,8 @@ import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
 import { runCalendarSync } from './tracked/sync';
 import { fetchIcs } from './tracked/calendar';
+import { matchByFlightNumber, searchCentre, SEARCH_RADIUS_NM } from './tracked/findHex';
+import { fetchAircraft } from './adsblol';
 import { assetManifest, serveAsset } from './assets';
 import { handleControl, resolveTier, fileControlStorage, type ControlStorage } from './control';
 
@@ -646,6 +648,24 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
               },
               position: (hex) => fetchPosition(hex, openSkyClientId, openSkyClientSecret),
               resolvesUsedToday,
+              // Live ADS-B sweep for a flight the schedule provider gave no
+              // aircraft for. adsb.lol is keyless and free, so this is not
+              // metered the way resolve is -- decideTracked bounds it instead,
+              // asking only while the flight should still be airborne.
+              findHex: async (entry, atMs) => {
+                const centre = searchCentre(
+                  {
+                    orig: entry.orig,
+                    dest: entry.dest,
+                    depMs: entry.schedDepEpoch !== null ? entry.schedDepEpoch * 1000 : null,
+                    arrMs: entry.schedArrEpoch !== null ? entry.schedArrEpoch * 1000 : null,
+                  },
+                  atMs,
+                );
+                if (!centre) return null;
+                const nearby = await fetchAircraft(centre.lat, centre.lon, SEARCH_RADIUS_NM);
+                return matchByFlightNumber(nearby, entry.number);
+              },
             }),
           )
           .catch((e) => console.error('tracked tick failed:', e instanceof Error ? e.message : String(e)));

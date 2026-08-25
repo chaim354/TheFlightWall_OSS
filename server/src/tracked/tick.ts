@@ -1,6 +1,7 @@
 import { decideTracked } from './lifecycle';
 import type { TrackedEntry } from './types';
 import type { TrackedStorage } from './store';
+import type { HexMatch } from './findHex';
 import type { ResolveResult } from './resolve';
 import type { PositionResult } from './opensky';
 
@@ -47,6 +48,13 @@ export interface TrackedDeps {
   resolve(number: string, date: string): Promise<ResolveResult>;
   position(icao24: string): Promise<PositionResult>;
   resolvesUsedToday: number;
+  /**
+   * Sweep live ADS-B for whatever is broadcasting this flight number near
+   * where the schedule says it should be. Optional so every TrackedDeps
+   * literal that predates it still compiles; absent means the sweep is simply
+   * not attempted and the entry follows the no-hex path as before.
+   */
+  findHex?(entry: TrackedEntry, nowMs: number): Promise<HexMatch | null>;
 }
 
 /**
@@ -150,6 +158,43 @@ export async function runTrackedTick(
       } else {
         updated = { ...updated, attempts: updated.attempts + 1 };
       }
+    } else if (d.action === 'findhex') {
+      // Free and keyless (adsb.lol), so this is not metered like resolve --
+      // but it is bounded anyway: decideTracked only asks while the flight
+      // should still be in the air.
+      //
+      // A miss is NOT a failure. The aircraft may be outside receiver
+      // coverage, or running late enough that the estimated position is wrong.
+      // The entry stays resolved and the next tick sweeps again, so this makes
+      // no state change and records no reason on an empty result.
+      let found: HexMatch | null = null;
+      try {
+        found = deps.findHex ? await deps.findHex(updated, nowMs) : null;
+      } catch (err) {
+        // One flight's sweep failing must not take the tick down with it --
+        // the entries after this one still need their positions polled.
+        console.error(
+          `tracked: hex sweep failed for ${e.number} ${e.date}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+      if (found) {
+        changed = true;
+        console.log(`tracked: ${e.number} ${e.date} is flying as ${found.callsign} (${found.hex})`);
+        updated = {
+          ...updated,
+          icao24: found.hex,
+          // Take the callsign, registration and type too: the entry had none
+          // of them (that is why it needed this), and the panel derives the
+          // operator and its logo tile from the callsign's first three
+          // letters. Without it a pinned card renders with no logo at all.
+          callsign: updated.callsign ?? found.callsign,
+          reg: updated.reg ?? found.registration,
+          aircraftType: updated.aircraftType ?? found.typeIcao,
+        };
+      }
+      next.push(updated);
+      continue;
     } else if (d.action === 'poll' && updated.icao24) {
       if (polled >= MAX_AIRBORNE_POLLS) {
         // Keep the entry exactly as it is: still airborne, still holding its

@@ -165,13 +165,29 @@ export function decideTracked(
       // why. That is precisely what the depMs === null case above refuses to
       // do, and the same argument applies unchanged: an entry that cannot
       // progress must never fail silently.
-      return e.icao24
-        ? { state: 'airborne', action: 'poll' }
-        : {
-            state: 'unresolved',
-            action: 'none',
-            reason: 'resolved without an aircraft to follow (no Mode S hex)',
-          };
+      if (e.icao24) return { state: 'airborne', action: 'poll' };
+
+      // No hex, but the flight should be in the air RIGHT NOW and we know
+      // where it ought to be -- so ask live ADS-B what is flying this number
+      // there. AeroDataBox has no aircraft for many regional flights, and
+      // nothing in the pipeline can derive the operating callsign from the
+      // marketing number; the flight number's digits are the only link, and a
+      // sweep of the estimated position turns them into a hex. See findHex.ts.
+      //
+      // Bounded by the arrival estimate rather than by a retry counter: past
+      // arrival there is nothing left in the air to find, so it stops instead
+      // of sweeping an empty sky until the date backstop.
+      const arrEstMs = e.schedArrEpoch !== null ? e.schedArrEpoch * 1000 : null;
+      const searchable = e.orig !== null && e.dest !== null && arrEstMs !== null;
+      if (searchable && nowMs < arrEstMs) return { state: 'resolved', action: 'findhex' };
+
+      return {
+        state: 'unresolved',
+        action: 'none',
+        reason: searchable
+          ? 'no aircraft broadcasting this flight number could be found'
+          : 'resolved without an aircraft to follow (no Mode S hex)',
+      };
     }
     if (!e.reresolved && nowMs >= depMs - RERESOLVE_LEAD_MS) {
       return { state: 'resolved', action: 'reresolve' };

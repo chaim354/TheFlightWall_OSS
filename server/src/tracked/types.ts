@@ -9,7 +9,7 @@ export type TrackedState =
 
 /** What the caller should DO about an entry this tick. Separate from state so
  * the state machine stays pure: it never performs the call it asks for. */
-export type TrackedAction = 'none' | 'resolve' | 'reresolve' | 'poll' | 'drop';
+export type TrackedAction = 'none' | 'resolve' | 'reresolve' | 'poll' | 'findhex' | 'drop';
 
 export interface LatLon {
   lat: number;
