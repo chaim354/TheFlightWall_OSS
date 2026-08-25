@@ -93,6 +93,9 @@ public:
     // by elimination before a USB cable finally produced `download failed
     // (-11)`. That string is the whole diagnosis, and it should never again
     // require going to the wall to read it.
+    // Why the chip last restarted; see resetReasonText() in main.cpp for why
+    // this is the field that separates a brownout from a crash.
+    void setResetReason(const char *r) { _resetReason = r; }
     void setLastOtaError(const String &err) { _lastOtaError = err; }
     const String &lastOtaError() const { return _lastOtaError; }
 
@@ -111,6 +114,7 @@ private:
     int _lightLevel = -1;
     bool _lightDark = false;
     String _lastOtaError;
+    String _resetReason;
     int _panelBrightness = -1;   // resolved, -1 until the first applyBrightness()
     bool _panelOff = false;      // the button-A toggle
     int _manualBrightness = -1;  // a button ramp, -1 when none is in force

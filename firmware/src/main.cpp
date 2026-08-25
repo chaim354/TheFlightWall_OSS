@@ -35,6 +35,7 @@ Run loop:
 #include "core/HttpJson.h"
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
+#include "esp_system.h"
 #include "adapters/OpenSkyFetcher.h"
 #include "adapters/FlightRadar24Fetcher.h"
 #include "adapters/AdsbLolFetcher.h"
@@ -75,6 +76,10 @@ static bool g_panelOff = false;
 static uint32_t g_lastAutoStateKey = 0;
 static unsigned long g_settingsDirtyMs = 0;
 static unsigned long g_lastLightMs = 0;
+
+// Defined beside setup(), where the boot log prints it; declared here because
+// the check-in document below is built earlier in the file.
+static const char *resetReasonText();
 
 static const char *kMdnsHostname = "flightwall"; // reachable at http://flightwall.local
 static bool g_apMode = false;
@@ -696,6 +701,7 @@ static void controlCheckIn()
     // reason it exists is that the remote page is the ONLY channel to a
     // wall-mounted board with no cable in it.
     doc["otaError"] = g_web.lastOtaError();
+    doc["resetReason"] = resetReasonText();
 
     // The device's own settings, redacted exactly as /api/settings redacts them.
     //
@@ -878,10 +884,48 @@ static bool fetchSuppressedWhileDark()
 // setup()/loop() without colliding with the firmware's.
 #ifndef PIO_UNIT_TESTING
 
+/**
+ * Why the chip restarted, as a short string.
+ *
+ * THE ONE FIELD THAT SEPARATES A BROWNOUT FROM A CRASH, and its absence cost a
+ * whole evening on 2026-08-25. The board repeatedly went unreachable -- WiFi
+ * AND its USB CDC port at once -- and nothing on the device could say whether
+ * the supply had sagged or the firmware had panicked. Both fit every other
+ * symptom, so two hardware diagnoses were argued from ping statistics and both
+ * were wrong.
+ *
+ * ESP_RST_BROWNOUT means the rail sagged: fix the supply, not the code.
+ * ESP_RST_PANIC / INT_WDT / TASK_WDT mean the firmware died: a supply is
+ * blameless. ESP_RST_POWERON after an unattended drop means it lost power
+ * outright. Reported in /api/status and the check-in, so it can be read
+ * without a cable -- which matters because a crash takes the cable away too.
+ */
+static const char *resetReasonText()
+{
+    switch (esp_reset_reason())
+    {
+    case ESP_RST_POWERON:   return "power-on";
+    case ESP_RST_EXT:       return "external reset";
+    case ESP_RST_SW:        return "software restart";
+    case ESP_RST_PANIC:     return "PANIC (firmware crash)";
+    case ESP_RST_INT_WDT:   return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:  return "task watchdog";
+    case ESP_RST_WDT:       return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep wake";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT (supply sagged)";
+    case ESP_RST_SDIO:      return "sdio";
+    default:                return "unknown";
+    }
+}
+
 void setup()
 {
     Serial.begin(115200);
     delay(200);
+
+    // First line out of the gate, before anything can fail and hide it.
+    Serial.printf("[boot] reset reason: %s\n", resetReasonText());
+    g_web.setResetReason(resetReasonText());
 
     // [boot] Confirm PSRAM initialized: 0/false on the plain ESP32; ~8MB on the S3
     // N16R8. A 0 here on the S3 means memory_type is wrong -> the TLS-in-PSRAM fix

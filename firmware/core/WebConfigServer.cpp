@@ -294,6 +294,7 @@ void WebConfigServer::handleGetStatus()
     doc["freePsram"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["lightLevel"] = _lightLevel;
     doc["otaError"] = _lastOtaError;
+    doc["resetReason"] = _resetReason;
     doc["lightDark"] = _lightDark;
     // Why the panel looks the way it does, resolved rather than configured.
     // `panelBrightness` is applyBrightness()'s output -- 0 means dark for SOME
