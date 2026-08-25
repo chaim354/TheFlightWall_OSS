@@ -19,9 +19,34 @@ export interface LatLon {
 /** What resolve.ts returns on success. */
 export interface ResolvedFlight {
   icao24: string | null;
+  /**
+   * The OPERATING carrier's ADS-B callsign, e.g. "BAW181" for BA181.
+   *
+   * AeroDataBox returns it as `callSign` and it was being discarded. It is what
+   * makes a pinned card look like every other card: the device derives the
+   * operator (and so the logo tile, and the airline name when nothing else
+   * supplies one) by taking the first three letters of the callsign, which
+   * only works on the ICAO form. A tracked entry's `number` is the IATA form
+   * the user typed -- "DL1732" -- whose first three characters are "DL1", so
+   * the parse failed and the card rendered with no logo at all.
+   *
+   * Operating, not marketing, and that is correct: a Delta-sold flight actually
+   * flown by Endeavor squawks EDV, so the tile matches the aircraft overhead
+   * while `al` still says who sold the seat.
+   */
+  callsign: string | null;
   reg: string | null;
   /** e.g. "Boeing 777-300ER Passenger" -- AeroDataBox's aircraft.model. */
   aircraftModel: string | null;
+  /**
+   * ICAO type code, e.g. "B77W" -- hexdb.io, keyed on the hex above.
+   *
+   * The field the panel actually renders, because it is the one an AREA card
+   * carries (adsb.lol's typeIcao) and a pinned card should not name the same
+   * aircraft in a different vocabulary. aircraftModel is kept as the fallback
+   * for when hexdb has nothing: see src/tracked/aircraftType.ts.
+   */
+  aircraftType: string | null;
   origIata: string | null;
   destIata: string | null;
   orig: LatLon | null;
@@ -46,8 +71,14 @@ export interface TrackedEntry {
   /** True once resolve #2 has run, so it runs at most once. */
   reresolved: boolean;
   icao24: string | null;
+  /** Operating ADS-B callsign; see ResolvedFlight.callsign. Null on entries
+   * resolved before this field existed -- serve.ts falls back to `number`. */
+  callsign: string | null;
   reg: string | null;
   aircraftModel: string | null;
+  /** ICAO type code; see ResolvedFlight.aircraftType. Null on entries resolved
+   * before this field existed, and whenever hexdb has no answer. */
+  aircraftType: string | null;
   origIata: string | null;
   destIata: string | null;
   orig: LatLon | null;

@@ -1,5 +1,5 @@
 import { MAX_ENTRIES, WINDOW_FUTURE_DAYS, WINDOW_PAST_DAYS } from './routes';
-import { EXPIRE_AFTER_LANDED_MS, EXPIRE_AFTER_UNRESOLVED_MS } from './lifecycle';
+import { EXPIRE_AFTER_LANDED_MS, EXPIRE_AFTER_UNRESOLVED_MS, MAX_TZ_LEAD_MS } from './lifecycle';
 import { FIX_FRESH_MS } from './serve';
 
 /**
@@ -110,7 +110,7 @@ export const trackedPage = `<!doctype html>
         <input id="num" placeholder="BA181" autocomplete="off" spellcheck="false" autocapitalize="characters" />
       </div>
       <div>
-        <label for="date">Departure date (UTC)</label>
+        <label for="date">Departure date</label>
         <input id="date" type="date" />
       </div>
       <div style="flex:0 0 auto">
@@ -119,9 +119,10 @@ export const trackedPage = `<!doctype html>
     </div>
     <div class="err" id="addErr"></div>
     <small class="help">One journey, not a subscription: a flight number plus the single date it departs.
-      The date is the departure's date <b>in UTC</b> — for an evening departure west of Greenwich that is
-      already tomorrow. Watching costs nothing until that date begins; the flight is looked up then, and
-      followed live once it is in the air. Entries remove themselves a couple of hours after landing.</small>
+      The date is the one <b>on the boarding pass</b> — local to the departure airport, so a 20:55
+      departure from JFK is the 24th even though it is already the 25th in UTC. Watching costs nothing
+      until that date begins; the flight is looked up then, and followed live once it is in the air.
+      Entries remove themselves a couple of hours after landing.</small>
   </div>
 
   <div class="card">
@@ -142,6 +143,7 @@ var WINDOW_PAST_DAYS = ${WINDOW_PAST_DAYS};
 var WINDOW_FUTURE_DAYS = ${WINDOW_FUTURE_DAYS};
 var EXPIRE_LANDED_MS = ${EXPIRE_AFTER_LANDED_MS};
 var EXPIRE_UNRESOLVED_MS = ${EXPIRE_AFTER_UNRESOLVED_MS};
+var TZ_LEAD_MS = ${MAX_TZ_LEAD_MS};
 
 function $(id){ return document.getElementById(id); }
 
@@ -164,6 +166,26 @@ function esc(s){
 }
 
 function pad2(n){ return (n < 10 ? '0' : '') + n; }
+
+// The browser's own calendar date, offset by whole days. Local, not UTC: the
+// date field means the date at the DEPARTURE airport, and this page's reader is
+// far more often in that airport's timezone than in UTC. It cannot be exact for
+// a flight leaving the other side of the world -- nothing here knows which
+// airport that is until the flight resolves -- so it is a sensible default and
+// a generous bound, not a claim.
+function localDay(offsetDays){
+  var d = new Date(Date.now() + offsetDays * DAY_MS);
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
+// The UTC calendar date, offset by whole days -- what the server's own window
+// check is measured against (routes.ts compares startOfUtcDay to UTC today).
+// The BOUNDS use this and the DEFAULT uses localDay above, deliberately: the
+// default should be the date the reader is living in, but a bound that does not
+// match the validator is worse than no bound, because it offers a date the POST
+// then refuses. Late evening in New York is exactly when they disagree -- local
+// 24th, UTC already the 25th -- and a local-dated min would have offered the
+// 23rd, which the server rejects as in the past.
 function utcDay(offsetDays){ return new Date(Date.now() + offsetDays * DAY_MS).toISOString().slice(0, 10); }
 
 // Local wall-clock time, with the UTC instant on the title attribute. Neither
@@ -268,10 +290,14 @@ function panelLine(e, now){
 
 function statusLine(e, now){
   if (e.state === 'pending') {
-    var startsMs = Date.parse(e.date + 'T00:00:00Z');
+    // The lifecycle starts resolving TZ_LEAD_MS before 00:00 UTC on the date,
+    // because the date is local to the departure airport and that airport may
+    // be as far ahead as UTC+14. Saying "nothing spent yet" past that point
+    // would be describing a lookup that has already been paid for.
+    var startsMs = Date.parse(e.date + 'T00:00:00Z') - TZ_LEAD_MS;
     var waiting = isFinite(startsMs) && now < startsMs;
     return line(waiting
-      ? 'Nothing spent yet — the aircraft is looked up when ' + esc(e.date) + ' begins (UTC).'
+      ? 'Nothing spent yet — the aircraft is looked up when ' + esc(e.date) + ' begins.'
       : 'Looking up the aircraft — this happens on the next tick, within about five minutes.');
   }
   if (e.state === 'resolved') return line('Aircraft known. Polling starts at the scheduled departure.');
@@ -429,7 +455,7 @@ $('date').addEventListener('keydown', function(ev){ if (ev.key === 'Enter') add(
 // offer a date the POST would reject.
 $('date').min = utcDay(-WINDOW_PAST_DAYS);
 $('date').max = utcDay(WINDOW_FUTURE_DAYS);
-$('date').value = utcDay(0);
+$('date').value = localDay(0);
 
 poll();
 </script>

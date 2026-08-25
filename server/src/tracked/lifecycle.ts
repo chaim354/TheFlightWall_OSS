@@ -17,6 +17,25 @@ const MAX_AIRBORNE_MS = 20 * 60 * 60_000;
 /** Backstop for an entry stuck in a non-terminal state by a bug. */
 const EXPIRE_AFTER_DATE_MS = 24 * 60 * 60_000;
 
+/**
+ * How far BEFORE 00:00 UTC on the entry's date the first resolve may run.
+ *
+ * An entry's `date` is the calendar date at the DEPARTURE AIRPORT (see
+ * resolve.ts), so the instant that date begins depends on the airport's offset:
+ * local midnight is 10:00Z the previous day at UTC+14, and noon on the day
+ * itself at UTC-12. Keying the resolve on 00:00 UTC alone therefore fires too
+ * LATE for anywhere east of Greenwich -- a 07:00 departure from Tokyo on the
+ * 25th is 22:00Z on the 24th, so a trigger at 00:00Z on the 25th lands two
+ * hours after the aircraft left, and the flight is missed for the first leg of
+ * its journey.
+ *
+ * 14 hours is the largest real offset (UTC+14, Kiribati), so this covers every
+ * timezone there is. Resolving earlier costs nothing -- it is the same single
+ * call, and the one re-resolve an hour before departure is what actually
+ * catches a tail swap, so an early first answer is not a stale one.
+ */
+export const MAX_TZ_LEAD_MS = 14 * 60 * 60_000;
+
 export interface TrackedDecision {
   state: TrackedState;
   action: TrackedAction;
@@ -91,7 +110,7 @@ export function decideTracked(
 
   if (e.state === 'pending') {
     if (Number.isNaN(dayStart)) return { state: 'pending', action: 'none' };
-    return nowMs >= dayStart
+    return nowMs >= dayStart - MAX_TZ_LEAD_MS
       ? { state: 'pending', action: 'resolve' }
       : { state: 'pending', action: 'none' };
   }

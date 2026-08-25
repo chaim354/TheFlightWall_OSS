@@ -11,8 +11,8 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 const sample = (id: string): TrackedEntry => ({
   id, number: 'BA181', date: '2026-09-14', state: 'pending', reason: null,
-  attempts: 0, stateAtMs: 0, reresolved: false, icao24: null, reg: null,
-  aircraftModel: null, origIata: null, destIata: null, orig: null, dest: null,
+  attempts: 0, stateAtMs: 0, reresolved: false, icao24: null, callsign: null, reg: null,
+  aircraftModel: null, aircraftType: null, origIata: null, destIata: null, orig: null, dest: null,
   schedDepEpoch: null, schedArrEpoch: null,
   lastLat: null, lastLon: null, lastPosAtMs: null,
   lastAltFt: null, lastGroundspeedKt: null, lastHeadingDeg: null, lastVerticalRateFpm: null,
