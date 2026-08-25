@@ -238,6 +238,17 @@
       <b>A:</b> click = panel off/on · hold = brighter &nbsp;|&nbsp; <b>B:</b> click = cycle no-flights mode · hold = dimmer<br>
       A held brightness overrides the schedule and the light sensor until the next automatic change.</small>
 
+    <div class="sec">Web UI</div>
+    <small class="help" id="uiSource">…</small>
+    <div class="bar" style="margin-top:8px">
+      <button class="ghost" type="button" onclick="updateUi()">Update from server</button>
+      <button class="ghost" type="button" onclick="clearUi()">Use built-in</button>
+    </div>
+    <small class="help">This page can be downloaded from your FlightWall server instead of being
+      reflashed, so a UI change no longer costs a cable and your settings. The built-in copy is never
+      overwritten — it is what you get if the download fails its checksum or the server is unreachable,
+      and <b>Use built-in</b> goes back to it at any time.</small>
+
     <div class="sec">Flight list</div>
     <div class="row">
       <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
@@ -501,6 +512,27 @@ async function save(){
   toast(j.ok ? 'Saved ✓' : ('Error: '+(j.error||'failed')));
 }
 
+async function updateUi(){
+  toast('Checking the server…');
+  try{
+    const j = await (await fetch('/api/updateui',{method:'POST'})).json();
+    if(!j.ok){ toast('Update failed: '+(j.error||'unknown')); return; }
+    // Reload only when the bytes actually changed -- a no-op reload looks like
+    // a failure to anyone watching, and the device says which happened.
+    if(j.changed){ toast('Updated ✓ reloading'); setTimeout(()=>location.reload(true), 900); }
+    else toast('Already up to date');
+  }catch(e){ toast('Could not reach the device'); }
+}
+
+async function clearUi(){
+  if(!confirm('Go back to the web page built into the firmware?')) return;
+  try{
+    const j = await (await fetch('/api/updateui',{method:'DELETE'})).json();
+    toast(j.cleared ? 'Using built-in ✓ reloading' : 'Already using the built-in page');
+    if(j.cleared) setTimeout(()=>location.reload(true), 900);
+  }catch(e){ toast('Could not reach the device'); }
+}
+
 async function restart(){
   if(!confirm('Restart the device?')) return;
   await fetch('/api/restart',{method:'POST'});
@@ -574,6 +606,12 @@ async function loadStatus(){
       ('manualBrightness' in s && s.manualBrightness >= 0
         ? `<span class="pill">manual brightness ${s.manualBrightness}</span>` : '');
     // Board-specific pins, reported by the device (the ESP32 and S3 maps differ).
+    if('uiSource' in s){
+      const el=$('uiSource');
+      if(el) el.innerHTML = s.uiSource === 'server'
+        ? `Serving the page <b>downloaded from your server</b> (${esc((s.uiSha||'').slice(0,12))}…).`
+        : 'Serving the page <b>built into the firmware</b>. Nothing downloaded yet.';
+    }
     if('i2cSda' in s){ const p=$('i2cPins'); if(p) p.textContent = `SDA ${s.i2cSda} / SCL ${s.i2cScl}`; }
     if('adc1Min' in s){ const a=$('adc1Range'); if(a) a.textContent = `${s.adc1Min}-${s.adc1Max}`; }
     if('buttonAPin' in s){ const b=$('btnPins'); if(b) b.textContent = `GPIO ${s.buttonAPin} (A) and GPIO ${s.buttonBPin} (B)`; }
