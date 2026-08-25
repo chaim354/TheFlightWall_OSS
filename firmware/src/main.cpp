@@ -361,7 +361,12 @@ static uint32_t autoStateKey()
         k = k * 3 + (hour < 0 ? 0u : (isNightHour(hour) ? 1u : 2u));
     }
     if (g_settings.lightSensorEnabled)
-        k = k * 3 + (g_light.isDark() ? 1u : 2u);
+        // Guarded by the enable flag, exactly as applyBrightness() guards its use of
+    // the same reading. Unguarded, a switched-off sensor could still flip this
+    // key and retire the user's manual brightness override -- a button ramp
+    // undone by a sensor nobody is listening to, with nothing on screen or in
+    // the API to account for it.
+    k = k * 3 + ((g_settings.lightSensorEnabled && g_light.isDark()) ? 1u : 2u);
     return k;
 }
 
@@ -828,13 +833,35 @@ void loop()
     // Sample the ambient light sensor a few times a second (cheap; works in all
     // modes so the panel auto-dims even on the setup AP).
     const unsigned long nowMs = millis();
-    if (g_settings.lightSensorEnabled && nowMs - g_lastLightMs >= 500)
+    if (g_settings.lightSensorEnabled)
     {
-        g_lastLightMs = nowMs;
-        g_light.update();
-        g_web.setLightStatus(g_light.level(), g_light.isDark());
+        if (nowMs - g_lastLightMs >= 500)
+        {
+            g_lastLightMs = nowMs;
+            g_light.update();
+            g_web.setLightStatus(g_light.level(), g_light.isDark());
+        }
+    }
+    else
+    {
+        // Publish "not consulted" rather than leaving the last verdict standing.
+        //
+        // Sampling stops the moment the sensor is switched off, so whatever it
+        // last decided used to sit in /api/status forever. Disabling a sensor
+        // that had just called the room dark left the API reporting
+        // lightDark:true and lightLevel:0 indefinitely -- a value nothing was
+        // acting on any more, presented identically to a live one, on the only
+        // diagnostic channel this device has. It sent a real investigation
+        // after the sensor while the panel was actually off for another reason
+        // entirely. -1 is the same "no reading" the sensor itself reports when
+        // it cannot be read.
+        g_web.setLightStatus(-1, false);
     }
     applyBrightness();
+    // Publish the RESOLVED state right after it is computed, so the API can
+    // explain a dark panel instead of merely showing settings that say it
+    // should be lit.
+    g_web.setPanelState(g_appliedBrightness, g_panelOff, g_manualBrightness);
 
     // Self-heal: in STA mode, if WiFi stays down for >60s (auto-reconnect failed,
     // e.g. the password changed), reboot. On restart it re-tries the network and

@@ -194,6 +194,13 @@ void WebConfigServer::handleGetStatus()
     doc["freePsram"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["lightLevel"] = _lightLevel;
     doc["lightDark"] = _lightDark;
+    // Why the panel looks the way it does, resolved rather than configured.
+    // `panelBrightness` is applyBrightness()'s output -- 0 means dark for SOME
+    // reason -- and the two fields under it name the reasons that exist only in
+    // RAM and so appear nowhere in /api/settings.
+    doc["panelBrightness"] = _panelBrightness;
+    doc["panelOff"] = _panelOff;
+    doc["manualBrightness"] = _manualBrightness;
     // Board-specific pins so the (single, board-agnostic) web UI can label the light
     // sensor controls truthfully. Hardcoding them in index.html got it wrong on the
     // S3, which has no GPIO 22 and whose ADC1 is 1-10 rather than 32-39.
