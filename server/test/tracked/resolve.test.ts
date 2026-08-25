@@ -21,7 +21,7 @@ const payload = [
 
 describe('parseByNumber', () => {
   it('extracts the hex, registration, route and times', () => {
-    const r = parseByNumber(payload, '2026-09-14');
+    const r = parseByNumber(payload, '2026-09-14', Date.parse('2026-09-14T12:00:00Z'));
     expect(r).not.toBeNull();
     // Lowercased: OpenSky's icao24 is lowercase hex and comparisons elsewhere
     // assume it.
@@ -37,11 +37,11 @@ describe('parseByNumber', () => {
   });
 
   it('accepts a bare object as well as an array', () => {
-    expect(parseByNumber(payload[0]!, '2026-09-14')!.icao24).toBe('4008f3');
+    expect(parseByNumber(payload[0]!, '2026-09-14', Date.parse('2026-09-14T12:00:00Z'))!.icao24).toBe('4008f3');
   });
 
   it('returns null for an empty array (flight not operating that date)', () => {
-    expect(parseByNumber([], '2026-09-14')).toBeNull();
+    expect(parseByNumber([], '2026-09-14', Date.parse('2026-09-14T12:00:00Z'))).toBeNull();
   });
 
   it('returns a row with a null hex rather than null, when modeS is missing', () => {
@@ -50,7 +50,7 @@ describe('parseByNumber', () => {
     // hide the spec's flagged risk that the by-number endpoint may not carry
     // modeS at all.
     const noHex = [{ ...payload[0]!, aircraft: { reg: 'G-STBA', model: 'B777' } }];
-    const r = parseByNumber(noHex, '2026-09-14');
+    const r = parseByNumber(noHex, '2026-09-14', Date.parse('2026-09-14T12:00:00Z'));
     expect(r).not.toBeNull();
     expect(r!.icao24).toBeNull();
     expect(r!.reg).toBe('G-STBA');
@@ -58,7 +58,7 @@ describe('parseByNumber', () => {
 
   it('tolerates missing coordinates without throwing', () => {
     const noCoord = [{ ...payload[0]!, departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-09-14 18:00Z' } } }];
-    const r = parseByNumber(noCoord, '2026-09-14');
+    const r = parseByNumber(noCoord, '2026-09-14', Date.parse('2026-09-14T12:00:00Z'));
     expect(r!.orig).toBeNull();
     expect(r!.origIata).toBe('JFK');
   });
@@ -72,7 +72,7 @@ describe('parseByNumber', () => {
     const real = JSON.parse(
       readFileSync(new URL('../../fixtures/aerodatabox-bynumber.json', import.meta.url), 'utf8'),
     );
-    const r = parseByNumber(real, '2026-08-24');
+    const r = parseByNumber(real, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'));
     expect(r).not.toBeNull();
     expect(r!.icao24).toBe('406947');
     // Against the REAL payload, not a hand-written one: callSign is a field
@@ -97,7 +97,7 @@ describe('parseByNumber', () => {
     const real = JSON.parse(
       readFileSync(new URL('../../fixtures/aerodatabox-bynumber-multileg.json', import.meta.url), 'utf8'),
     );
-    const r = parseByNumber(real, '2026-08-24');
+    const r = parseByNumber(real, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'));
     expect(r).not.toBeNull();
     expect(r!.icao24).toBe('ab20e7');
     expect(r!.origIata).toBe('JFK');
@@ -124,7 +124,7 @@ describe('parseByNumber', () => {
   }];
 
   it('selects by the departure airport local date, not the UTC one', () => {
-    const r = parseByNumber(jfkEvening, '2026-08-24');
+    const r = parseByNumber(jfkEvening, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'));
     expect(r).not.toBeNull();
     expect(r!.icao24).toBe('a997cc');
     expect(r!.origIata).toBe('JFK');
@@ -133,7 +133,7 @@ describe('parseByNumber', () => {
   it('does NOT select that row for the UTC date of the same departure', () => {
     // The old behaviour, now explicitly wrong: asking for the 25th must not
     // return a flight that left on the evening of the 24th.
-    expect(parseByNumber(jfkEvening, '2026-08-25')).toBeNull();
+    expect(parseByNumber(jfkEvening, '2026-08-25', Date.parse('2026-08-25T12:00:00Z'))).toBeNull();
   });
 
   it('falls back to the UTC date when a row carries no local timestamp', () => {
@@ -145,8 +145,8 @@ describe('parseByNumber', () => {
         scheduledTime: { utc: '2026-08-25 00:55Z' },
       },
     }];
-    expect(parseByNumber(noLocal, '2026-08-25')).not.toBeNull();
-    expect(parseByNumber(noLocal, '2026-08-24')).toBeNull();
+    expect(parseByNumber(noLocal, '2026-08-25', Date.parse('2026-08-25T12:00:00Z'))).not.toBeNull();
+    expect(parseByNumber(noLocal, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'))).toBeNull();
   });
 
   it('rejects a cancelled row (AeroDataBox spells it "Canceled", single-l)', () => {
@@ -156,7 +156,7 @@ describe('parseByNumber', () => {
       departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-24 21:20Z' } },
       arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-25 05:55Z' } },
     }];
-    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+    expect(parseByNumber(rows, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'))).toBeNull();
   });
 
   it('also tolerates the double-l "Cancelled" spelling', () => {
@@ -166,7 +166,7 @@ describe('parseByNumber', () => {
       departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-24 21:20Z' } },
       arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-25 05:55Z' } },
     }];
-    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+    expect(parseByNumber(rows, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'))).toBeNull();
   });
 
   it('does not select a row whose scheduled departure falls on a different date', () => {
@@ -178,7 +178,7 @@ describe('parseByNumber', () => {
       departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-23 21:20Z' } },
       arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-24 05:55Z' } },
     }];
-    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+    expect(parseByNumber(rows, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'))).toBeNull();
   });
 
   it('does not select a row with no arrival airport IATA', () => {
@@ -190,7 +190,7 @@ describe('parseByNumber', () => {
       departure: { airport: { iata: 'YYT' }, scheduledTime: { utc: '2026-08-24 12:21Z' } },
       arrival: { airport: { name: 'Unknown' } },
     }];
-    expect(parseByNumber(rows, '2026-08-24')).toBeNull();
+    expect(parseByNumber(rows, '2026-08-24', Date.parse('2026-08-24T12:00:00Z'))).toBeNull();
   });
 
   it('picks the earliest scheduled departure when two rows both qualify', () => {
@@ -206,7 +206,7 @@ describe('parseByNumber', () => {
       departure: { airport: { iata: 'JFK' }, scheduledTime: { utc: '2026-08-24 09:00Z' } },
       arrival: { airport: { iata: 'FCO' }, scheduledTime: { utc: '2026-08-24 17:00Z' } },
     };
-    const r = parseByNumber([later, earlier], '2026-08-24');
+    const r = parseByNumber([later, earlier], '2026-08-24', Date.parse('2026-08-24T12:00:00Z'));
     expect(r).not.toBeNull();
     expect(r!.icao24).toBe('bbbbbb');
   });
@@ -221,7 +221,7 @@ describe('resolveFlight', () => {
       new Response(JSON.stringify(payload), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const r = await resolveFlight('BA181', '2026-09-14', 'KEY');
+    const r = await resolveFlight('BA181', '2026-09-14', 'KEY', Date.parse('2026-09-14T12:00:00Z'));
     expect(r.ok).toBe(true);
     // `expect(r.ok).toBe(true)` doesn't narrow `r` for the type checker --
     // only a real `if` does -- so an explicit guard is needed before `r.flight`
@@ -235,14 +235,14 @@ describe('resolveFlight', () => {
   it('reports not-found as a terminal miss, not a transport error', async () => {
     // The distinction drives retry policy: a 404 must never be retried.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })));
-    const r = await resolveFlight('BA1811', '2026-09-14', 'KEY');
+    const r = await resolveFlight('BA1811', '2026-09-14', 'KEY', Date.parse('2026-09-14T12:00:00Z'));
     expect(r).toEqual({ ok: false, retryable: false, reason: 'not operating 2026-09-14' });
   });
 
   it('reports 5xx and 429 as retryable', async () => {
     for (const status of [429, 500, 503]) {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status })));
-      const r = await resolveFlight('BA181', '2026-09-14', 'KEY');
+      const r = await resolveFlight('BA181', '2026-09-14', 'KEY', Date.parse('2026-09-14T12:00:00Z'));
       expect(r.ok).toBe(false);
       if (r.ok) throw new Error('unreachable: r.ok was asserted false above');
       expect(r.retryable).toBe(true);
@@ -251,13 +251,13 @@ describe('resolveFlight', () => {
 
   it('reports a thrown fetch as retryable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNRESET')));
-    const r = await resolveFlight('BA181', '2026-09-14', 'KEY');
+    const r = await resolveFlight('BA181', '2026-09-14', 'KEY', Date.parse('2026-09-14T12:00:00Z'));
     expect(r).toEqual({ ok: false, retryable: true, reason: 'ECONNRESET' });
   });
 
   it('treats an empty result as terminal, not retryable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })));
-    const r = await resolveFlight('BA181', '2026-09-14', 'KEY');
+    const r = await resolveFlight('BA181', '2026-09-14', 'KEY', Date.parse('2026-09-14T12:00:00Z'));
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('unreachable: r.ok was asserted false above');
     expect(r.retryable).toBe(false);
@@ -276,7 +276,7 @@ describe('a status that only STARTS with "cancel"', () => {
   );
 
   it('drops the cancelled leg and takes the one that is actually flying', () => {
-    const r = parseByNumber(payload, '2026-08-25')!;
+    const r = parseByNumber(payload, '2026-08-25', Date.parse('2026-08-25T12:00:00Z'))!;
     expect(r).not.toBeNull();
     expect(r.origIata).toBe('HPN');
     expect(r.destIata).toBe('ORD');
@@ -285,13 +285,63 @@ describe('a status that only STARTS with "cancel"', () => {
   it('recognises every spelling variant the provider uses', () => {
     for (const status of ['Canceled', 'Cancelled', 'CanceledUncertain', 'CancelledUncertain', 'CANCELED']) {
       const only = [{ ...payload[0], status }];
-      expect(parseByNumber(only, '2026-08-25')).toBeNull();
+      expect(parseByNumber(only, '2026-08-25', Date.parse('2026-08-25T12:00:00Z'))).toBeNull();
     }
   });
 
   it('does not drop a status that merely contains the word later on', () => {
     // Guard against over-matching: only a LEADING "cancel" counts.
     const notCancelled = [{ ...payload[1], status: 'Uncertain' }];
-    expect(parseByNumber(notCancelled, '2026-08-25')).not.toBeNull();
+    expect(parseByNumber(notCancelled, '2026-08-25', Date.parse('2026-08-25T12:00:00Z'))).not.toBeNull();
+  });
+});
+
+describe('choosing among legs that all depart on the requested date', () => {
+  // EK214 is a BOG->MIA->DXB rotation, so one date carries several legs. The
+  // old rule -- "take the earliest scheduled departure" -- is right only while
+  // the earliest leg has not already flown, and silently wrong afterwards.
+  // That is the same shape as the AA3964 failure on 2026-08-25.
+  const rotation = JSON.parse(
+    readFileSync(new URL('../../fixtures/aerodatabox-bynumber-rotation.json', import.meta.url), 'utf8'),
+  );
+  const at = (iso: string) => Date.parse(iso);
+
+  it('takes the leg that is in the air right now', () => {
+    // 23:00Z: BOG->MIA left at 22:15Z and lands 01:50Z. That is the flight.
+    const r = parseByNumber(rotation, '2026-08-25', at('2026-08-25T23:00:00Z'))!;
+    expect(r.origIata).toBe('BOG');
+    expect(r.destIata).toBe('MIA');
+  });
+
+  it('takes the next departure when nothing is airborne yet', () => {
+    // 19:00Z: BOG->MIA has not left. It is next, so it is the answer.
+    const r = parseByNumber(rotation, '2026-08-25', at('2026-08-25T19:00:00Z'))!;
+    expect(r.origIata).toBe('BOG');
+  });
+
+  it('moves on to the following leg once the earlier one has landed', () => {
+    // 02:30Z on the 26th: BOG->MIA landed at 01:50Z. The old rule returned it
+    // anyway -- a landed flight, nothing to track, and no explanation.
+    const r = parseByNumber(rotation, '2026-08-25', at('2026-08-26T02:30:00Z'))!;
+    expect(r.origIata).toBe('MIA');
+    expect(r.destIata).toBe('DXB');
+    expect(r.icao24).toBe('8964a0');
+  });
+
+  it('still excludes a leg that departed on a different date', () => {
+    // The MIA->DXB that left on the 24th is not this date's flight, whatever
+    // the clock says. The date filter runs before any of this.
+    for (const t of ['2026-08-25T19:00:00Z', '2026-08-25T23:00:00Z', '2026-08-26T02:30:00Z']) {
+      expect(parseByNumber(rotation, '2026-08-25', at(t))!.icao24).not.toBe('896450');
+    }
+  });
+
+  it('falls back to the last leg of the day once all of them are down', () => {
+    // Nothing left to prefer. Returning the most recent is more useful than
+    // returning the first, and lifecycle.ts decides what to do about a flight
+    // that has already landed.
+    const r = parseByNumber(rotation, '2026-08-25', at('2026-08-27T12:00:00Z'))!;
+    expect(r.origIata).toBe('MIA');
+    expect(r.destIata).toBe('DXB');
   });
 });

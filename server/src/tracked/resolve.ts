@@ -141,7 +141,16 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
  *   4. Require both a departure and an arrival airport IATA -- this drops a
  *      same-numbered flight on a different aircraft that has no arrival on
  *      file yet.
- *   5. Of what is left, take the earliest scheduled departure.
+ *   5. Of what is left, take the leg that matters AT `nowMs`: the one in the
+ *      air (departed, not yet due to arrive), else the next to depart, else
+ *      the last one of the day.
+ *
+ * Step 5 used to be "take the earliest scheduled departure", which is right
+ * only until the earliest leg has flown. A flight number can operate several
+ * legs on one date -- EK214 is a BOG->MIA->DXB rotation -- so after the first
+ * lands, "earliest" returns a completed flight with nothing to track and no
+ * explanation. MEASURED 2026-08-25 on AA3964, whose earlier leg had already
+ * landed when it was added, and the wall showed nothing.
  *
  * Returning a row whose `icao24` is null is NOT the same as returning null.
  * The first means "this flight exists, we just have no transponder address";
@@ -149,11 +158,16 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
  * differently, and the spec flags the missing-modeS case as an explicit risk
  * to keep visible.
  */
-export function parseByNumber(payload: unknown, date: string): ResolvedFlight | null {
+export function parseByNumber(
+  payload: unknown,
+  date: string,
+  nowMs: number,
+): ResolvedFlight | null {
   const rows = Array.isArray(payload) ? payload : [payload];
 
-  let bestRow: Record<string, unknown> | null = null;
-  let bestDepEpoch = Infinity;
+  // Collected rather than reduced in one pass: step 5 needs to see all the
+  // qualifying legs before it can say which one matters now.
+  const legs: { row: Record<string, unknown>; depEpoch: number; arrEpoch: number | null }[] = [];
 
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue;
@@ -183,13 +197,31 @@ export function parseByNumber(payload: unknown, date: string): ResolvedFlight | 
     if (depLocalDate !== date) continue;
     if (!str(depAirport?.iata) || !str(arrAirport?.iata)) continue;
 
-    if (depEpoch < bestDepEpoch) {
-      bestRow = row;
-      bestDepEpoch = depEpoch;
-    }
+    legs.push({
+      row,
+      depEpoch,
+      arrEpoch: epoch((arr.scheduledTime as { utc?: unknown } | undefined)?.utc),
+    });
   }
 
-  return bestRow ? toResolvedFlight(bestRow) : null;
+  if (legs.length === 0) return null;
+  legs.sort((a, b) => a.depEpoch - b.depEpoch);
+
+  // In the air now: departed, and not yet due to arrive. A leg with no arrival
+  // time counts as still running rather than being skipped -- the alternative
+  // is passing over the only leg that might be the live one.
+  const nowSec = nowMs / 1000;
+  const airborne = legs.find((l) => l.depEpoch <= nowSec && (l.arrEpoch === null || nowSec < l.arrEpoch));
+  if (airborne) return toResolvedFlight(airborne.row);
+
+  // Nothing airborne: the next one to leave. This is the ordinary case, since
+  // entries are usually added hours ahead of departure.
+  const upcoming = legs.find((l) => l.depEpoch > nowSec);
+  if (upcoming) return toResolvedFlight(upcoming.row);
+
+  // Every leg is down. The most recent is more useful than the first, and
+  // lifecycle.ts decides what a landed flight is worth.
+  return toResolvedFlight(legs[legs.length - 1]!.row);
 }
 
 /**
@@ -205,6 +237,7 @@ export async function resolveFlight(
   number: string,
   date: string,
   apiKey: string,
+  nowMs: number,
 ): Promise<ResolveResult> {
   const url = `${BASE}/flights/number/${encodeURIComponent(number)}/${encodeURIComponent(date)}`;
   let res: Response;
@@ -228,7 +261,7 @@ export async function resolveFlight(
     return { ok: false, retryable: false, reason: 'unparseable response' };
   }
 
-  const flight = parseByNumber(payload, date);
+  const flight = parseByNumber(payload, date, nowMs);
   if (!flight) {
     return { ok: false, retryable: false, reason: `not operating ${date}` };
   }

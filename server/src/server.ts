@@ -659,7 +659,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
             runTrackedTick(trackedStorage, nowMs, {
               resolve: async (n, d) => {
                 resolvesUsedToday++;
-                return resolveFlight(n, d, config.aerodataboxKey);
+                return resolveFlight(n, d, config.aerodataboxKey, nowMs);
               },
               position: (hex) => fetchPosition(hex, openSkyClientId, openSkyClientSecret),
               resolvesUsedToday,

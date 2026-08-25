@@ -192,6 +192,17 @@ export async function runTrackedTick(
           reg: updated.reg ?? found.registration,
           aircraftType: updated.aircraftType ?? found.typeIcao,
         };
+        // Re-decide now that there IS a hex. Without this the entry sits in
+        // `resolved` for a whole extra tick before anything notices, which on
+        // a 300s interval is five minutes of a flight that is already in the
+        // air and now trackable. The poll branch below re-runs the machine
+        // with its observation for the same reason.
+        const withHex = decideTracked(updated, nowMs);
+        updated = {
+          ...updated,
+          state: withHex.state,
+          stateAtMs: withHex.state === updated.state ? updated.stateAtMs : nowMs,
+        };
       }
       next.push(updated);
       continue;
