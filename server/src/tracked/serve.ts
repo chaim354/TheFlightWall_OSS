@@ -170,7 +170,11 @@ export function trackedCards(
     const nmToDest = e.dest !== null
       ? haversineKm(lat, lon, e.dest.lat, e.dest.lon) / KM_PER_NM
       : Number.NaN;
-    const etaText = formatEta(nmToDest, etaMinRaw);
+    // Always clock-derived here: etaMinRaw above is a countdown to
+    // schedArrEpoch, never a physics estimate (a tracked entry carries no
+    // groundspeed-based ETA at all), so it takes minute resolution rather than
+    // sitting on one five-minute value across several refreshes.
+    const etaText = formatEta(nmToDest, etaMinRaw, true);
 
     const prefix = carrierPrefix(e.number);
 

@@ -218,7 +218,11 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
       etaSrc = etaMin === null ? null : 'physics';
     }
 
-    etaText = formatEta(nm, etaMin);
+    // Minute resolution only when etaMin counts down to a real arrival TIME
+    // (revised or scheduled). The physics fallback keeps its coarse rounding --
+    // see formatEta. Keyed off etaSrc rather than off arrivalEpoch so it cannot
+    // drift from the value actually reported on the wire.
+    etaText = formatEta(nm, etaMin, etaSrc === 'revised' || etaSrc === 'scheduled');
   }
 
   // Prefer the feed's precomputed values; adsb.lol ships both, so this

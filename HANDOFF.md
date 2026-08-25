@@ -297,9 +297,12 @@ transatlantic flight (DL182, JFK->FCO). NOT confirmed on hardware:
 
 - **Dead-reckoning across an ADS-B coverage gap.** Community ADS-B has large
   oceanic holes, so a transatlantic flight should switch to an estimated
-  position mid-crossing and the panel marker should render HOLLOW instead of
-  filled. The test flight was deleted while still over land. Track a transatlantic
-  departure and leave it running to exercise this.
+  position mid-crossing. The test flight was deleted while still over land.
+  Track a transatlantic departure and leave it running to exercise this.
+  **Check it on the server, not on the panel** -- the watched-flights page at
+  `GET /` names the state per entry ("estimated position ... last fix N min
+  ago"), and `/v1/flights` still carries `pos_src`. The panel no longer shows
+  the difference; see the marker entry below.
 - **The heading fallback.** Heading shows only on a card with NO ETA; every
   flight overhead during testing resolved a route, so it never triggered. GA and
   N-number traffic typically lack ETAs and should surface it.
@@ -326,9 +329,25 @@ SAME shape in the card builder DID break airline lookup and was fixed by taking
 the trailing digit run first. If anyone refactors `normaliseNumber` to use its
 groups, this is waiting.
 
-**The pin marker does not cover `displayTextOnlyCard`.** That layout (panels
-under 16px tall) never calls `drawLogoOrBadge`, where the marker lives. Not a
-gap for the 128x64 wall device, which takes the `displayMiniCard` branch.
+**The tracked marker no longer distinguishes an estimated position, by explicit
+maintainer decision (2026-08-24).** It was a 3px amber bar down the left edge,
+filled for a live fix and hollow for a dead-reckoned one; it is now a 1px white
+border round the whole panel with `TRACKED` in the top-right, drawn the same way
+either way. The maintainer was shown the trade-off -- that this is the one thing
+the tracked design named as a risk ("dead-reckoned position mistaken for a fix",
+see the 2026-08-24 spec) -- and chose it. NOTHING upstream changed: `pos_src` is
+still computed, still on the wire, still rendered in words on the server's
+watched-flights page. If it should come back on the panel, the cheap version is
+a second word (`EST`) rather than a border style, because a 1px border has no
+legible hollow variant.
+
+Two things that entry fixes in passing: the marker now lives in
+`displayFlightCard`, after the layout call, so it covers `displayTextOnlyCard`
+too (the old bar sat in `drawLogoOrBadge`, which that layout never calls); and
+the `TRACKED` word is drawn only on the Mini layout, gated on the same
+`usesMiniCard()` predicate the dispatcher uses, because that is the only layout
+that reserves columns for it -- on a 64x64 Stacked card it would land across the
+centred logo. Other shapes get the border alone.
 
 ---
 

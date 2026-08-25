@@ -64,6 +64,31 @@ int main() {
     // Case-insensitive
     CHECK(isCargoOperator("fdx"));
 
+    // isGeneralAviation() — the GA/private side of the airline split. This is
+    // the predicate the "show general aviation" setting keys off on EVERY
+    // source, so it has to agree with Area mode's two passes exactly: whatever
+    // pass 1 (airline-format) refuses must land here, and nothing else.
+    CHECK(isGeneralAviation("N172SP"));   // US N-number
+    CHECK(isGeneralAviation("C-GABC"));   // hyphenated international registration
+    CHECK(isGeneralAviation("N1"));
+
+    // Broader than isTailNumber on purpose: a callsign that is neither
+    // airline-format NOR registration-shaped is still not an airline flight,
+    // and Area mode's pass 1 has always rejected it. Were this keyed on
+    // isTailNumber instead, these would slip through a filter set to hide them.
+    CHECK(isGeneralAviation("GOLF12"));
+    CHECK(!isTailNumber("GOLF12"));       // ...and it is NOT a tail number
+    CHECK(isGeneralAviation("LIFEGUARD"));
+    CHECK(isGeneralAviation(""));
+    CHECK(isGeneralAviation(nullptr));    // unknown is not an airline flight
+
+    // Airline flights are never GA -- these must survive the filter.
+    CHECK(!isGeneralAviation("DAL123"));
+    CHECK(!isGeneralAviation("AAL2960"));
+    CHECK(!isGeneralAviation("GTI4521"));  // cargo is an airline flight, not GA
+    CHECK(!isGeneralAviation("QFA3"));     // shortest airline form: 3 letters + 1 digit
+    CHECK(!isGeneralAviation("  BAW286 ")); // leading space tolerated, as in pass 1
+
     if (failures == 0) { printf("ALL PASS\n"); return 0; }
     printf("%d FAILURES\n", failures);
     return 1;
