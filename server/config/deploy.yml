@@ -72,6 +72,10 @@ env:
     - AERODATABOX_KEY
     - OPENSKY_CLIENT_ID
     - OPENSKY_CLIENT_SECRET
+    # Remote control. Unset disables those routes entirely rather than leaving
+    # them open -- see src/control.ts. Unlike the four above, this one is not a
+    # read credential: whoever holds it can reconfigure and restart the wall.
+    - CONTROL_TOKEN
 
 # The schedule table (server writes it to SCHEDULE_PATH, which the
 # Dockerfile defaults to /app/data/schedule.json) needs to survive a

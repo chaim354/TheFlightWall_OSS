@@ -194,6 +194,65 @@ describe('startServer', () => {
     expect((await fetch(`${base}/assets/..%2f..%2fetc%2fpasswd`)).status).toBe(404);
   });
 
+  it('404s the control routes when CONTROL_TOKEN is unset, and serves them when it is', async () => {
+    running = await startServer({
+      port: 0,
+      aerodataboxKey: '',
+      boards: 'KJFK',
+      schedulePath: join(dir, 'schedule.json'),
+      panynjIntervalMs: 0,
+      panynjPageDelayMs: 0,
+      refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null,
+      quietHoursTimeZone: 'America/New_York',
+      boardFetchDelayMs: 0,
+    });
+    // Unset: the routes do not exist. A 404 rather than a 401 also declines to
+    // confirm the feature is present at all.
+    expect((await fetch(`http://127.0.0.1:${running.port}/v1/control`)).status).toBe(404);
+    await running.close();
+
+    running = await startServer({
+      port: 0,
+      aerodataboxKey: '',
+      boards: 'KJFK',
+      schedulePath: join(dir, 'schedule.json'),
+      controlToken: 'sekrit',
+      controlPath: join(dir, 'control.json'),
+      panynjIntervalMs: 0,
+      panynjPageDelayMs: 0,
+      refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null,
+      quietHoursTimeZone: 'America/New_York',
+      boardFetchDelayMs: 0,
+    });
+    const base = `http://127.0.0.1:${running.port}`;
+
+    // Set, but no credential presented.
+    const noAuth = await fetch(`${base}/v1/control`);
+    expect(noAuth.status).toBe(401);
+    expect(noAuth.headers.get('www-authenticate')).toBe('Bearer');
+
+    const auth = { authorization: 'Bearer sekrit' };
+    expect((await fetch(`${base}/v1/control`, { headers: auth })).status).toBe(200);
+
+    // A queued command survives to the device's next check-in, through the
+    // file on disk rather than through memory.
+    const queued = await fetch(`${base}/v1/control/command`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ set: { display: { brightness: 7 }, network: { wifiSsid: 'evil' } } }),
+    });
+    expect(queued.status).toBe(201);
+
+    const checkin = await fetch(`${base}/v1/control/checkin`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ fwVersion: '0d68283' }),
+    });
+    const body = (await checkin.json()) as { commands: { set?: Record<string, unknown> }[] };
+    expect(body.commands).toHaveLength(1);
+    expect(body.commands[0]!.set).toEqual({ display: { brightness: 7 } }); // network gone
+  });
+
   it('still answers /v1/flights (with no routes) when AERODATABOX_KEY is missing', async () => {
     vi.mocked(fetchAircraft).mockResolvedValue([
       { hex: 'a1', callsign: 'DL5075', registration: null, typeIcao: null, lat: 40.8, lon: -73.9,

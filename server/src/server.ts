@@ -11,6 +11,7 @@ import { runTrackedTick } from './tracked/tick';
 import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
 import { assetManifest, serveAsset } from './assets';
+import { handleControl, fileControlStorage, type ControlStorage } from './control';
 
 /** Everything server.ts needs, read from process.env with a default for
  * every var except the API key -- there is no sensible default for that. */
@@ -83,6 +84,15 @@ export interface ServerConfig {
    * does not require a redeploy -- see src/assets.ts.
    */
   assetsPath?: string;
+  /**
+   * Shared secret for the remote-control routes. Absent disables them
+   * entirely -- they 404 and the device never calls them -- the same
+   * inert-rather-than-broken posture the tracked routes take without OpenSky
+   * credentials. Anyone holding this has full control of the wall.
+   */
+  controlToken?: string;
+  /** Where the command queue and last-reported status live; see src/control.ts. */
+  controlPath?: string;
 }
 
 const DEFAULT_PORT = 8787;
@@ -90,6 +100,7 @@ const DEFAULT_BOARDS = 'KJFK,KLGA,KEWR,KBOS';
 const DEFAULT_SCHEDULE_PATH = './data/schedule.json';
 const DEFAULT_TRACKED_PATH = './data/tracked.json';
 const DEFAULT_ASSETS_PATH = './data/assets';
+const DEFAULT_CONTROL_PATH = './data/control.json';
 /**
  * AeroDataBox refresh cadence.
  *
@@ -179,6 +190,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     openSkyClientSecret: env.OPENSKY_CLIENT_SECRET ?? '',
     trackedPath: env.TRACKED_PATH ?? DEFAULT_TRACKED_PATH,
     assetsPath: env.ASSETS_PATH ?? DEFAULT_ASSETS_PATH,
+    controlToken: env.CONTROL_TOKEN ?? '',
+    controlPath: env.CONTROL_PATH ?? DEFAULT_CONTROL_PATH,
   };
 }
 
@@ -187,6 +200,7 @@ async function handleRequest(
   res: ServerResponse,
   env: Env,
   assetsRoot: string,
+  control: { storage: ControlStorage; token: string } | null,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
@@ -217,6 +231,35 @@ async function handleRequest(
     });
     // Node drops the body itself on a HEAD response.
     res.end(trackedPage);
+    return;
+  }
+
+  if (url.pathname === '/v1/control' || url.pathname.startsWith('/v1/control/')) {
+    // Absent a token these routes do not exist, rather than existing and
+    // refusing -- the same posture /v1/tracked takes without OpenSky
+    // credentials. A 404 also declines to confirm the feature is here at all.
+    if (!control) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const response = await handleControl(
+      req.method ?? 'GET',
+      url,
+      Buffer.concat(chunks).toString('utf8'),
+      req.headers.authorization,
+      control.storage,
+      control.token,
+      Date.now(),
+    );
+    const body = await response.text();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    const wa = response.headers.get('www-authenticate');
+    if (wa) headers['www-authenticate'] = wa;
+    res.writeHead(response.status, headers);
+    res.end(body);
     return;
   }
 
@@ -307,6 +350,16 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
   // into env (so /v1/tracked 404s, see handleRequest) and, further down, no
   // tick timer is created either.
   const trackedStorage = openSkyClientId ? fileTrackedStorage(trackedPath) : undefined;
+
+  // Inert without a token: no storage is opened, and handleRequest 404s the
+  // routes rather than serving them to be refused.
+  const controlToken = config.controlToken ?? '';
+  const control = controlToken
+    ? { storage: fileControlStorage(config.controlPath ?? DEFAULT_CONTROL_PATH), token: controlToken }
+    : null;
+  if (!controlToken) {
+    console.log('CONTROL_TOKEN is not set -- remote control is disabled.');
+  }
   // Only what handleFlights reads. It used to be handed the board list and a
   // paid-API secret it has no use for, on a per-request read-only path.
   const env: Env = { SCHEDULE: storage, TRACKED: trackedStorage };
@@ -471,7 +524,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
-      handleRequest(req, res, env, config.assetsPath ?? DEFAULT_ASSETS_PATH).catch((err) => {
+      handleRequest(req, res, env, config.assetsPath ?? DEFAULT_ASSETS_PATH, control).catch((err) => {
         console.error('request handler error:', err instanceof Error ? err.message : String(err));
         if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
         res.end('internal error');
