@@ -177,4 +177,24 @@ describe('runTrackedTick', () => {
     // when the ceiling is 50 -- and must still be waiting.
     expect(store.current[DAILY_RESOLVE_CEILING]!.state).toBe('pending');
   });
+
+  it('logs when it drops an entry, naming the state it was dropped from', () => {
+    // Regression on DIAGNOSABILITY, not on behaviour. The drop path was silent,
+    // so an entry swept by a bad bound left an empty store and nothing else --
+    // no state, no reason, no log line. "expired from landed" is the feature
+    // working; "expired from pending" is a bug, and only the log tells them
+    // apart after the entry is gone.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    return runTrackedTick(
+      memStore([entry({ number: 'DL1732', date: '2026-08-24', state: 'landed', stateAtMs: 0 })]),
+      DAY_START + 400 * 24 * 60 * 60_000, // far past every expiry timer
+      { resolve: vi.fn(), position: vi.fn(), resolvesUsedToday: 0 },
+    ).then(() => {
+      const line = log.mock.calls.map((c) => String(c[0])).find((l) => l.includes('dropped'));
+      expect(line).toContain('DL1732');
+      expect(line).toContain('2026-08-24');
+      expect(line).toContain('expired from landed');
+      log.mockRestore();
+    });
+  });
 });

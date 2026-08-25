@@ -50,6 +50,20 @@ export async function runTrackedTick(
     const d = decideTracked(e, nowMs);
 
     if (d.action === 'drop') {
+      // Say so. This is the only path that makes an entry vanish, and a store
+      // that silently reads empty is indistinguishable from one that was never
+      // written to -- which is exactly how a bounds bug went unnoticed until a
+      // person noticed the wall was not tracking anything: a local-dated
+      // evening departure was swept by the date backstop 55 minutes before
+      // pushback, from `pending`, leaving nothing behind to look at.
+      //
+      // The PRIOR STATE is the diagnostic half. "expired from landed" is the
+      // feature working; "expired from pending", with a date that has not
+      // departed yet, is a bug, and the two are one word apart in the log.
+      console.log(
+        `tracked: dropped ${e.number} ${e.date} -- expired from ${before}` +
+          (e.reason ? ` (${e.reason})` : ''),
+      );
       changed = true;
       continue;
     }
