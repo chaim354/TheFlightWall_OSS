@@ -98,6 +98,50 @@ describe('assetManifest', () => {
   });
 });
 
+describe('assetManifest firmware entry', () => {
+  const layDownFirmware = (bin: string, sig: Buffer, version: string): void => {
+    mkdirSync(join(root, 'firmware'), { recursive: true });
+    writeFileSync(join(root, 'firmware', 'firmware.bin'), bin);
+    writeFileSync(join(root, 'firmware', 'firmware.sig'), sig);
+    writeFileSync(join(root, 'firmware', 'version.txt'), version + '\n');
+  };
+
+  it('reports version, size, hash and the signature', async () => {
+    const sig = Buffer.from([0x30, 0x45, 0x02, 0x21, 0xde, 0xad]);
+    layDownFirmware('IMAGE', sig, '2e05f4d');
+    const body = (await (await assetManifest(root)).json()) as {
+      firmware: { version: string; size: number; sha256: string; sig: string } | null;
+    };
+    expect(body.firmware).toEqual({
+      version: '2e05f4d',           // trailing newline trimmed
+      size: 5,
+      sha256: sha('IMAGE'),          // from the BYTES, not from anything uploaded
+      sig: sig.toString('base64'),
+    });
+  });
+
+  it('is null when any of the three files is missing', async () => {
+    // A half-uploaded directory is an incomplete offer, not a broken one: the
+    // device must be told there is nothing to install rather than handed
+    // something it cannot verify.
+    mkdirSync(join(root, 'firmware'), { recursive: true });
+    writeFileSync(join(root, 'firmware', 'firmware.bin'), 'IMAGE');
+    const noSig = (await (await assetManifest(root)).json()) as { firmware: unknown };
+    expect(noSig.firmware).toBeNull();
+
+    writeFileSync(join(root, 'firmware', 'firmware.sig'), Buffer.from([1, 2, 3]));
+    const noVersion = (await (await assetManifest(root)).json()) as { firmware: unknown };
+    expect(noVersion.firmware).toBeNull();
+  });
+
+  it('is null when nothing is uploaded at all, alongside ui', async () => {
+    const body = (await (await assetManifest(root)).json()) as { ok: boolean; ui: unknown; firmware: unknown };
+    expect(body.ok).toBe(true);
+    expect(body.ui).toBeNull();
+    expect(body.firmware).toBeNull();
+  });
+});
+
 describe('serveAsset', () => {
   it('serves the bytes with the hash on the response', async () => {
     writeFileSync(join(root, 'index.html.gz'), 'page');
