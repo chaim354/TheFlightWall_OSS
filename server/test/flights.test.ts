@@ -5,6 +5,7 @@ vi.mock('../src/adsblol', () => ({
 }));
 
 import { handleFlights, MAX_FLIGHTS_CEILING, type Env } from '../src/flights';
+import { resetRouteCache } from '../src/routes/routeLookup';
 import { fetchAircraft } from '../src/adsblol';
 import { KV_KEY, indexRows, STALE_AFTER_MS, kvStorage } from '../src/schedule/store';
 import type { Aircraft, ScheduleRow } from '../src/types';
@@ -389,5 +390,56 @@ describe('handleFlights: schedule-time ETA end to end', () => {
     expect(body.flights[0]!.eta_src).toBe('scheduled');
     expect(body.flights[0]!.eta_min).toBe(45);
     expect(body.flights[0]!.eta_text).toBe('~45m');
+  });
+});
+
+describe('a flight the schedule table cannot answer for still gets its identity', () => {
+  // UBT70A (Norse Atlantic UK, LGW->JFK) showed a route and NO airline on the
+  // wall. Its callsign ends in a letter, so callsignKey returns null and
+  // matchSchedule's second path is unreachable; without an exact operating
+  // callsign in the table there is no row, so flt and al are both null. The
+  // adsbdb reply fetched for the ROUTE carries both, and used to be discarded.
+  const JFK = getAirportCoord('KJFK')!;
+
+  const adsbdbNorse = {
+    response: {
+      flightroute: {
+        callsign: 'UBT70A',
+        callsign_iata: 'Z070A',
+        airline: { name: 'Norse Atlantic UK', icao: 'UBT', iata: 'Z0' },
+        origin: { iata_code: 'LGW', latitude: 51.148102, longitude: -0.190278 },
+        destination: { iata_code: 'JFK', latitude: JFK.lat, longitude: JFK.lon },
+      },
+    },
+  };
+
+  async function flightFor(callsign: string) {
+    resetRouteCache();
+    vi.mocked(fetchAircraft).mockResolvedValue([
+      { callsign, lat: JFK.lat + 0.25, lon: JFK.lon + 0.25, altFt: 9000, gsKt: 300, trackDeg: 250, vsFpm: -900, onGround: false, hex: 'abc123' } as unknown as Aircraft,
+    ]);
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify(adsbdbNorse), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ) as unknown as typeof fetch;
+
+    const env = { SCHEDULE: kvStorage(new FakeKV() as never) } as unknown as Env;
+    const res = await handleFlights(
+      new URL(`https://x/v1/flights?lat=${JFK.lat}&lon=${JFK.lon}&radius_km=80`),
+      env,
+      Date.now(),
+    );
+    const body = (await res.json()) as { flights: { cs: string; flt: string | null; al: string | null; from: string | null; to: string | null }[] };
+    return body.flights[0];
+  }
+
+  it('fills the flight number from the same reply that supplied the route', async () => {
+    const f = await flightFor('UBT70A');
+    expect(f?.from).toBe('LGW');
+    expect(f?.to).toBe('JFK');
+    expect(f?.flt).toBe('Z070A');
+  });
+
+  it('fills the airline name, which is what was missing on the panel', async () => {
+    expect((await flightFor('UBT70A'))?.al).toBe('Norse Atlantic UK');
   });
 });

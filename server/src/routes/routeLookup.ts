@@ -42,6 +42,24 @@ export interface RouteFix {
   destLon: number;
   /** Which database answered. Surfaced for logging, not for the client. */
   source: 'adsbdb' | 'hexdb';
+  /**
+   * IATA flight number, e.g. "Z070A" -- adsbdb only; hexdb returns a bare
+   * airport pair and has none.
+   *
+   * Carried because the aircraft that need this fallback are exactly the ones
+   * the schedule table could not answer for, and `flt` is null for all of
+   * them. A trailing-letter callsign cannot reach matchSchedule's second path
+   * at all (callsignKey rejects it), so unless AeroDataBox happens to ship the
+   * exact operating callsign, the number in this field is the only one there
+   * is -- and it arrived in the same response as the route, at no extra cost.
+   *
+   * Already in the concatenated carrier+number form enrich.ts builds for the
+   * schedule path (`LX` + `14` -> `LX14`), so it needs no reassembly.
+   */
+  flightIata: string | null;
+  /** Operator name, e.g. "Norse Atlantic UK". adsbdb only. Null when the
+   *  reply carries only a code -- see parseAdsbdb. */
+  airlineName: string | null;
 }
 
 const ADSBDB = 'https://api.adsbdb.com/v0/callsign/';
@@ -150,7 +168,28 @@ export function parseAdsbdb(body: unknown): RouteFix | null {
   if (oLat === null || oLon === null || dLat === null || dLon === null) return null;
   if (!oIata || !dIata) return null;
 
-  return { origIata: oIata, origLat: oLat, origLon: oLon, destIata: dIata, destLat: dLat, destLon: dLon, source: 'adsbdb' };
+  const airline = fr.airline as Record<string, unknown> | undefined;
+  const name = str(airline?.name);
+  const icao = str(airline?.icao).toUpperCase();
+  const iata = str(airline?.iata).toUpperCase();
+  // A "name" that is only the carrier's own code is NOT a name, and passing it
+  // on would repeat a bug this codebase has already paid for: the wall reads
+  // any non-empty name as authoritative, so a bare "SV" pre-empted the
+  // "Saudia" the device's own 177-entry table had all along (see airlines.ts,
+  // and commit aad7160). Null is what lets that better-stocked table answer.
+  const named = name && name.toUpperCase() !== icao && name.toUpperCase() !== iata;
+
+  return {
+    origIata: oIata,
+    origLat: oLat,
+    origLon: oLon,
+    destIata: dIata,
+    destLat: dLat,
+    destLon: dLon,
+    source: 'adsbdb',
+    flightIata: str(fr.callsign_iata).toUpperCase() || null,
+    airlineName: named ? name : null,
+  };
 }
 
 /**
@@ -165,7 +204,19 @@ export function parseHexdb(text: unknown): RouteFix | null {
   const o = getAirportCoord(m[1]!);
   const d = getAirportCoord(m[2]!);
   if (!o || !d) return null;
-  return { origIata: o.iata, origLat: o.lat, origLon: o.lon, destIata: d.iata, destLat: d.lat, destLon: d.lon, source: 'hexdb' };
+  // hexdb answers with an airport pair and nothing else -- no flight number,
+  // no operator -- so these are null by nature, not by omission.
+  return {
+    origIata: o.iata,
+    origLat: o.lat,
+    origLon: o.lon,
+    destIata: d.iata,
+    destLat: d.lat,
+    destLon: d.lon,
+    source: 'hexdb',
+    flightIata: null,
+    airlineName: null,
+  };
 }
 
 /**

@@ -160,6 +160,22 @@ async function fillMissingRoutes(
         if (!fix) return;
         p.f.from = fix.origIata;
         p.f.to = fix.destIata;
+        // The identity fields, from the SAME reply -- no extra call.
+        //
+        // Every aircraft reaching here failed the schedule table, so flt and al
+        // are null for all of them by construction. That is not a rare corner:
+        // a callsign ending in a letter cannot reach matchSchedule's second
+        // path at all, because callsignKey rejects it, so unless AeroDataBox
+        // shipped the exact operating callsign there is no row and never will
+        // be. UBT70A (Norse Atlantic UK) rendered with a route and no airline
+        // for exactly this reason, while the reply that gave it LGW->JFK also
+        // carried "Z070A" and "Norse Atlantic UK" and both were dropped.
+        //
+        // Guarded on null rather than assigned outright: a schedule row is the
+        // MARKETING carrier and stays authoritative where one exists. hexdb
+        // supplies neither field, so its fixes leave both alone.
+        if (!p.f.flt && fix.flightIata) p.f.flt = fix.flightIata;
+        if (!p.f.al && fix.airlineName) p.f.al = fix.airlineName;
       } catch {
         // resolveGatedRoute already swallows transport failures; this is the
         // belt-and-braces case (an unexpected throw from parsing or the cache),

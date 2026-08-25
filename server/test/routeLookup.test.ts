@@ -73,6 +73,7 @@ describe('gateRoute: the check that makes a 32%-wrong source usable', () => {
   const laxJfk: RouteFix = {
     origIata: 'LAX', origLat: 33.9425, origLon: -118.408,
     destIata: 'JFK', destLat: 40.6398, destLon: -73.7789, source: 'adsbdb',
+    flightIata: null, airlineName: null,
   };
 
   it('accepts an aircraft actually on the corridor', () => {
@@ -297,5 +298,58 @@ describe('lookupRoute: a non-answer is not a negative answer', () => {
     const back = await lookupRoute('AAL118', afterExpiry + FAIL_TTL_MS + 1000, { fetchImpl: impl });
     expect(back).not.toBeNull();
     expect(back!.destIata).toBe('JFK');
+  });
+});
+
+describe('parseAdsbdb: the identity fields alongside the route', () => {
+  /** A Norse Atlantic UK reply — the case that showed a route and no airline. */
+  const norse = () => ({
+    response: {
+      flightroute: {
+        callsign: 'UBT70A',
+        callsign_icao: 'UBT70A',
+        callsign_iata: 'Z070A',
+        airline: { name: 'Norse Atlantic UK', icao: 'UBT', iata: 'Z0' },
+        origin: { iata_code: 'LGW', latitude: 51.148102, longitude: -0.190278 },
+        destination: { iata_code: 'JFK', latitude: 40.639801, longitude: -73.7789 },
+      },
+    },
+  });
+
+  it('takes the IATA flight number the same response already carries', () => {
+    // UBT70A cannot reach the schedule table: callsignKey rejects a trailing
+    // letter, so matchSchedule returns null and flt stays null -- while THIS
+    // field, in the reply we already fetched for the route, is the answer.
+    expect(parseAdsbdb(norse())!.flightIata).toBe('Z070A');
+  });
+
+  it('takes the operator name too', () => {
+    expect(parseAdsbdb(norse())!.airlineName).toBe('Norse Atlantic UK');
+  });
+
+  it('still returns the route when the identity fields are absent', () => {
+    const bare = norse() as Record<string, any>;
+    delete bare.response.flightroute.callsign_iata;
+    delete bare.response.flightroute.airline;
+    const r = parseAdsbdb(bare)!;
+    expect(r.origIata).toBe('LGW');
+    expect(r.flightIata).toBeNull();
+    expect(r.airlineName).toBeNull();
+  });
+
+  it('refuses a name that is only the carrier code, which must not outrank the wall', () => {
+    // airlines.ts: a bare code read as a name pre-empted "Saudia" from the
+    // device's own better-stocked table. Null lets that table answer.
+    const coded = norse() as Record<string, any>;
+    coded.response.flightroute.airline.name = 'UBT';
+    expect(parseAdsbdb(coded)!.airlineName).toBeNull();
+    coded.response.flightroute.airline.name = 'Z0';
+    expect(parseAdsbdb(coded)!.airlineName).toBeNull();
+  });
+
+  it('reports null identity for hexdb, which carries no such data', () => {
+    const r = parseHexdb('EGKK-KJFK')!;
+    expect(r.flightIata).toBeNull();
+    expect(r.airlineName).toBeNull();
   });
 });
