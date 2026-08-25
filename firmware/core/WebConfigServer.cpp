@@ -8,6 +8,7 @@ Purpose: Implementation of the on-device configuration & control web server.
 #include "config/HardwareConfiguration.h" // board-guarded pins reported in /api/status
 #include "adapters/GeoLocator.h"
 #include "utils/ServerJson.h" // renderable()
+#include "core/AssetUpdater.h"
 
 #include <LittleFS.h>
 #include <WiFi.h>
@@ -87,6 +88,10 @@ void WebConfigServer::registerRoutes()
                { handleWifiScan(); });
     _server.on("/api/restart", HTTP_POST, [this]()
                { handleRestart(); });
+    _server.on("/api/updateui", HTTP_POST, [this]()
+               { handleUpdateUi(); });
+    _server.on("/api/updateui", HTTP_DELETE, [this]()
+               { handleClearUi(); });
     _server.on("/setup", HTTP_GET, [this]()
                { handleSetupGet(); });
     _server.on("/setup", HTTP_POST, [this]()
@@ -108,7 +113,17 @@ void WebConfigServer::handleRoot()
     // gzipped TWICE — the browser decodes once, tries again, fails, and renders
     // nothing. The content type stays text/html: that is what the decoded body is,
     // and it is also what triggers the automatic header.
-    File f = LittleFS.open("/index.html.gz", "r");
+    // The DOWNLOADED page first, the built-in one as the fallback.
+    //
+    // That ordering is the whole feature: a UI change ships by fetching a file
+    // rather than by reflashing a 10MB filesystem image and wiping settings.
+    // The built-in copy is never overwritten, so a device that has never
+    // reached the server, or whose download failed its hash check, still
+    // serves a working page -- which matters because this page is how someone
+    // fixes a misbehaving device.
+    File f = LittleFS.open(AssetUpdater::kUiCachePath, "r");
+    if (!f)
+        f = LittleFS.open("/index.html.gz", "r");
     if (f)
     {
         _server.streamFile(f, "text/html");
@@ -152,6 +167,34 @@ void WebConfigServer::handlePostSettings()
     _settingsChanged = true;
     String resp = String("{\"ok\":") + (saved ? "true" : "false") + "}";
     _server.send(saved ? 200 : 500, "application/json", resp);
+}
+
+void WebConfigServer::handleUpdateUi()
+{
+    // Synchronous, inside the request that asked for it. The page is ~12KB and
+    // this device serves one request per loop() anyway, so the browser waiting
+    // a second is both honest and simpler than a job queue -- and the caller
+    // gets the actual outcome rather than "started".
+    const AssetUpdater::FetchResult r = AssetUpdater::updateUi(g_settings.serverUrl);
+    JsonDocument doc;
+    doc["ok"] = r.ok;
+    doc["changed"] = r.changed;
+    if (!r.ok)
+        doc["error"] = r.error;
+    doc["sha"] = AssetUpdater::cachedUiSha();
+    String out;
+    serializeJson(doc, out);
+    _server.send(r.ok ? 200 : 502, "application/json", out);
+}
+
+void WebConfigServer::handleClearUi()
+{
+    // The escape hatch for a download that passed its hash and is still bad:
+    // drop the cache and the built-in page is served again on the next load.
+    const bool had = AssetUpdater::servingCachedUi();
+    AssetUpdater::clearCachedUi();
+    String out = String("{\"ok\":true,\"cleared\":") + (had ? "true" : "false") + "}";
+    _server.send(200, "application/json", out);
 }
 
 void WebConfigServer::handleGetStatus()
@@ -198,6 +241,11 @@ void WebConfigServer::handleGetStatus()
     // `panelBrightness` is applyBrightness()'s output -- 0 means dark for SOME
     // reason -- and the two fields under it name the reasons that exist only in
     // RAM and so appear nowhere in /api/settings.
+    // Which page is being served, so "I changed the UI and nothing happened" is
+    // answerable without guessing. builtin = the copy flashed with the
+    // firmware; server = one downloaded from the FlightWall server.
+    doc["uiSource"] = AssetUpdater::servingCachedUi() ? "server" : "builtin";
+    doc["uiSha"] = AssetUpdater::cachedUiSha();
     doc["panelBrightness"] = _panelBrightness;
     doc["panelOff"] = _panelOff;
     doc["manualBrightness"] = _manualBrightness;
