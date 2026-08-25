@@ -46,6 +46,24 @@ describe('authorised', () => {
 });
 
 describe('stripProtected', () => {
+  it('removes api.controlToken but keeps the rest of api', () => {
+    // The second self-destructive setting: changing it remotely locks remote
+    // control out permanently, and the only repair is the LAN page this whole
+    // feature exists to avoid needing.
+    const out = stripProtected({
+      api: { controlToken: 'new', serverUrl: 'https://x', positionSource: 'server' },
+      display: { brightness: 5 },
+    });
+    expect(out).toEqual({
+      api: { serverUrl: 'https://x', positionSource: 'server' },
+      display: { brightness: 5 },
+    });
+  });
+
+  it('drops api entirely when controlToken was all it held', () => {
+    expect(stripProtected({ api: { controlToken: 'x' } })).toEqual({});
+  });
+
   it('removes network and keeps everything else', () => {
     const out = stripProtected({
       network: { wifiSsid: 'evil', wifiPassword: 'x' },

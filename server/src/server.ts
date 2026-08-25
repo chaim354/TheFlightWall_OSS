@@ -12,6 +12,7 @@ import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
 import { assetManifest, serveAsset } from './assets';
 import { handleControl, fileControlStorage, type ControlStorage } from './control';
+import { controlPage } from './controlPage';
 
 /** Everything server.ts needs, read from process.env with a default for
  * every var except the API key -- there is no sensible default for that. */
@@ -231,6 +232,16 @@ async function handleRequest(
     });
     // Node drops the body itself on a HEAD response.
     res.end(trackedPage);
+    return;
+  }
+
+  if (url.pathname === '/control' && (req.method === 'GET' || req.method === 'HEAD')) {
+    // Served whether or not a token is configured, unlike the /v1 routes below.
+    // The page's own unlock step is where a missing or wrong token is reported,
+    // and a 404 at a URL someone was told to open is a worse answer than a page
+    // saying it cannot get in.
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(controlPage);
     return;
   }
 

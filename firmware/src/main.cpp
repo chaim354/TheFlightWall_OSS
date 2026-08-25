@@ -692,6 +692,18 @@ static void controlCheckIn()
     doc["panelOff"] = g_panelOff;
     doc["mode"] = (g_settings.mode == TrackingMode::Flights) ? "flights" : "area";
     doc["uptimeS"] = (uint32_t)(millis() / 1000);
+
+    // The device's own settings, redacted exactly as /api/settings redacts them.
+    //
+    // Without this the remote page has no idea what the wall is currently set
+    // to, so its form starts empty -- and an untouched checkbox then reads as
+    // "set this to false" rather than "leave it alone". Queueing one filter
+    // change would silently clear two others. A control page has to show the
+    // real state before it can safely offer to change it.
+    JsonDocument settingsDoc;
+    if (deserializeJson(settingsDoc, g_settings.toJsonPublic()) == DeserializationError::Ok)
+        doc["settings"] = settingsDoc;
+
     String statusJson;
     serializeJson(doc, statusJson);
 

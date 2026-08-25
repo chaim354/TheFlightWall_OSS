@@ -125,6 +125,21 @@ export function stripProtected(set: Record<string, unknown>): Record<string, unk
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(set)) {
     if (k === 'network') continue;
+
+    // api.controlToken is the SECOND self-destructive setting, and it belongs
+    // here for exactly the same reason as network: changing it remotely locks
+    // remote control out permanently, and the only repair is the LAN page this
+    // feature exists to avoid needing. The rest of `api` stays settable.
+    if (k === 'api' && v && typeof v === 'object' && !Array.isArray(v)) {
+      const api: Record<string, unknown> = {};
+      for (const [ak, av] of Object.entries(v as Record<string, unknown>)) {
+        if (ak === 'controlToken') continue;
+        api[ak] = av;
+      }
+      if (Object.keys(api).length > 0) out[k] = api;
+      continue;
+    }
+
     out[k] = v;
   }
   return out;

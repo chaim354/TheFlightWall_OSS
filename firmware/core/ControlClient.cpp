@@ -52,6 +52,19 @@ namespace ControlClient
             removedSomething = true;
         }
 
+        // api.controlToken, for the same reason: applying a new token from the
+        // network locks remote control out permanently, and the only repair is
+        // the LAN page this feature exists to avoid needing. The rest of `api`
+        // is ordinary configuration and stays settable.
+        JsonObject api = doc["api"].as<JsonObject>();
+        if (!api.isNull() && api["controlToken"].is<const char *>())
+        {
+            api.remove("controlToken");
+            removedSomething = true;
+            if (api.size() == 0)
+                doc.remove("api");
+        }
+
         String out;
         serializeJson(doc, out);
         return out;
