@@ -32,6 +32,52 @@ namespace
     }
 
     /**
+     * A Stream that hashes what it is given and writes it into the OTA slot.
+     *
+     * Exists so HTTPClient::writeToStream() can do the READING, which is the
+     * only way the body arrives de-chunked. This server answers through
+     * Cloudflare with transfer-encoding: chunked and no content-length, so
+     * reading getStreamPtr() by hand receives the chunk framing along with the
+     * image -- the size lines and their CRLFs. Measured, on hardware: the very
+     * first Update.write() was handed an ASCII chunk-length line and rejected
+     * it with "Wrong Magic Byte", because an ESP32 image must begin 0xE9.
+     *
+     * The identical mistake was made and fixed one phase earlier in
+     * AssetUpdater. Writing it down here because the shape recurs: on this
+     * server, anything that reads a body by hand is reading chunk framing.
+     */
+    class UpdateSink : public Stream
+    {
+    public:
+        explicit UpdateSink(mbedtls_sha256_context &ctx) : _ctx(ctx) {}
+
+        size_t write(const uint8_t *buf, size_t n) override
+        {
+            mbedtls_sha256_update(&_ctx, buf, n);
+            const size_t w = Update.write(const_cast<uint8_t *>(buf), n);
+            if (w != n)
+                _failed = true;
+            _written += w;
+            return w;
+        }
+        size_t write(uint8_t b) override { return write(&b, 1); }
+
+        // Stream is read/write; nothing ever reads from this one.
+        int available() override { return 0; }
+        int read() override { return -1; }
+        int peek() override { return -1; }
+        void flush() override {}
+
+        bool failed() const { return _failed; }
+        size_t written() const { return _written; }
+
+    private:
+        mbedtls_sha256_context &_ctx;
+        size_t _written = 0;
+        bool _failed = false;
+    };
+
+    /**
      * ECDSA P-256 verification of `sig` over a 32-byte SHA-256 `hash`, using
      * the public key compiled into this image.
      *
@@ -193,39 +239,14 @@ namespace FirmwareUpdater
         mbedtls_sha256_init(&ctx);
         mbedtls_sha256_starts(&ctx, 0);
 
-        WiFiClient *stream = http.getStreamPtr();
-        uint8_t buf[1024];
-        size_t written = 0;
-        unsigned long lastData = millis();
+        UpdateSink sink(ctx);
+        const int streamed = http.writeToStream(&sink);
+        const size_t written = sink.written();
         String err;
-
-        while (written < a.size)
-        {
-            const size_t avail = stream->available();
-            if (avail == 0)
-            {
-                if (!http.connected())
-                    break;
-                if (millis() - lastData > 20000)
-                {
-                    err = "stalled";
-                    break;
-                }
-                delay(2);
-                continue;
-            }
-            const int n = stream->readBytes(buf, avail > sizeof(buf) ? sizeof(buf) : avail);
-            if (n <= 0)
-                continue;
-            lastData = millis();
-            mbedtls_sha256_update(&ctx, buf, (size_t)n);
-            if (Update.write(buf, (size_t)n) != (size_t)n)
-            {
-                err = String("flash write failed: ") + Update.errorString();
-                break;
-            }
-            written += (size_t)n;
-        }
+        if (sink.failed())
+            err = String("flash write failed: ") + Update.errorString();
+        else if (streamed < 0)
+            err = String("download failed (") + streamed + ")";
 
         uint8_t hash[32];
         mbedtls_sha256_finish(&ctx, hash);
