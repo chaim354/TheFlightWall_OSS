@@ -86,6 +86,7 @@ export function newEntry(number: string, date: string, nowMs: number): TrackedEn
     stateAtMs: nowMs,
     reresolved: false,
     icao24: null,
+    callsign: null,
     reg: null,
     aircraftModel: null,
     origIata: null,

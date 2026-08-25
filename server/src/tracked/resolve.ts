@@ -60,6 +60,10 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
     // Lowercase: OpenSky's icao24 is lowercase hex and every comparison
     // downstream assumes it.
     icao24: modeS ? modeS.toLowerCase() : null,
+    // Uppercased to match the ADS-B callsigns every other path produces --
+    // the device's prefix parse is case-insensitive, but the value also
+    // reaches the panel as the flight number in the metric row.
+    callsign: (() => { const c = str(row.callSign); return c ? c.toUpperCase() : null; })(),
     reg: str(aircraft.reg),
     aircraftModel: str(aircraft.model),
     origIata: str(depAirport?.iata),

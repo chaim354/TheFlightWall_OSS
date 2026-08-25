@@ -13,7 +13,7 @@ const CENTER = { lat: 40.6413, lon: -73.7781 };
 
 const airborne = (over: Partial<TrackedEntry> = {}): TrackedEntry => ({
   id: 'e1', number: 'BA181', date: '2026-09-14', state: 'airborne', reason: null,
-  attempts: 0, stateAtMs: DAY, reresolved: true, icao24: '4008f3', reg: 'G-STBA',
+  attempts: 0, stateAtMs: DAY, reresolved: true, icao24: '4008f3', callsign: 'BAW181', reg: 'G-STBA',
   aircraftModel: null, origIata: 'JFK', destIata: 'LHR',
   orig: { lat: 40.6413, lon: -73.7781 }, dest: { lat: 51.47, lon: -0.4543 },
   schedDepEpoch: dep / 1000, schedArrEpoch: arr / 1000,
@@ -29,9 +29,43 @@ describe('trackedCards', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]!.pin).toBe(true);
     expect(cards[0]!.pos_src).toBe('live');
-    expect(cards[0]!.cs).toBe('BA181');
+    // The ICAO callsign, not the IATA number the user typed. This is what the
+    // device's operator parse needs -- it takes the first three letters, so
+    // "BA181" yields "BA1" and no logo tile at all.
+    expect(cards[0]!.cs).toBe('BAW181');
+    expect(cards[0]!.flt).toBe('BA181'); // the marketing number is still carried
     expect(cards[0]!.from).toBe('JFK');
     expect(cards[0]!.to).toBe('LHR');
+  });
+
+  // The pinned card rendered with NO AIRLINE LOGO in production, because `cs`
+  // carried the IATA number the user typed ("DL1732") while every other card
+  // carries the ADS-B callsign ("DAL1732"), and the device derives the operator
+  // -- and so the logo tile -- from the first three letters. "DL1" is not an
+  // operator. AeroDataBox returns the right value as `callSign` and resolve.ts
+  // was discarding it.
+  it('identifies a card by its ICAO callsign, so the operator parse can find a logo', () => {
+    const now = dep + 3600_000;
+    const [card] = trackedCards(
+      [airborne({ number: 'DL1732', callsign: 'DAL1732', lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now })],
+      now, CENTER,
+    );
+    expect(card!.cs).toBe('DAL1732');
+    expect(card!.cs.slice(0, 3)).toBe('DAL'); // the three letters the tile is keyed on
+    expect(card!.flt).toBe('DL1732');
+  });
+
+  it('falls back to the number for an entry stored before callsign existed', () => {
+    // No schema migration for stored entries (see HANDOFF): an older entry
+    // simply lacks the field. That must render the pre-fix card -- logo-less
+    // but present -- rather than a card with no identity, which serve.ts would
+    // otherwise have to drop.
+    const now = dep + 3600_000;
+    const [card] = trackedCards(
+      [airborne({ number: 'DL1732', callsign: null, lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now })],
+      now, CENTER,
+    );
+    expect(card!.cs).toBe('DL1732');
   });
 
   it('dead-reckons and labels ESTIMATED when the fix is stale', () => {

@@ -17,6 +17,7 @@ function entry(over: Partial<TrackedEntry> = {}): TrackedEntry {
     stateAtMs: 0,
     reresolved: false,
     icao24: null,
+    callsign: null,
     reg: null,
     aircraftModel: null,
     origIata: null,

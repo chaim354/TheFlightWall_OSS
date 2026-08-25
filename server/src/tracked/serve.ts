@@ -179,7 +179,12 @@ export function trackedCards(
     const prefix = carrierPrefix(e.number);
 
     cards.push({
-      cs: e.number,
+      // The ICAO callsign when we have one, so this card carries the same KIND
+      // of value an area card does and the device's own operator parse (and so
+      // the logo tile) works on it unchanged. Falls back to the IATA number for
+      // an entry resolved before the field existed -- that is exactly the
+      // logo-less card this fixes, not a regression.
+      cs: e.callsign ?? e.number,
       flt: e.number,
       al: prefix ? airlineName(prefix) : null,
       reg: e.reg,

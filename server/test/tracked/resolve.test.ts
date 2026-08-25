@@ -26,6 +26,7 @@ describe('parseByNumber', () => {
     // Lowercased: OpenSky's icao24 is lowercase hex and comparisons elsewhere
     // assume it.
     expect(r!.icao24).toBe('4008f3');
+    expect(r!.callsign).toBe('BAW181');
     expect(r!.reg).toBe('G-STBA');
     expect(r!.aircraftModel).toBe('Boeing 777');
     expect(r!.origIata).toBe('JFK');
@@ -74,6 +75,11 @@ describe('parseByNumber', () => {
     const r = parseByNumber(real, '2026-08-24');
     expect(r).not.toBeNull();
     expect(r!.icao24).toBe('406947');
+    // Against the REAL payload, not a hand-written one: callSign is a field
+    // AeroDataBox actually returns, and the pinned card had no logo for a month
+    // because this parser dropped it. Asserted here so the fixture is what
+    // proves the field exists, rather than a fixture written to match the code.
+    expect(r!.callsign).toBe('BAW181');
     // The real payload's aircraft.model is "Boeing 777-300ER Passenger" --
     // this is what serve.ts's `ac` field renders on a pinned card.
     expect(r!.aircraftModel).toBe('Boeing 777-300ER Passenger');

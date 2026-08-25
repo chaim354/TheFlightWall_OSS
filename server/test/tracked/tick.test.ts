@@ -7,7 +7,7 @@ const DAY_START = Date.UTC(2026, 8, 14);
 
 const entry = (over: Partial<TrackedEntry> = {}): TrackedEntry => ({
   id: 'e1', number: 'BA181', date: '2026-09-14', state: 'pending', reason: null,
-  attempts: 0, stateAtMs: 0, reresolved: false, icao24: null, reg: null,
+  attempts: 0, stateAtMs: 0, reresolved: false, icao24: null, callsign: null, reg: null,
   aircraftModel: null, origIata: null, destIata: null, orig: null, dest: null,
   schedDepEpoch: null, schedArrEpoch: null,
   lastLat: null, lastLon: null, lastPosAtMs: null,
