@@ -208,11 +208,13 @@ String Settings::serialize(bool redactSecrets) const
     {
         api["openSkyClientSecretSet"] = openSkyClientSecret.length() > 0;
         api["aeroApiKeySet"] = aeroApiKey.length() > 0;
+        api["controlTokenSet"] = controlToken.length() > 0;
     }
     else
     {
         api["openSkyClientSecret"] = openSkyClientSecret;
         api["aeroApiKey"] = aeroApiKey;
+        api["controlToken"] = controlToken;
     }
     api["positionSource"] = positionSourceToString(positionSource);
     api["serverUrl"] = serverUrl;
@@ -341,6 +343,11 @@ bool Settings::fromJson(const String &in)
             openSkyClientSecret = api["openSkyClientSecret"].as<String>();
         if (api.containsKey("aeroApiKey") && api["aeroApiKey"].as<String>().length())
             aeroApiKey = api["aeroApiKey"].as<String>();
+        // Empty means "unchanged", exactly as for the secrets above -- a page
+        // that cannot read the value back must not be able to clear it by
+        // posting what it read.
+        if (api.containsKey("controlToken") && api["controlToken"].as<String>().length())
+            controlToken = api["controlToken"].as<String>();
         if (api.containsKey("positionSource"))
             positionSource = positionSourceFromString(api["positionSource"].as<String>());
         if (api.containsKey("serverUrl"))

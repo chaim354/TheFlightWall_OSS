@@ -124,6 +124,13 @@
 
     <label>FlightAware AeroAPI key <span style="color:var(--muted)">(for AeroAPI source or backup)</span></label>
     <input id="aeroApiKey" type="password" />
+
+    <label>Remote control token <span style="color:var(--muted)">(optional)</span></label>
+    <input id="controlToken" type="password" />
+    <small class="help">Lets you see and control this wall from your FlightWall server when you are
+      not on this network. Must match <b>CONTROL_TOKEN</b> on the server. Leave blank to keep the
+      feature off — the device then never checks in. <b>WiFi settings can never be changed remotely</b>,
+      by design: a wrong network would put the wall out of reach with no way back but a cable.</small>
     <span class="check"><input type="checkbox" id="enrichmentFallbackToAeroApi"><label>Use AeroAPI as backup when adsbdb misses a flight (needs key)</label></span>
   </div>
 
@@ -405,6 +412,7 @@ async function loadSettings(){
   $('openSkyClientId').value = s.api.openSkyClientId || '';
   secretField('openSkyClientSecret', s.api.openSkyClientSecretSet);
   secretField('aeroApiKey', s.api.aeroApiKeySet);
+  secretField('controlToken', s.api.controlTokenSet);
   $('positionSource').value = s.api.positionSource || 'opensky';
   $('serverUrl').value = s.api.serverUrl || '';
   $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
@@ -479,7 +487,7 @@ function collect(){
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
     network:{ wifiSsid:$('wifiSsid').value, ...secret('wifiPassword') },
-    api:{ openSkyClientId:$('openSkyClientId').value, ...secret('openSkyClientSecret'), ...secret('aeroApiKey'), positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    api:{ openSkyClientId:$('openSkyClientId').value, ...secret('openSkyClientSecret'), ...secret('aeroApiKey'), ...secret('controlToken'), positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),

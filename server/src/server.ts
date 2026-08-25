@@ -255,7 +255,12 @@ async function handleRequest(
       Date.now(),
     );
     const body = await response.text();
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      // Carried through from the handler rather than assumed: without it these
+      // responses were cached at the edge and served minutes stale.
+      'cache-control': response.headers.get('cache-control') ?? 'no-store',
+    };
     const wa = response.headers.get('www-authenticate');
     if (wa) headers['www-authenticate'] = wa;
     res.writeHead(response.status, headers);

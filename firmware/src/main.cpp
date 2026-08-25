@@ -31,6 +31,7 @@ Run loop:
 #include "core/Settings.h"
 #include "core/AssetUpdater.h"
 #include "core/FirmwareUpdater.h"
+#include "core/ControlClient.h"
 #include "core/HttpJson.h"
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
@@ -87,6 +88,9 @@ static unsigned long g_apSinceMs = 0;
 // zeroed the moment there are no credentials -- exactly the case this runs in.
 static unsigned long g_apStartedMs = 0;
 static bool g_apDmaStopped = false;
+// Set when a remote command changed settings; consumed by the same block that
+// handles a LAN save, so remote and local edits cannot diverge in behaviour.
+static bool g_controlSettingsChanged = false;
 // How long the CURRENT lit period lasts. Starts at the 30s opener and becomes a
 // full minute for every later one; see the duty-cycle block in loop().
 static unsigned long g_apPanelLitMs = 0;
@@ -200,6 +204,8 @@ static void applyWifiRegion(uint8_t nchan)
 static void useReliableDns();
 /** Defined below; pulls any logo tile this cycle's flights need. */
 static void fetchMissingLogos();
+/** Defined below; reports to the server and applies anything queued there. */
+static void controlCheckIn();
 
 static bool connectWifiSta()
 {
@@ -608,6 +614,7 @@ static void doFetchAndRender()
     FirmwareUpdater::markRunningImageValid();
 
     fetchMissingLogos();
+    controlCheckIn();
     // A fetch always supplies fresh data: force a recompose even if the cycled
     // index is unchanged. The 200ms re-render path deliberately does NOT do this.
     g_display.markFlightsUpdated();
@@ -654,6 +661,81 @@ static void fetchMissingLogos()
         {
             fetched++; // a failure still costs a request; do not retry in a tight loop
         }
+    }
+}
+
+// Report to the server and apply anything queued there.
+//
+// On the fetch cycle rather than a timer of its own: the device is already
+// talking to this server every cycle, so this adds one request to a
+// conversation that exists instead of inventing a second cadence. It also means
+// remote control has exactly the latency the wall already runs at -- a change
+// lands within one fetch interval, which is the honest cost of never opening an
+// inbound port.
+//
+// Silent when unconfigured: no token, no request.
+static void controlCheckIn()
+{
+    if (g_settings.controlToken.length() == 0 || g_settings.serverUrl.length() == 0)
+        return;
+
+    // What the wall reports about itself. Deliberately the same values
+    // /api/status serves, so the remote page and the LAN page describe the
+    // device identically rather than approximately.
+    JsonDocument doc;
+    doc["fwVersion"] = FirmwareUpdater::runningVersion();
+    doc["ip"] = WiFi.localIP().toString();
+    doc["rssi"] = WiFi.RSSI();
+    doc["flightCount"] = (int)g_lastFlights.size();
+    doc["note"] = g_web.lastNote();
+    doc["brightness"] = g_appliedBrightness;
+    doc["panelOff"] = g_panelOff;
+    doc["mode"] = (g_settings.mode == TrackingMode::Flights) ? "flights" : "area";
+    doc["uptimeS"] = (uint32_t)(millis() / 1000);
+    String statusJson;
+    serializeJson(doc, statusJson);
+
+    const ControlClient::Outcome o =
+        ControlClient::checkIn(g_settings.serverUrl, g_settings.controlToken, statusJson);
+
+    if (o.error.length())
+    {
+        // One line, not a note on /api/status: a control server being briefly
+        // unreachable must not look like the flight fetch failing, which is the
+        // field a person actually reads to judge whether the wall is working.
+        Serial.printf("[control] check-in failed: %s\n", o.error.c_str());
+        return;
+    }
+
+    if (o.settingsChanged)
+        g_controlSettingsChanged = true;
+
+    // Updates before restart, and restart last: a batch containing both should
+    // do the work and THEN reboot, not reboot away from it.
+    if (o.updateUi)
+    {
+        const AssetUpdater::FetchResult r = AssetUpdater::updateUi(g_settings.serverUrl);
+        Serial.printf("[control] ui update: %s\n", r.ok ? (r.changed ? "updated" : "already current") : r.error.c_str());
+    }
+    if (o.updateFirmware)
+    {
+        const FirmwareUpdater::Available a = FirmwareUpdater::check(g_settings.serverUrl);
+        if (!a.ok)
+            Serial.printf("[control] firmware check failed: %s\n", a.error.c_str());
+        else if (a.version == FirmwareUpdater::runningVersion())
+            Serial.println("[control] firmware already current");
+        else
+        {
+            // Reboots on success, so nothing after this runs.
+            const FirmwareUpdater::ApplyResult r = FirmwareUpdater::apply(g_settings.serverUrl, a);
+            Serial.printf("[control] firmware update failed: %s\n", r.error.c_str());
+        }
+    }
+    if (o.restart)
+    {
+        Serial.println("[control] restarting on request");
+        delay(200);
+        ESP.restart();
     }
 }
 
@@ -864,7 +946,9 @@ void loop()
     // pass: short-circuiting would leave the console's set while the web's was
     // true, so a console change made in the same pass as a web change would be
     // silently swallowed until the next unrelated web save.
-    if (g_web.consumeSettingsChanged() | g_console.consumeSettingsChanged())
+    const bool controlChanged = g_controlSettingsChanged;
+    g_controlSettingsChanged = false;
+    if (g_web.consumeSettingsChanged() | g_console.consumeSettingsChanged() | controlChanged)
     {
         // Someone is actively provisioning: restart the AP retry window below.
         // Deliberately keyed on a SETTINGS WRITE rather than on

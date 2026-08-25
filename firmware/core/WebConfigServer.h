@@ -49,6 +49,9 @@ public:
     // Note only. The flight COUNT is no longer pushed: it is derived from the
     // same vector /api/flights serialises, so the two cannot disagree.
     void setLastNote(const String &note);
+    /** The same string /api/status reports, so the remote check-in describes
+     * the wall identically to the LAN page rather than approximately. */
+    const String &lastNote() const { return _lastNote; }
     // FlightDataFetcher::lastFetchStale() from the most recent cycle: the
     // FlightWall server served schedule or position data from cache after a
     // provider failure. Flights still render normally either way -- this is

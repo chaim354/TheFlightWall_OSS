@@ -72,6 +72,21 @@ describe('handleControl: auth', () => {
   });
 });
 
+describe('handleControl: caching', () => {
+  it('marks every response no-store, including the 401', async () => {
+    // Observed: without this the edge cached these and served a status minutes
+    // old while the device was checking in every cycle. The age field does not
+    // save a reader from that -- the age is cached with the status.
+    for (const res of [
+      await call('GET', '/v1/control'),
+      await call('POST', '/v1/control/checkin', '{}'),
+      await call('GET', '/v1/control', '', 'Bearer wrong'),
+    ]) {
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    }
+  });
+});
+
 describe('handleControl: checkin', () => {
   it('stores the reported status and returns queued commands, draining them', async () => {
     await call('POST', '/v1/control/command', JSON.stringify({ action: 'restart' }));

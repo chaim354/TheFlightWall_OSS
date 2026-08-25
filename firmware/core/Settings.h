@@ -129,6 +129,12 @@ struct Settings
     String openSkyClientId;
     String openSkyClientSecret;
     String aeroApiKey;
+    // Shared secret for the server's remote-control routes. Empty disables the
+    // feature on this device: it never checks in, which is the same
+    // inert-rather-than-broken posture the server takes without CONTROL_TOKEN.
+    // Treated as a SECRET everywhere the other four are -- redacted from
+    // /api/settings, and an empty value on write means "unchanged".
+    String controlToken;
     // Base URL of the FlightWall server, e.g. "https://flightwall.example.workers.dev".
     // Stored without a trailing slash (normalised on load). Empty means the
     // server source is unusable and the fetcher falls back to AdsbLol.

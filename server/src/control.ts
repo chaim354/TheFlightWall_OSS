@@ -130,13 +130,34 @@ export function stripProtected(set: Record<string, unknown>): Record<string, unk
   return out;
 }
 
+/**
+ * no-store on EVERY control response, without exception.
+ *
+ * Not defensive boilerplate -- an observed bug. Without it these responses were
+ * cached at the edge, and repeated polls returned a status minutes old while
+ * the device was checking in every cycle. It cost several minutes of diagnosing
+ * a device that was working perfectly, and on the control page it would be
+ * worse: a page whose entire job is saying what the wall is doing, showing a
+ * stale answer as though it were live. The age field cannot save a reader from
+ * that, because the age is cached along with the status.
+ *
+ * no-store rather than no-cache: these carry device state and command queues
+ * behind a bearer token, and there is no version of "keep a copy" that helps.
+ */
 const json = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  });
 
 const UNAUTHORISED = (): Response =>
   new Response(JSON.stringify({ ok: false, error: 'unauthorised' }), {
     status: 401,
-    headers: { 'content-type': 'application/json', 'www-authenticate': 'Bearer' },
+    headers: {
+      'content-type': 'application/json',
+      'www-authenticate': 'Bearer',
+      'cache-control': 'no-store',
+    },
   });
 
 /**

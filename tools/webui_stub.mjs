@@ -120,6 +120,7 @@ const SETTINGS = {
   network: { wifiSsid: 'HomeWiFi', wifiPasswordSet: true },
   api: {
     openSkyClientId: 'osky-id', openSkyClientSecretSet: true, aeroApiKeySet: false,
+    controlTokenSet: false,
     positionSource: 'server', serverUrl: 'https://flightwall.example',
     enrichmentSource: 'adsbdb', enrichmentFallbackToAeroApi: false,
   },
