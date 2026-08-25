@@ -76,18 +76,13 @@ env:
     # them open -- see src/control.ts. Unlike the four above, this one is not a
     # read credential: whoever holds it can reconfigure and restart the wall.
     - CONTROL_TOKEN
-    # Calendar sync is DEPLOYED BUT OFF: TRACKED_ICS_URL is deliberately not
-    # listed here yet, because Kamal fails the deploy on a secret it cannot
-    # resolve, and the published feed URL does not exist yet. Without the var
-    # the sync never runs and everything else behaves exactly as before.
-    #
-    # To switch it on: add the line to .kamal/secrets (it belongs in 1Password
-    # with the other four -- it is a CAPABILITY URL, and anyone holding it can
-    # read every flight in that calendar), uncomment the entry below, and
-    # redeploy. See server/README.md, "Syncing tracked flights from a
-    # calendar", for publishing the feed and what the sync will and will not
-    # delete.
-    # - TRACKED_ICS_URL
+    # Calendar sync, LIVE since 2026-08-25. A CAPABILITY URL -- anyone holding
+    # it can read every flight in that calendar -- so it lives in 1Password
+    # (tinkerex/flightwall-ics-url) with the other four and never in this file.
+    # Unset it to switch the sync off; the tracked tick then behaves exactly as
+    # it did before. See server/README.md, "Syncing tracked flights from a
+    # calendar", for what the sync will and will not delete.
+    - TRACKED_ICS_URL
 
 # The schedule table (server writes it to SCHEDULE_PATH, which the
 # Dockerfile defaults to /app/data/schedule.json) needs to survive a
