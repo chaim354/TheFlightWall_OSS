@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  redactSettingsForTier,
   tierFor,
   hashPassword,
   actionNeedsAdmin,
@@ -202,6 +203,23 @@ export function redactStatus(status: Record<string, unknown>): Record<string, un
 }
 
 /**
+ * The status as a given tier is allowed to see it.
+ *
+ * redactStatus() removes what NOBODY should see; this removes what THIS caller
+ * should not. Same rule as the write path, from the same list, so a field
+ * cannot be gated in one direction and forgotten in the other.
+ */
+function statusForTier(
+  status: Record<string, unknown> | null,
+  tier: Tier,
+): Record<string, unknown> | null {
+  if (!status) return null;
+  const settings = status.settings;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return status;
+  return { ...status, settings: redactSettingsForTier(settings as Record<string, unknown>, tier) };
+}
+
+/**
  * GET /v1/control, POST /v1/control/{checkin,command,password}.
  *
  * `nowMs` is a parameter rather than a Date.now() call so the age arithmetic is
@@ -261,7 +279,7 @@ export async function handleControl(
       // would not be enough: the exposure lasts as long as the default does.
       usingDefaultUiPassword,
       adminAvailable,
-      status: state.status,
+      status: statusForTier(state.status, tier),
       // Age rather than a timestamp: a control page must never present stale
       // state as though it were live, and an age is the one form a reader
       // cannot misjudge at a glance.

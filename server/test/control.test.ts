@@ -12,6 +12,7 @@ import {
   hashPassword,
   verifyPassword,
   adminFieldsIn,
+  redactSettingsForTier,
   actionNeedsAdmin,
   DEFAULT_UI_PASSWORD,
 } from '../src/controlAuth';
@@ -233,6 +234,45 @@ describe('redactStatus', () => {
     expect(redactStatus({ fwVersion: 'x' })).toEqual({ fwVersion: 'x' });
     expect(redactStatus({ fwVersion: 'x', settings: { display: {} } }))
       .toEqual({ fwVersion: 'x', settings: { display: {} } });
+  });
+});
+
+describe('what each tier may READ', () => {
+  const settings = {
+    display: { brightness: 5, fetchIntervalSeconds: 60 },
+    api: { openSkyClientId: 'someone@example.com-api-client', positionSource: 'server', serverUrl: 'https://x' },
+    filters: { hideCargo: true },
+    hardware: { panelResX: 64 },
+    light: { pin: 4 },
+  };
+
+  it('hides from the ui tier exactly what the ui tier may not set', () => {
+    expect(redactSettingsForTier(settings, 'ui')).toEqual({
+      display: { brightness: 5 },
+      api: {},
+      filters: { hideCargo: true },
+    });
+  });
+
+  it('shows the admin tier everything', () => {
+    expect(redactSettingsForTier(settings, 'admin')).toEqual(settings);
+  });
+
+  it('redacts on the wire, not just in the helper', async () => {
+    // The OpenSky client id is the account holder's email address, and the ui
+    // password ships with a public default -- so anything the ui tier can read
+    // is effectively public until somebody changes it.
+    await call('POST', '/v1/control/checkin', JSON.stringify({ settings }), DEVICE);
+
+    const asUi = (await (await call('GET', '/v1/control')).json()) as { status: { settings: Record<string, unknown> } };
+    expect(JSON.stringify(asUi.status.settings)).not.toContain('example.com');
+    expect(asUi.status.settings.hardware).toBeUndefined();
+
+    await call('POST', '/v1/control/password', JSON.stringify({ which: 'admin', newPassword: 'admin-password-1' }));
+    const asAdmin = (await (await call('GET', '/v1/control', '', 'admin-password-1')).json()) as
+      { status: { settings: Record<string, unknown> } };
+    expect(JSON.stringify(asAdmin.status.settings)).toContain('example.com');
+    expect(asAdmin.status.settings.hardware).toEqual({ panelResX: 64 });
   });
 });
 

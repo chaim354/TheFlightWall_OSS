@@ -138,6 +138,43 @@ export function actionNeedsAdmin(action: string): boolean {
  * password" leaves someone hunting through a form; "hardware, display.fetchIntervalSeconds
  * need the admin password" does not.
  */
+/**
+ * The same list, applied to READS.
+ *
+ * A tier that may not set a field has no business being shown its value
+ * either: the ui password ships with a public default, so anything returned to
+ * that tier is effectively public until someone changes it. The OpenSky client
+ * id is the account holder's email address; the AeroAPI key arrives redacted
+ * but its presence flag does not have to.
+ *
+ * Deliberately driven by the SAME constants as adminFieldsIn(), so a field
+ * added to one direction cannot be forgotten in the other -- which is exactly
+ * how the Wi-Fi SSID ended up readable.
+ */
+export function redactSettingsForTier(
+  settings: Record<string, unknown>,
+  tier: Tier,
+): Record<string, unknown> {
+  if (tier === 'admin') return settings;
+
+  const out: Record<string, unknown> = {};
+  for (const [section, value] of Object.entries(settings)) {
+    if (ADMIN_SECTIONS.has(section)) continue;
+
+    const keys = ADMIN_KEYS[section];
+    if (!keys || !value || typeof value !== 'object' || Array.isArray(value)) {
+      out[section] = value;
+      continue;
+    }
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (!keys.has(k)) kept[k] = v;
+    }
+    out[section] = kept;
+  }
+  return out;
+}
+
 export function adminFieldsIn(set: Record<string, unknown>): string[] {
   const found: string[] = [];
   for (const [section, value] of Object.entries(set)) {
