@@ -115,6 +115,19 @@ private:
 
     void drawTextLine(int16_t x, int16_t y, const String &text, uint16_t color);
     String truncateToColumns(const String &text, int maxColumns);
+
+    // The tracked-flight marker: a 1px white border round the whole panel with
+    // TRACKED in the top-right. The length is stated rather than measured
+    // because it is needed for LAYOUT, in displayMiniCard, before anything is
+    // drawn -- sizeof-1 keeps the two from drifting if the word ever changes.
+    static constexpr const char *TRACKED_LABEL = "TRACKED";
+    static constexpr size_t TRACKED_LABEL_LEN = sizeof("TRACKED") - 1;
+    // Which layout displayFlightCard will pick, as a predicate: the tracked
+    // label needs the answer BEFORE the card is drawn, and a second copy of
+    // the test is how the label ends up on a card that never reserved room.
+    bool usesMiniCard() const { return _matrixHeight >= 48 && _matrixWidth >= 96; }
+    int16_t trackedLabelX() const;
+    void drawTrackedChrome();
     void buildFlightLines(const FlightInfo &f, std::vector<String> &outLines, bool includeAirline);
     void displayFlightCard(const FlightInfo &f);     // picks a layout by panel shape
     void displayMiniCard(const FlightInfo &f);       // big panels (128x64): logo + info + metric rows

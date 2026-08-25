@@ -418,44 +418,6 @@ uint16_t Hub75Display::accentColorFor(const String &code)
 
 void Hub75Display::drawLogoOrBadge(const FlightInfo &f, int16_t x, int16_t y, int16_t w, int16_t h)
 {
-    // Pinned marker: a 3px amber bar down the CARD's left edge (x=0, full
-    // _matrixHeight) -- deliberately not (x, y, h) above, which describe only
-    // the logo/badge box inside the card, not the card itself. Every layout
-    // that reaches this function renders one flight per full frame (see
-    // displayFlights()/displayFlightCard()), so the panel IS the card.
-    //
-    // Filled for a live fix, hollow (outline only) for a dead-reckoned one --
-    // the panel must never present a schedule projection the same way it
-    // presents an observation, the same rule eta_src follows for times. Below
-    // 3px, drawRect's outline and fillRect's fill render identically (no
-    // interior row is left to leave unlit), so 3px is the minimum width that
-    // actually makes hollow look hollow.
-    //
-    // Drawn BEFORE the logo/badge below, and before the rest of this card's
-    // text -- not after. The Mini and Side-by-side boxes start only 1-2px
-    // from this same edge (x=2 and x=1 respectively, at their call sites),
-    // and Mini's bottom metric rows print at x=1 too; a bar painted on top of
-    // those would nick a column out of an airline logo or a digit. Painted
-    // first instead, everything drawn afterward -- the box fill/blit below
-    // (always opaque across its own footprint) and this card's text (opaque
-    // only on each glyph's own "on" pixels, per drawTextLine()'s transparent
-    // setTextColor()) -- paints over the bar wherever it actually has
-    // content, so the bar only shows through in the margin nothing else
-    // claims. The Stacked layout's box is centered and never reaches the
-    // edge, so there the bar is simply a clean, unbroken line.
-    if (f.pinned)
-    {
-        const uint16_t amber = rgb565(255, 180, 84);
-        if (f.position_estimated)
-        {
-            _canvas->drawRect(0, 0, 3, _matrixHeight, amber);
-        }
-        else
-        {
-            _canvas->fillRect(0, 0, 3, _matrixHeight, amber);
-        }
-    }
-
     // Logo selection priority (first that loads wins):
     //   1. helicopter -> generic rotorcraft icon (must NOT fall to _PRIVATE)
     //   2. private     -> generic private-jet icon
@@ -544,9 +506,61 @@ int16_t Hub75Display::fitLines(std::vector<String> &lines, int maxCols, int avai
     return (int16_t)(n * charHeight + (n - 1) * lineSpacing);
 }
 
+// Where the TRACKED label starts, right-aligned inside the border, or -1 when
+// this panel is too narrow to carry it. displayMiniCard calls this BEFORE it
+// lays out its top line so the airline name can stop short of the label rather
+// than running underneath it; drawTrackedChrome then draws at the same x.
+//
+// The label is deliberately the full word rather than an abbreviation: it is
+// the only thing on the panel that says WHY this card looks different, and a
+// wall display is read from across a room, where "TRK" is a guess.
+int16_t Hub75Display::trackedLabelX() const
+{
+    // ONLY the Mini layout. It is the one that reserves columns for this (see
+    // displayMiniCard), and the others actively collide: the Stacked card
+    // centres a 32px logo at the very top, so a label right-aligned there
+    // would be drawn straight across it. Gated on the same predicate the
+    // dispatcher selects the layout with, so the two cannot drift into
+    // disagreeing about which card is on screen. Those panels still get the
+    // border, which is what says "tracked"; only the word is dropped.
+    if (!usesMiniCard())
+        return -1;
+    const int16_t w = (int16_t)(TRACKED_LABEL_LEN * 6); // 6px advance per glyph
+    const int16_t x = (int16_t)(_matrixWidth - 1 - w);
+    return x >= 0 ? x : (int16_t)-1;
+}
+
+// A 1px white border around the whole panel, plus TRACKED in the top-right.
+//
+// Drawn LAST, over the finished card, which is the opposite of the amber bar
+// this replaces: a bar only had to survive in the margin, whereas a border has
+// to close. A border with a gap in it does not read as a border at all, it
+// reads as a rendering fault -- so where a glyph reaches the outermost column
+// the border wins, costing that glyph one pixel of its edge. Nothing in the
+// Mini layout gets that close (its logo starts at x=2, its metric rows at x=1,
+// and its text stops well inside the last column), so on the 128x64 wall this
+// costs nothing at all.
+//
+// This is the whole marker now: a dead-reckoned position is no longer drawn
+// differently from an observed one. That was a deliberate call -- see
+// HANDOFF.md. `pos_src` is untouched on the wire and still visible in
+// /api/flights and on the server's watched-flights page.
+void Hub75Display::drawTrackedChrome()
+{
+    const uint16_t white = rgb565(255, 255, 255);
+    _canvas->drawRect(0, 0, _matrixWidth, _matrixHeight, white);
+
+    // y=1 clears the border's own top row. The label and the airline name share
+    // rows 4-7 but never a column: at 128px the name is cut to 7 chars, ending
+    // at x=80, and the label starts at x=85.
+    const int16_t x = trackedLabelX();
+    if (x >= 0)
+        drawTextLine(x, 1, String(TRACKED_LABEL), white);
+}
+
 void Hub75Display::displayFlightCard(const FlightInfo &f)
 {
-    if (_matrixHeight >= 48 && _matrixWidth >= 96)
+    if (usesMiniCard())
         displayMiniCard(f); // big panel (e.g. 128x64): logo + 3 info lines + 2 metric rows
     else if (_matrixHeight < 16)
         displayTextOnlyCard(f); // too short for a logo
@@ -554,6 +568,12 @@ void Hub75Display::displayFlightCard(const FlightInfo &f)
         displaySideBySideCard(f); // wide & short (128x32, 160x32, 64x32)
     else
         displayStackedCard(f); // square / tall (64x64)
+
+    // After the layout, never inside one: every card shape gets the same
+    // marker, including displayTextOnlyCard, which the old bar missed entirely
+    // because it lived in drawLogoOrBadge and that layout never calls it.
+    if (f.pinned)
+        drawTrackedChrome();
 }
 
 // "ORD-LAX" style route, preferring IATA codes.
@@ -685,6 +705,16 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     const int16_t tx = 2 + box + 4; // ~38
     const int topCols = (_matrixWidth - tx - 1) / 6;
 
+    // The TRACKED label shares the first line's row, so on a tracked card the
+    // airline name gets only the columns left of it (14 -> 7 at 128px wide).
+    // Only the AIRLINE line is shortened: route and aircraft sit on rows the
+    // label does not occupy and keep the full width. A negative result means
+    // the label leaves no usable columns at all, in which case the name is
+    // dropped rather than drawn as a stub -- the label still says what the card
+    // is, which is the more useful of the two in that space.
+    const int16_t labelX = f.pinned ? trackedLabelX() : (int16_t)-1;
+    const int topColsAirline = labelX < 0 ? topCols : (labelX - 2 - tx) / 6;
+
     String airline = f.airline_display_name_full.length() ? f.airline_display_name_full
                      : (f.operator_iata.length() ? f.operator_iata
                         : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
@@ -698,7 +728,8 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     if (_lastDrewLogo)
         airline = stripAirlineWords(airline);
 
-    drawTextLine(tx, topY, truncateToColumns(airline, topCols), color);
+    if (topColsAirline > 0)
+        drawTextLine(tx, topY, truncateToColumns(airline, topColsAirline), color);
     if (route.length())
         drawTextLine(tx, topY + 11, truncateToColumns(route, topCols), color);
     if (type.length())
