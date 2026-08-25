@@ -692,6 +692,10 @@ static void controlCheckIn()
     doc["panelOff"] = g_panelOff;
     doc["mode"] = (g_settings.mode == TrackingMode::Flights) ? "flights" : "area";
     doc["uptimeS"] = (uint32_t)(millis() / 1000);
+    // Same string /api/status serves, per this block's own rule -- and the
+    // reason it exists is that the remote page is the ONLY channel to a
+    // wall-mounted board with no cable in it.
+    doc["otaError"] = g_web.lastOtaError();
 
     // The device's own settings, redacted exactly as /api/settings redacts them.
     //
@@ -733,7 +737,10 @@ static void controlCheckIn()
     {
         const FirmwareUpdater::Available a = FirmwareUpdater::check(g_settings.serverUrl);
         if (!a.ok)
+        {
+            g_web.setLastOtaError(a.error);
             Serial.printf("[control] firmware check failed: %s\n", a.error.c_str());
+        }
         else if (a.version == FirmwareUpdater::runningVersion())
             Serial.println("[control] firmware already current");
         else
@@ -769,6 +776,7 @@ static void controlCheckIn()
             // Failure only. The panel must come back, or a failed update is
             // indistinguishable from a dead wall.
             g_display.startOutput();
+            g_web.setLastOtaError(r.error);
             Serial.printf("[control] firmware update failed: %s\n", r.error.c_str());
         }
     }

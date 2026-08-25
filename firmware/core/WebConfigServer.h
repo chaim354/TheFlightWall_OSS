@@ -81,6 +81,21 @@ public:
         _lightDark = dark;
     }
 
+    // Why the last over-the-air update did not happen. Empty when none has
+    // been attempted since boot, or when one succeeded (success reboots, so it
+    // is never observed).
+    //
+    // It earned its place the same way setPanelState did: on 2026-08-25 an OTA
+    // failed twice with the reason printed ONLY to Serial, and the wall is
+    // wall-mounted with no cable in it. From the network the two attempts were
+    // indistinguishable from a device that had ignored the command -- the
+    // image, the signature, the partition and the server were each ruled out
+    // by elimination before a USB cable finally produced `download failed
+    // (-11)`. That string is the whole diagnosis, and it should never again
+    // require going to the wall to read it.
+    void setLastOtaError(const String &err) { _lastOtaError = err; }
+    const String &lastOtaError() const { return _lastOtaError; }
+
     // One-shot flags consumed by the main loop.
     bool consumeSettingsChanged();
     bool consumeRestartRequested();
@@ -95,6 +110,7 @@ private:
     bool _serverStale = false;
     int _lightLevel = -1;
     bool _lightDark = false;
+    String _lastOtaError;
     int _panelBrightness = -1;   // resolved, -1 until the first applyBrightness()
     bool _panelOff = false;      // the button-A toggle
     int _manualBrightness = -1;  // a button ramp, -1 when none is in force
