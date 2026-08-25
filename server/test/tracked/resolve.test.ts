@@ -263,3 +263,35 @@ describe('resolveFlight', () => {
     expect(r.retryable).toBe(false);
   });
 });
+
+describe('a status that only STARTS with "cancel"', () => {
+  // MEASURED 2026-08-25, live: AA3964 on 2026-08-25 returned two legs --
+  // ORD->HPN "CanceledUncertain", and HPN->ORD "Unknown" which was the one
+  // actually in the air. CANCELED_STATUSES was an exact-match set of
+  // {canceled, cancelled}, so "CanceledUncertain" was NOT recognised, the dead
+  // leg survived the filter, and "earliest scheduled departure" then chose it.
+  // The wall showed nothing and the entry sat inert.
+  const payload = JSON.parse(
+    readFileSync(new URL('../../fixtures/aerodatabox-bynumber-canceled-uncertain.json', import.meta.url), 'utf8'),
+  );
+
+  it('drops the cancelled leg and takes the one that is actually flying', () => {
+    const r = parseByNumber(payload, '2026-08-25')!;
+    expect(r).not.toBeNull();
+    expect(r.origIata).toBe('HPN');
+    expect(r.destIata).toBe('ORD');
+  });
+
+  it('recognises every spelling variant the provider uses', () => {
+    for (const status of ['Canceled', 'Cancelled', 'CanceledUncertain', 'CancelledUncertain', 'CANCELED']) {
+      const only = [{ ...payload[0], status }];
+      expect(parseByNumber(only, '2026-08-25')).toBeNull();
+    }
+  });
+
+  it('does not drop a status that merely contains the word later on', () => {
+    // Guard against over-matching: only a LEADING "cancel" counts.
+    const notCancelled = [{ ...payload[1], status: 'Uncertain' }];
+    expect(parseByNumber(notCancelled, '2026-08-25')).not.toBeNull();
+  });
+});

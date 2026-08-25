@@ -1,0 +1,26 @@
+[
+  {
+    "status": "CanceledUncertain",
+    "departure": {
+      "airport": { "iata": "ORD", "icao": "KORD", "location": { "lat": 41.9786, "lon": -87.9048 } },
+      "scheduledTime": { "utc": "2026-08-25 18:58Z", "local": "2026-08-25 13:58-05:00" }
+    },
+    "arrival": {
+      "airport": { "iata": "HPN", "icao": "KHPN", "location": { "lat": 41.067, "lon": -73.7076 } },
+      "scheduledTime": { "utc": "2026-08-25 21:15Z", "local": "2026-08-25 17:15-04:00" }
+    },
+    "aircraft": { "model": "Embraer 170" }
+  },
+  {
+    "status": "Unknown",
+    "departure": {
+      "airport": { "iata": "HPN", "icao": "KHPN", "location": { "lat": 41.067, "lon": -73.7076 } },
+      "scheduledTime": { "utc": "2026-08-25 21:45Z", "local": "2026-08-25 17:45-04:00" }
+    },
+    "arrival": {
+      "airport": { "iata": "ORD", "icao": "KORD", "location": { "lat": 41.9786, "lon": -87.9048 } },
+      "scheduledTime": { "utc": "2026-08-26 00:38Z", "local": "2026-08-25 19:38-05:00" }
+    },
+    "aircraft": { "model": "Embraer 170" }
+  }
+]

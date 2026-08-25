@@ -105,11 +105,34 @@ describe('decideTracked - resolved', () => {
     expect(decideTracked(resolved({ reresolved: true }), dep)).toEqual({ state: 'airborne', action: 'poll' });
   });
 
-  it('does not go airborne without a hex to poll', () => {
-    // Nothing to ask OpenSky about. Polling would be a guaranteed-empty call.
+  it('does not go airborne without a hex to poll, and says so instead of sitting inert', () => {
+    // Nothing to ask OpenSky about, so it must not go airborne -- polling
+    // would be a guaranteed-empty call every tick for the length of a flight.
+    //
+    // But it must not sit in `resolved`/`none` either, which is what it used
+    // to do. MEASURED 2026-08-25: AA3964 ORD->HPN resolved with a route and
+    // schedule but NO modeS hex, and parked silently -- nothing on the wall
+    // and nothing anywhere saying why -- until the 24h date backstop would
+    // have swept it. Past departure there is no route to a hex at all: the
+    // reresolve branch below is unreachable once `nowMs >= depMs`.
+    //
+    // Terminal with a reason, for exactly the argument the depMs === null
+    // case makes four lines earlier: an entry that cannot progress must never
+    // fail silently.
     expect(decideTracked(resolved({ reresolved: true, icao24: null }), dep)).toEqual({
-      state: 'resolved',
+      state: 'unresolved',
       action: 'none',
+      reason: 'resolved without an aircraft to follow (no Mode S hex)',
+    });
+  });
+
+  it('still re-resolves a hexless entry BEFORE departure, where a hex can still arrive', () => {
+    // The pre-departure path must keep working: an aircraft is often assigned
+    // late, and the re-resolve an hour out is what picks it up. Only the
+    // past-departure case is terminal.
+    expect(decideTracked(resolved({ reresolved: false, icao24: null }), dep - HOUR)).toEqual({
+      state: 'resolved',
+      action: 'reresolve',
     });
   });
 

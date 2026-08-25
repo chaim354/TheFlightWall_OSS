@@ -58,9 +58,27 @@ const localDateOf = (localTime: unknown): string | null => {
  */
 const CANCELED_STATUSES = new Set(['canceled', 'cancelled']);
 
+/**
+ * PREFIX match, not exact -- the provider qualifies the word.
+ *
+ * MEASURED 2026-08-25, live: AA3964 returned two legs that day, ORD->HPN as
+ * "CanceledUncertain" and HPN->ORD as "Unknown". The exact-match set did not
+ * recognise "CanceledUncertain", so the dead leg survived this filter and
+ * parseByNumber's "earliest scheduled departure" rule then picked it over the
+ * leg that was genuinely in the air. The wall showed nothing, and the entry
+ * sat resolved-with-no-hex telling nobody why (see lifecycle.ts, which now
+ * makes that state terminal with a reason).
+ *
+ * Anchored with startsWith rather than includes: a leading "cancel" is the
+ * provider qualifying a cancellation, while the word appearing later could be
+ * some future status this has no business swallowing. The exact set is kept
+ * as the documented base spelling for both variants.
+ */
 const isCanceled = (row: Record<string, unknown>): boolean => {
   const status = str(row.status);
-  return status !== null && CANCELED_STATUSES.has(status.toLowerCase());
+  if (status === null) return false;
+  const s = status.toLowerCase();
+  return CANCELED_STATUSES.has(s) || s.startsWith('cancel');
 };
 
 /** Map one qualifying row to a ResolvedFlight. */

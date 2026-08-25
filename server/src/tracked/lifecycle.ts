@@ -157,9 +157,21 @@ export function decideTracked(
     if (nowMs >= depMs) {
       // Nothing to poll without a hex; going airborne would guarantee an empty
       // call every tick for the length of the flight.
+      //
+      // But hexless past departure is TERMINAL, not idle. There is no route to
+      // a hex from here: the reresolve branch below is unreachable once this
+      // one is taken, so `resolved`/`none` would mean sitting silent until the
+      // 24h date backstop -- nothing on the wall, and nothing anywhere saying
+      // why. That is precisely what the depMs === null case above refuses to
+      // do, and the same argument applies unchanged: an entry that cannot
+      // progress must never fail silently.
       return e.icao24
         ? { state: 'airborne', action: 'poll' }
-        : { state: 'resolved', action: 'none' };
+        : {
+            state: 'unresolved',
+            action: 'none',
+            reason: 'resolved without an aircraft to follow (no Mode S hex)',
+          };
     }
     if (!e.reresolved && nowMs >= depMs - RERESOLVE_LEAD_MS) {
       return { state: 'resolved', action: 'reresolve' };
