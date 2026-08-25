@@ -101,8 +101,8 @@ Everything that can break the wall or spend money:
 - **Actions**: `restart`, `updateui`, `updatefw`
 - **The wall's reported status** — firmware version, IP, signal, uptime
 - **Sections**: `hardware` (HUB75 geometry, driver chip, I2S clock)
-- **Light sensor wiring**: `light.type`, `light.pin`, `light.hysteresis` — but
-  NOT `enabled`, `darkThreshold`, `dimInstead` or `dimBrightness`
+- **Light sensor wiring**: `light.type` and `light.pin` only — not `enabled`,
+  `darkThreshold`, `hysteresis`, `dimInstead` or `dimBrightness`
 - **Keys**: `display.fetchIntervalSeconds`; `api.positionSource`,
   `enrichmentSource`, `enrichmentFallbackToAeroApi`, `serverUrl`, and every
   credential — `aeroApiKey`, `openSkyClientId`, `openSkyClientSecret`,
@@ -113,7 +113,9 @@ stated precisely. Which sensor it is and where it is plugged in is wiring;
 getting it wrong blanks the panel and pauses fetching, which from the page looks
 exactly like a dead device. Whether the sensor is *used* and what counts as dark
 are everyday tuning — the wall is too dim this evening, or it never came back on
-this morning. Gating those behind the admin password means walking to the wall to
+this morning. Hysteresis belongs with them rather than with the wiring: it is the
+margin either side of the threshold, so it is set *by* tuning the threshold and
+is useless apart from it. Gating those behind the admin password means walking to the wall to
 fix a room that got darker, which is the opposite of the point. Turning the
 sensor off is also the quickest repair for a panel that has gone dark and should
 not have, which is not a thing to make hard.

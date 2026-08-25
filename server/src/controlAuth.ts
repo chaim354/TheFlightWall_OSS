@@ -129,9 +129,10 @@ const ADMIN_KEYS: Record<string, Set<string>> = {
   // morning. Locking those behind the admin password means walking to the wall
   // to fix a room that got darker, which is the opposite of the point.
   //
-  // Hysteresis sits on the wiring side because it is the anti-flapping margin,
-  // not a brightness preference -- and because it was named as admin.
-  light: new Set(['type', 'pin', 'hysteresis']),
+  // Hysteresis moved to the main page: it is the margin that stops the wall
+  // flapping at dusk, so it is set BY tuning the threshold and is useless
+  // apart from it. Only which sensor and which pin remain wiring.
+  light: new Set(['type', 'pin']),
   api: new Set([
     'positionSource', 'enrichmentSource', 'enrichmentFallbackToAeroApi', 'serverUrl',
     // Credentials and the two knobs that decide how often they get spent.

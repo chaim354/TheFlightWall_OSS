@@ -280,13 +280,15 @@ export const trackedPage = `<!doctype html>
       <span class="check"><input type="checkbox" id="f_light_enabled" /> Use the light sensor</span>
       <div class="row">
         <div><label>Dark threshold</label><input id="f_light_darkThreshold" type="number" /></div>
+        <div><label>Hysteresis</label><input id="f_light_hysteresis" type="number" /></div>
         <div><label>Dim brightness</label><input id="f_light_dimBrightness" type="number" min="0" max="255" /></div>
       </div>
       <span class="check"><input type="checkbox" id="f_light_dimInstead" /> Dim instead of switching off</span>
       <small class="help">Turning the sensor off leaves the wall on the brightness above, which is the
         quickest fix for a panel that has gone dark and should not have. A threshold set too high does
         the same thing on its own — the wall blanks and pauses fetching, and from here that looks exactly
-        like a dead device.</small>
+        like a dead device. Hysteresis is the margin either side of the threshold that stops it flapping
+        on and off at dusk; raise it if the wall dithers, and leave it alone otherwise.</small>
       <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="light">Save</button></div></div>
     </div>
 
@@ -298,11 +300,9 @@ export const trackedPage = `<!doctype html>
             <option value="analog">Analog LDR</option><option value="bh1750">BH1750</option><option value="tcs3472">TCS3472</option>
           </select></div>
         <div><label>Analog pin</label><input id="f_light_pin" type="number" /></div>
-        <div><label>Hysteresis</label><input id="f_light_hysteresis" type="number" /></div>
       </div>
-      <small class="help">Which sensor it is and where it is plugged in. Hysteresis is the margin that
-        stops the wall flapping on and off at dusk — it is here rather than beside the threshold because
-        it is a wiring characteristic, not a preference.</small>
+      <small class="help">Which sensor it is and where it is plugged in. Wrong here and the wall reads
+        darkness off an unconnected pin, which blanks the panel and pauses fetching.</small>
       <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="light">Save</button></div></div>
     </div>
 
