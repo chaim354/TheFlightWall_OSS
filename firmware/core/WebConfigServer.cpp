@@ -9,6 +9,7 @@ Purpose: Implementation of the on-device configuration & control web server.
 #include "adapters/GeoLocator.h"
 #include "utils/ServerJson.h" // renderable()
 #include "core/AssetUpdater.h"
+#include "core/FirmwareUpdater.h"
 
 #include <LittleFS.h>
 #include <WiFi.h>
@@ -92,6 +93,10 @@ void WebConfigServer::registerRoutes()
                { handleUpdateUi(); });
     _server.on("/api/updateui", HTTP_DELETE, [this]()
                { handleClearUi(); });
+    _server.on("/api/firmware", HTTP_GET, [this]()
+               { handleFirmwareCheck(); });
+    _server.on("/api/firmware", HTTP_POST, [this]()
+               { handleFirmwareApply(); });
     _server.on("/setup", HTTP_GET, [this]()
                { handleSetupGet(); });
     _server.on("/setup", HTTP_POST, [this]()
@@ -197,6 +202,58 @@ void WebConfigServer::handleClearUi()
     _server.send(200, "application/json", out);
 }
 
+void WebConfigServer::handleFirmwareCheck()
+{
+    const FirmwareUpdater::Available a = FirmwareUpdater::check(g_settings.serverUrl);
+    JsonDocument doc;
+    doc["ok"] = a.ok;
+    doc["running"] = FirmwareUpdater::runningVersion();
+    if (a.ok)
+    {
+        doc["available"] = a.version;
+        doc["size"] = a.size;
+        // The device decides by comparing strings, not by ordering them: these
+        // are git revisions, which have no order. "different" is the only
+        // question that can honestly be asked, and downgrading is a legitimate
+        // answer to a bad release.
+        doc["differs"] = (a.version != FirmwareUpdater::runningVersion());
+    }
+    else
+    {
+        doc["error"] = a.error;
+    }
+    String out;
+    serializeJson(doc, out);
+    _server.send(a.ok ? 200 : 502, "application/json", out);
+}
+
+void WebConfigServer::handleFirmwareApply()
+{
+    const FirmwareUpdater::Available a = FirmwareUpdater::check(g_settings.serverUrl);
+    if (!a.ok)
+    {
+        _server.send(502, "application/json",
+                     String("{\"ok\":false,\"error\":\"") + a.error + "\"}");
+        return;
+    }
+
+    // Answer BEFORE downloading. A successful apply ends in ESP.restart(), so
+    // the browser would otherwise be waiting on a connection the device is
+    // about to drop -- and would show a network error for the one outcome that
+    // actually worked.
+    _server.send(200, "application/json",
+                 String("{\"ok\":true,\"staging\":\"") + a.version +
+                     "\",\"note\":\"downloading and verifying; the device reboots if it passes\"}");
+    _server.client().flush();
+    delay(50);
+
+    const FirmwareUpdater::ApplyResult r = FirmwareUpdater::apply(g_settings.serverUrl, a);
+    // Only reached on FAILURE -- success rebooted. Nothing to reply to now, so
+    // the serial log is the record.
+    Serial.printf("[ota] update failed: %s\n", r.error.c_str());
+    setLastNote(String("update failed: ") + r.error);
+}
+
 void WebConfigServer::handleGetStatus()
 {
     JsonDocument doc;
@@ -244,6 +301,10 @@ void WebConfigServer::handleGetStatus()
     // Which page is being served, so "I changed the UI and nothing happened" is
     // answerable without guessing. builtin = the copy flashed with the
     // firmware; server = one downloaded from the FlightWall server.
+    doc["fwVersion"] = FirmwareUpdater::runningVersion();
+    // True only in the window between an OTA reboot and the device proving it
+    // works. Visible so a rollback is explicable rather than mysterious.
+    doc["fwPendingVerify"] = FirmwareUpdater::awaitingValidation();
     doc["uiSource"] = AssetUpdater::servingCachedUi() ? "server" : "builtin";
     doc["uiSha"] = AssetUpdater::cachedUiSha();
     doc["panelBrightness"] = _panelBrightness;

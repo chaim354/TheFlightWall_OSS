@@ -30,6 +30,7 @@ Run loop:
 #include <ArduinoJson.h>
 #include "core/Settings.h"
 #include "core/AssetUpdater.h"
+#include "core/FirmwareUpdater.h"
 #include "core/HttpJson.h"
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
@@ -592,6 +593,20 @@ static void doFetchAndRender()
     g_web.setServerStale(g_fetcher->lastFetchStale());
 
     g_lastFlights = std::move(flights);
+
+    // The device has now proved it can do its job: WiFi associated, the server
+    // answered, flights are in hand. THAT is what cancels the bootloader's
+    // pending rollback -- not merely having reached setup().
+    //
+    // The distinction is the whole value of rollback. An image that starts,
+    // brings up the panel and then cannot reach the network is exactly the
+    // failure a cable-free update most needs protecting against, and it would
+    // sail through a "we booted" check. Left unmarked, the bootloader reverts
+    // to the previous image on the next restart, with no cable involved.
+    //
+    // A no-op on a cable-flashed build, which is not pending anything.
+    FirmwareUpdater::markRunningImageValid();
+
     fetchMissingLogos();
     // A fetch always supplies fresh data: force a recompose even if the cycled
     // index is unchanged. The 200ms re-render path deliberately does NOT do this.
