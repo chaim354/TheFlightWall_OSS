@@ -244,20 +244,38 @@ export const LANDING_MAX_MIN = (LANDING_NM / TERMINAL_KT) * 60;
  * about vectoring, holds, runway changes or taxi-in, so it lands within ~5 min
  * enroute and gets vaguer near the end. Always prefixed "~" so the panel never
  * implies a scheduled time.
+ *
+ * `clockDerived` opts out of that rounding, and ONLY a caller whose etaMin came
+ * from a real arrival TIME may pass it -- AeroDataBox's revised or scheduled
+ * arrival (enrich.ts), or a tracked entry's scheduled arrival (tracked/serve.ts).
+ * Such a value is a countdown to a clock instant, so every minute that passes
+ * takes a minute off it, and rounding to the nearest five made the panel LOOK
+ * frozen: the number sat unchanged through five refreshes and then jumped by
+ * five, which reads as a stale card rather than a coarse one. It is only the
+ * PHYSICS estimate that cannot support minutes -- this file's own measurements
+ * put it ~10 min optimistic at cruise -- and that path keeps its rounding
+ * untouched. The "~" prefix stays either way: a scheduled arrival is still a
+ * plan, not a promise, and the aircraft's own progress is not in this number.
  */
-export function formatEta(distanceNm: number, etaMin: number | null): string | null {
+export function formatEta(
+  distanceNm: number,
+  etaMin: number | null,
+  clockDerived = false,
+): string | null {
   if (etaMin === null || !Number.isFinite(etaMin)) return null;
   if (Number.isFinite(distanceNm) && distanceNm <= LANDING_NM && etaMin <= LANDING_MAX_MIN) {
     return 'LANDING';
   }
 
+  // One minute is the smallest step either branch below can take, so the floor
+  // is 1 rather than 5 here -- but it is still a floor for the same reason:
+  // outside LANDING_NM, "~0m" would be both wrong and alarming.
+  const step = clockDerived ? 1 : 5;
   if (etaMin < 60) {
-    // Nearest 5, but never round down to a bare zero — outside LANDING_NM,
-    // "~0m" would be both wrong and alarming.
-    const m = Math.max(5, Math.round(etaMin / 5) * 5);
+    const m = Math.max(step, Math.round(etaMin / step) * step);
     return m >= 60 ? '~1h00' : `~${m}m`;
   }
-  const total = Math.round(etaMin / 10) * 10;
+  const total = clockDerived ? Math.round(etaMin) : Math.round(etaMin / 10) * 10;
   const h = Math.floor(total / 60);
   const m = total % 60;
   return `~${h}h${String(m).padStart(2, '0')}`;

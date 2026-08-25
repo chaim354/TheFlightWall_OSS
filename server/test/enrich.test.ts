@@ -524,7 +524,10 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     expect(f.to).toBe('LHR');
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(296);
-    expect(f.eta_text).toBe('~5h00');
+    // Minute resolution, because this is a clock time and not a physics guess
+    // (see formatEta's clockDerived) -- so the text now names the same 4h56
+    // this case is named after, instead of rounding it away to ~5h00.
+    expect(f.eta_text).toBe('~4h56');
   });
 
   it('rejects only the implausible tier -- a bad revised time does not block a good scheduled time next to it', () => {
@@ -598,7 +601,11 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(4);
-    expect(f.eta_text).toBe('~5m'); // never rounds down to a bare zero
+    // A clock time now shows its own minute rather than the nearest five, so
+    // the "4-minute claim ... passes through exactly as it would have" above is
+    // now literally what the panel says. The bare-zero floor still holds -- it
+    // is just a floor of one minute here rather than five.
+    expect(f.eta_text).toBe('~4m');
   });
 
   it('does not reject a schedule time when the row has no destination coordinates to check it against', () => {

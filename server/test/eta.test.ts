@@ -170,6 +170,44 @@ describe('formatEta', () => {
     // Rounding 2 minutes to the nearest 5 gives 0; at that range we are landing.
     expect(formatEta(200, 2)).toBe('~5m');
   });
+
+  // clockDerived: etaMin counts down to a real arrival TIME (a tracked entry's
+  // scheduled arrival, or the schedule table's revised/scheduled one), so every
+  // minute that passes takes a minute off it. Rounding that to fives made the
+  // card look FROZEN -- unchanged across five refreshes, then a five-minute
+  // jump. Only the physics estimate keeps the coarse rounding.
+  describe('clock-derived', () => {
+    it('steps by one minute under an hour', () => {
+      expect(formatEta(200, 47, true)).toBe('~47m');
+      expect(formatEta(200, 46, true)).toBe('~46m');
+      expect(formatEta(200, 22.4, true)).toBe('~22m');
+      // and the same minutes WITHOUT the flag still round, unchanged
+      expect(formatEta(200, 47)).toBe('~45m');
+    });
+
+    it('steps by one minute at an hour and over', () => {
+      expect(formatEta(800, 122, true)).toBe('~2h02');
+      expect(formatEta(800, 121, true)).toBe('~2h01');
+      expect(formatEta(800, 125, true)).toBe('~2h05');
+      expect(formatEta(800, 60, true)).toBe('~1h00');
+    });
+
+    it('moves on every single minute where the rounded form does not', () => {
+      // The actual complaint, as a test: five consecutive minutes must produce
+      // five distinct strings, not one repeated string and then a jump.
+      const rounded = [64, 63, 62, 61, 60].map((m) => formatEta(800, m));
+      const precise = [64, 63, 62, 61, 60].map((m) => formatEta(800, m, true));
+      expect(new Set(rounded).size).toBe(1);   // '~1h00' five times over
+      expect(new Set(precise).size).toBe(5);
+      expect(precise).toEqual(['~1h04', '~1h03', '~1h02', '~1h01', '~1h00']);
+    });
+
+    it('still says LANDING, and still never renders a bare zero', () => {
+      expect(formatEta(5, 2, true)).toBe('LANDING');
+      expect(formatEta(200, 0.2, true)).toBe('~1m');
+      expect(formatEta(200, null, true)).toBeNull();
+    });
+  });
 });
 
 describe('constants', () => {
