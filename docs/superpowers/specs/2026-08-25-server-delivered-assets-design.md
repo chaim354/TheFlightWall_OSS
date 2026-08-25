@@ -117,7 +117,33 @@ where that matters.
 | A bad firmware image | Two OTA slots; ESP32 rollback marks the new image valid only after a successful boot |
 | Unattended update surprises the user | Manual trigger only |
 
-## The open question: which CA
+## RESOLVED (2026-08-25): signed, not pinned
+
+The maintainer chose signing, and phase 3 is built and verified on hardware.
+The section below is kept as the reasoning that led there.
+
+ECDSA P-256 over the image's SHA-256, public key compiled into the firmware
+(`config/FirmwareSigningKey.h`), private key never in this repository. The
+transport is now irrelevant to code: a hostile network can serve any bytes it
+likes and cannot make them boot.
+
+Verified end to end, in this order deliberately:
+
+- A tampered image -- one byte flipped mid-file, original signature -- was
+  downloaded in full into the spare slot and refused: `[ota] update failed:
+  signature does not verify`. The running firmware was untouched.
+- A genuine signed image took the device from `7c03e5c-dirty` to `c04980b`
+  with no cable, and it cancelled its own rollback after a flight fetch
+  succeeded.
+
+One caveat worth keeping visible: the first tamper test was rejected by the
+WRONG guard. A chunked-encoding bug meant the first flash write received an
+ASCII chunk-length line and failed on the magic byte, so the signature path had
+never actually run. The device was never at risk, but the test had proved
+nothing until that was fixed. A security check that has not been observed
+failing for the RIGHT reason is not yet evidence.
+
+## The reasoning: which CA (superseded by the above)
 
 Verified TLS means the device must know a root to trust, and the server is
 behind Cloudflare, so the device sees Cloudflare's edge certificate rather than
@@ -139,8 +165,7 @@ Staged accordingly:
   transport irrelevant. (b) has no rotation hazard and is the better answer if
   firmware OTA is meant to be depended on.
 
-**This needs a maintainer decision before phase 3 is built.** Phases 1 and 2 do
-not depend on it.
+**Decided: (b), signing.** See the resolution above.
 
 ## Not doing
 
