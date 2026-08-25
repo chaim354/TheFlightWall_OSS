@@ -233,19 +233,23 @@ describe('startServer', () => {
     expect(noAuth.status).toBe(401);
     expect(noAuth.headers.get('www-authenticate')).toBe('Bearer');
 
-    const auth = { authorization: 'Bearer sekrit' };
-    expect((await fetch(`${base}/v1/control`, { headers: auth })).status).toBe(200);
+    // CONTROL_TOKEN is the DEVICE's credential, so it may check in and nothing
+    // else; a person uses the UI password, which starts at the shipped default.
+    const device = { authorization: 'Bearer sekrit' };
+    const person = { authorization: 'Bearer flightwall123' };
+    expect((await fetch(`${base}/v1/control`, { headers: device })).status).toBe(403);
+    expect((await fetch(`${base}/v1/control`, { headers: person })).status).toBe(200);
 
     // A queued command survives to the device's next check-in, through the
     // file on disk rather than through memory.
     const queued = await fetch(`${base}/v1/control/command`, {
-      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      method: 'POST', headers: { ...person, 'content-type': 'application/json' },
       body: JSON.stringify({ set: { display: { brightness: 7 }, network: { wifiSsid: 'evil' } } }),
     });
     expect(queued.status).toBe(201);
 
     const checkin = await fetch(`${base}/v1/control/checkin`, {
-      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      method: 'POST', headers: { ...device, 'content-type': 'application/json' },
       body: JSON.stringify({ fwVersion: '0d68283' }),
     });
     const body = (await checkin.json()) as { commands: { set?: Record<string, unknown> }[] };

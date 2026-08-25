@@ -37,7 +37,7 @@ It is not fine for control, which is the whole cost of this feature.
 |---|---|
 | Transport | **The existing 60s poll**, via one added request. No tunnel, no inbound connection |
 | Scope | **Everything except network settings.** WiFi stays device-only |
-| Auth | **A shared token**, server env + device setting + the control page |
+| Auth | **Three secrets**: a device token, a resettable UI password, an admin password |
 | Devices | **One wall per server.** A single global command queue, no device ids |
 | Delivery | **At-most-once.** The queue drains on collection; a lost command is re-queued by a human |
 
@@ -52,12 +52,67 @@ queued, and the device strips it again before applying. The second is not
 redundant — it is the one that still holds when the server is the thing that has
 been compromised, which is precisely the scenario the exclusion is for.
 
-### Why one shared token, and what it does not protect
+### Three secrets, not one
 
-Anyone holding the token has full control of the wall. That is understood and
-accepted for a single-user deployment; the alternative (per-user login) is
-Cloudflare Access in front of these routes, which needs no code here and can be
-added later without changing anything below.
+The original design had a single shared token. That could not survive the
+requirement that a person be able to reset the password from the page: the token
+is what the DEVICE authenticates with, so resetting it would leave the wall
+holding a credential the server no longer accepts, unable to check in, with the
+only repair being the cable this whole arc existed to eliminate.
+
+So the one secret splits into three, by what each is for:
+
+| Secret | Held by | Resettable | Grants |
+|---|---|---|---|
+| `CONTROL_TOKEN` (env) | the device | **No** — deliberately | check-in only |
+| UI password | a person | Yes, from the page | status, and the everyday settings |
+| Admin password | a person | Yes, by its holder | everything, including flashing |
+
+`tierFor()` resolves a bearer to one of `none` / `device` / `ui` / `admin`.
+Admin is checked **before** ui, so setting both to the same string grants admin
+rather than silently capping at ui. Device is checked first and separately
+because it is a different KIND of caller: it may report, and nothing else. A
+browser presenting the device token gets 403 on every page route, and a browser
+cannot check in — otherwise anyone with the UI password could fake what the wall
+reports and the page would show a fiction with a fresh timestamp on it.
+
+Passwords are stored as scrypt hashes with a per-password salt, in the same
+state file as the queue. The device token stays a plain shared secret compared
+in constant time, because it is supplied by the environment, not stored.
+
+### The default UI password
+
+The UI password defaults to `flightwall123` — public, guessable, and shipped on
+purpose so the page works the moment it is deployed.
+
+It is not a secret and is never treated as one. `GET /v1/control` returns
+`usingDefaultUiPassword`, and the page shows a warning card continuously while
+it is true, saying plainly that anyone who finds the URL can change settings and
+restart the wall. Setting the UI password back to the default is refused: it
+would clear the warning while leaving the exposure exactly as it was.
+
+Once a real UI password exists, the default stops being accepted — otherwise
+resetting the password would change nothing at all.
+
+### What the admin tier gates
+
+Everything that can break the wall or spend money:
+
+- **Actions**: `restart`, `updateui`, `updatefw`
+- **Sections**: `hardware` (HUB75 geometry, driver chip, I2S clock), `light`
+  (sensor type, pin, thresholds, hysteresis)
+- **Keys**: `display.fetchIntervalSeconds`; `api.positionSource`,
+  `enrichmentSource`, `enrichmentFallbackToAeroApi`, `serverUrl`, and every
+  credential — `aeroApiKey`, `openSkyClientId`, `openSkyClientSecret`,
+  `enrichmentCacheSeconds`
+
+A refusal names the fields it refused. "Needs the admin password" leaves someone
+hunting through a form for which control did it.
+
+Before any admin password exists the admin tier is unreachable, and flashing
+stays unavailable rather than falling back to a weaker check. The ui tier may
+create the FIRST admin password — somebody has to, and it is the only credential
+in existence at that point — and is locked out of changing it afterwards.
 
 Absent `CONTROL_TOKEN`, every control route 404s and the device never calls
 them — the same inert-rather-than-broken posture `/v1/tracked` takes without
@@ -74,7 +129,10 @@ OpenSky credentials.
   anything still pending.
 - `POST /v1/control/command` — queue one command.
 
-All three require `Authorization: Bearer <CONTROL_TOKEN>`.
+- `POST /v1/control/password` — set the UI or admin password.
+
+All require `Authorization: Bearer <secret>`, and each route accepts only the
+tiers listed above.
 
 State lives on the volume beside the schedule and tracked entries, so a redeploy
 does not lose a queued command or the last known status.
@@ -99,10 +157,34 @@ as they do for a LAN save.
 
 ### Page
 
-A second view on the server, gated by the token, showing what the wall reports
-and offering the same controls the LAN page has minus WiFi. Every value is
-stamped with when the wall last checked in, because a control page showing stale
-state as though it were live is worse than one showing nothing.
+**One page, not two.** The controls live on the watched-flights page at `/`, so
+there is a single address for the wall; `/control` 301s there for anyone who was
+given the old URL. Watched flights stay unauthenticated above the fold and the
+wall controls sit behind the password below them.
+
+It offers the same controls the LAN page has, minus WiFi and the device token,
+and the fields auto-populate from the settings the device reports on each
+check-in. That population is what makes the form safe: without it an untouched
+checkbox reads as "set this to false" rather than "leave it alone", so queueing
+one filter change would silently clear two others. If a wall has never reported
+its settings the controls stay hidden, because sending a form full of blanks
+would overwrite real values with guesses.
+
+A submit collects from **its own card only**, not by section name across the
+page. A section's fields are deliberately spread across cards —
+`display.fetchIntervalSeconds` sits with the API keys because it decides how
+often they are spent — so a page-wide sweep made "Queue display" also submit an
+admin-only field and the whole card was refused for a control the person never
+touched.
+
+Admin cards stay visible but inert at the ui tier, so it is obvious the settings
+exist and obvious why they cannot be touched; hiding them reads as a missing
+feature. A `Lock` control clears the held password and returns to the sign-in
+card, which is also how someone at the ui tier signs back in with the admin one.
+
+Every value is stamped with how long ago the wall checked in — an age, not a
+timestamp, because the reader is asking "is it alive" and a clock reading makes
+them subtract against a device that may be in another time zone.
 
 ## Risks
 

@@ -1,4 +1,13 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import {
+  tierFor,
+  hashPassword,
+  actionNeedsAdmin,
+  adminFieldsIn,
+  DEFAULT_UI_PASSWORD,
+  type Secrets,
+  type Tier,
+} from './controlAuth';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -30,6 +39,11 @@ export interface ControlState {
   status: Record<string, unknown> | null;
   statusAtMs: number | null;
   queue: Command[];
+  /** Null while the shipped default is still in force -- see controlAuth. */
+  uiPasswordHash?: string | null;
+  /** Null until one is set; the admin tier is unreachable until then, rather
+   * than falling back to a weaker check. */
+  adminPasswordHash?: string | null;
 }
 
 /**
@@ -42,7 +56,9 @@ export interface ControlState {
  */
 export const MAX_QUEUE = 20;
 
-const EMPTY: ControlState = { status: null, statusAtMs: null, queue: [] };
+const EMPTY: ControlState = {
+  status: null, statusAtMs: null, queue: [], uiPasswordHash: null, adminPasswordHash: null,
+};
 
 export interface ControlStorage {
   read(): Promise<ControlState>;
@@ -69,6 +85,8 @@ export function fileControlStorage(path: string): ControlStorage {
           status: s.status ?? null,
           statusAtMs: typeof s.statusAtMs === 'number' ? s.statusAtMs : null,
           queue: Array.isArray(s.queue) ? s.queue : [],
+          uiPasswordHash: s.uiPasswordHash ?? null,
+          adminPasswordHash: s.adminPasswordHash ?? null,
         };
       } catch (err) {
         if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
@@ -90,24 +108,6 @@ export function fileControlStorage(path: string): ControlStorage {
       }
     },
   };
-}
-
-/**
- * Constant-time bearer check.
- *
- * `===` on a secret leaks its prefix through timing, and this one grants
- * control of the device. The length guard before the compare is required
- * because timingSafeEqual throws on differing lengths -- so length itself is
- * still observable, which is acceptable and unavoidable here.
- */
-export function authorised(header: string | null | undefined, token: string): boolean {
-  if (!token) return false;
-  const prefix = 'Bearer ';
-  if (!header || !header.startsWith(prefix)) return false;
-  const got = Buffer.from(header.slice(prefix.length));
-  const want = Buffer.from(token);
-  if (got.length !== want.length) return false;
-  return timingSafeEqual(got, want);
 }
 
 /**
@@ -176,7 +176,7 @@ const UNAUTHORISED = (): Response =>
   });
 
 /**
- * GET /v1/control, POST /v1/control/command, POST /v1/control/checkin.
+ * GET /v1/control, POST /v1/control/{checkin,command,password}.
  *
  * `nowMs` is a parameter rather than a Date.now() call so the age arithmetic is
  * testable, matching the convention every other handler here follows.
@@ -187,17 +187,32 @@ export async function handleControl(
   bodyText: string,
   authHeader: string | null | undefined,
   storage: ControlStorage,
-  token: string,
+  deviceToken: string,
   nowMs: number,
 ): Promise<Response> {
-  if (!authorised(authHeader, token)) return UNAUTHORISED();
-
   const state = await storage.read();
+  const secrets: Secrets = {
+    deviceToken,
+    uiPasswordHash: state.uiPasswordHash ?? null,
+    adminPasswordHash: state.adminPasswordHash ?? null,
+  };
+
+  const bearer = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.slice('Bearer '.length)
+    : null;
+  const tier: Tier = tierFor(bearer, secrets);
+  if (tier === 'none') return UNAUTHORISED();
+
+  const usingDefaultUiPassword = !state.uiPasswordHash;
+  const adminAvailable = !!state.adminPasswordHash;
 
   // The DEVICE's call: report status, collect commands. Collecting drains the
   // queue -- at-most-once, by decision. A command lost to a reboot mid-apply is
   // re-queued by a human, which is preferable to one that silently repeats.
   if (method === 'POST' && url.pathname === '/v1/control/checkin') {
+    // Only the device may check in. A browser holding the UI password must not
+    // be able to overwrite the reported status with anything it likes.
+    if (tier !== 'device') return json({ ok: false, error: 'not the device' }, 403);
     let status: Record<string, unknown>;
     try {
       status = JSON.parse(bodyText) as Record<string, unknown>;
@@ -205,14 +220,21 @@ export async function handleControl(
       return json({ ok: false, error: 'body must be JSON' }, 400);
     }
     const commands = state.queue;
-    await storage.write({ status, statusAtMs: nowMs, queue: [] });
+    await storage.write({ ...state, status, statusAtMs: nowMs, queue: [] });
     return json({ ok: true, commands });
   }
 
-  // The PAGE's call.
+  // Everything below is for a person, never the device.
+  if (tier === 'device') return json({ ok: false, error: 'device token cannot do this' }, 403);
+
   if (method === 'GET' && url.pathname === '/v1/control') {
     return json({
       ok: true,
+      tier,
+      // The page shows a standing warning while this is true. Once, at login,
+      // would not be enough: the exposure lasts as long as the default does.
+      usingDefaultUiPassword,
+      adminAvailable,
       status: state.status,
       // Age rather than a timestamp: a control page must never present stale
       // state as though it were live, and an age is the one form a reader
@@ -220,6 +242,39 @@ export async function handleControl(
       statusAgeMs: state.statusAtMs === null ? null : nowMs - state.statusAtMs,
       pending: state.queue,
     });
+  }
+
+  // Changing either password.
+  if (method === 'POST' && url.pathname === '/v1/control/password') {
+    let input: { which?: unknown; newPassword?: unknown };
+    try {
+      input = JSON.parse(bodyText) as { which?: unknown; newPassword?: unknown };
+    } catch {
+      return json({ ok: false, error: 'body must be JSON' }, 400);
+    }
+    const which = input.which === 'admin' ? 'admin' : 'ui';
+    const next = typeof input.newPassword === 'string' ? input.newPassword : '';
+    if (next.length < 8) {
+      return json({ ok: false, error: 'password must be at least 8 characters' }, 400);
+    }
+    // Setting the ADMIN password needs admin -- unless none exists yet, which
+    // is the bootstrap case: somebody has to be able to create the first one,
+    // and the UI password is the only credential available at that point.
+    if (which === 'admin' && adminAvailable && tier !== 'admin') {
+      return json({ ok: false, error: 'changing the admin password needs the admin password' }, 403);
+    }
+    if (which === 'ui' && next === DEFAULT_UI_PASSWORD) {
+      // Refusing beats accepting: setting it back to the shipped default would
+      // clear the warning while leaving the exposure exactly as it was.
+      return json({ ok: false, error: 'that is the shipped default; choose something else' }, 400);
+    }
+    const hash = hashPassword(next);
+    await storage.write({
+      ...state,
+      uiPasswordHash: which === 'ui' ? hash : (state.uiPasswordHash ?? null),
+      adminPasswordHash: which === 'admin' ? hash : (state.adminPasswordHash ?? null),
+    });
+    return json({ ok: true, which });
   }
 
   if (method === 'POST' && url.pathname === '/v1/control/command') {
@@ -240,13 +295,30 @@ export async function handleControl(
       if (!ACTIONS.includes(input.action as ControlAction)) {
         return json({ ok: false, error: `unknown action; expected one of ${ACTIONS.join(', ')}` }, 400);
       }
+      if (actionNeedsAdmin(input.action) && tier !== 'admin') {
+        return json({
+          ok: false,
+          needsAdmin: true,
+          error: adminAvailable
+            ? `"${input.action}" needs the admin password`
+            : `"${input.action}" needs an admin password, and none has been set yet`,
+        }, 403);
+      }
       cmd.action = input.action as ControlAction;
     } else if (input.set && typeof input.set === 'object' && !Array.isArray(input.set)) {
       const stripped = stripProtected(input.set as Record<string, unknown>);
       if (Object.keys(stripped).length === 0) {
-        // Everything sent was refused. Saying so beats queueing a no-op that
-        // appears to have worked.
-        return json({ ok: false, error: 'nothing settable remained (network settings cannot be set remotely)' }, 400);
+        return json({ ok: false, error: 'nothing settable remained (network settings and the control token cannot be set remotely)' }, 400);
+      }
+      const needsAdmin = adminFieldsIn(stripped);
+      if (needsAdmin.length > 0 && tier !== 'admin') {
+        // Named rather than generic: "needs the admin password" leaves someone
+        // hunting through a form for which field did it.
+        return json({
+          ok: false,
+          needsAdmin: true,
+          error: `${needsAdmin.join(', ')} ${needsAdmin.length === 1 ? 'needs' : 'need'} the admin password`,
+        }, 403);
       }
       cmd.set = stripped;
     } else {

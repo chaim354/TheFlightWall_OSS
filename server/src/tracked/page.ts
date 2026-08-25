@@ -52,8 +52,16 @@ export const trackedPage = `<!doctype html>
   .card > h2 { font-size:12px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-weight:600; }
   label { display:block; font-size:12px; color:var(--muted); margin:0 0 4px; }
   input, button { font:inherit; }
-  input { width:100%; padding:9px 10px; background:#0e1420; border:1px solid var(--line); border-radius:8px; color:var(--fg); }
-  input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  input, select { width:100%; padding:9px 10px; background:#0e1420; border:1px solid var(--line); border-radius:8px; color:var(--fg); font:inherit; }
+  input:focus, select:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  input[type=color] { padding:4px; height:38px; }
+  /* Checkboxes opt OUT of the full-width input rule above, which otherwise
+     stretches the box across the card and drops its label onto the next line
+     -- the tick ends up centred over text it no longer looks attached to. */
+  .check { display:flex; align-items:center; gap:8px; margin:8px 0; font-size:13px; color:var(--fg); }
+  .check input[type=checkbox] { width:16px; height:16px; flex:0 0 auto; margin:0; accent-color:var(--accent); }
+  .checks { display:flex; flex-wrap:wrap; gap:4px 18px; }
+  .checks .check { flex:1 1 200px; margin:4px 0; }
   button { padding:9px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
   button.ghost { background:transparent; color:var(--fg); border-color:var(--line); }
   button.danger { background:transparent; color:var(--warn); border-color:var(--line); padding:5px 10px; font-size:13px; }
@@ -89,6 +97,7 @@ export const trackedPage = `<!doctype html>
   <span class="spacer"></span>
   <span class="pill" id="freshPill">loading…</span>
   <button class="ghost" id="refreshBtn">Refresh</button>
+  <button class="ghost" id="lockBtn" hidden>Lock</button>
 </header>
 
 <div class="wrap">
@@ -130,8 +139,206 @@ export const trackedPage = `<!doctype html>
     <div id="list"><small class="help">loading…</small></div>
   </div>
 
-  <small class="help" style="text-align:center">This page is unauthenticated, exactly like the API it
-    drives — anyone who can reach it can add and remove flights.</small>
+  <small class="help" style="text-align:center">Watched flights are unauthenticated, exactly like the API
+    they drive — anyone who can reach this page can add and remove them. The wall controls below are not.</small>
+
+  <div class="card" id="lockCard">
+    <h2>Wall control</h2>
+    <div class="line">Settings, status and updates for the wall itself. If nobody has changed it,
+      the shipped default is <b>flightwall123</b> — a page cannot tell you whether it still works
+      without the password, so it says what it shipped with rather than guessing.</div>
+    <label for="pw" style="display:block;font-size:12px;color:var(--muted);margin:12px 0 4px">Password</label>
+    <input id="pw" type="password" autocomplete="current-password" />
+    <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button id="unlockBtn">Unlock</button></div></div>
+    <div class="err" id="lockErr"></div>
+  </div>
+
+  <div id="ctl" hidden>
+    <div class="card" id="defaultWarn" hidden style="border-color:var(--warn)">
+      <h2 style="color:var(--warn)">Still using the default password</h2>
+      <div class="line"><b>Anyone who finds this URL can change your wall's settings and restart it.</b>
+        The address is public. Set a password below — it takes one field and it is the only thing standing
+        between the internet and your living room.</div>
+    </div>
+
+    <div class="card">
+      <h2>What the wall last reported</h2>
+      <div id="wallStatus"></div>
+      <small class="help" id="ctlNote"></small>
+    </div>
+
+    <div class="card" data-tier="ui">
+      <h2>Brightness</h2>
+      <div class="row">
+        <div><label>Base (0–255)</label><input id="f_display_brightness" type="number" min="0" max="255" /></div>
+        <div><label>Day</label><input id="f_schedule_dayBrightness" type="number" min="0" max="255" /></div>
+        <div><label>Night</label><input id="f_schedule_nightBrightness" type="number" min="0" max="255" /></div>
+      </div>
+      <div class="row">
+        <div><label>Night starts (0–23)</label><input id="f_schedule_nightStartHour" type="number" min="0" max="23" /></div>
+        <div><label>Night ends (0–23)</label><input id="f_schedule_nightEndHour" type="number" min="0" max="23" /></div>
+        <div><label>Time zone</label><input id="f_schedule_timezone" placeholder="America/New_York" /></div>
+      </div>
+      <span class="check"><input type="checkbox" id="f_schedule_enabled" /> Day/night schedule enabled</span>
+      <small class="help">With the schedule on, day and night win over the base value — so changing the
+        base alone can look like nothing happened.</small>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="display,schedule">Queue brightness</button></div></div>
+    </div>
+
+    <div class="card" data-tier="ui">
+      <h2>Display</h2>
+      <div class="row">
+        <div><label>Seconds per flight</label><input id="f_display_cycleSeconds" type="number" min="1" /></div>
+        <div><label>Max flights</label><input id="f_display_maxFlights" type="number" min="1" max="20" /></div>
+      </div>
+      <label>When no flights</label>
+      <select id="f_layout_noFlightsMode">
+        <option value="dots">Dots</option><option value="clock">Clock</option>
+        <option value="funfact">Fun fact</option><option value="clockfact">Clock + fun fact</option>
+      </select>
+      <div class="checks" style="margin-top:8px">
+        <span class="check"><input type="checkbox" id="f_layout_showAirlineFlight" /> Airline + flight</span>
+        <span class="check"><input type="checkbox" id="f_layout_showRoute" /> Route</span>
+        <span class="check"><input type="checkbox" id="f_layout_showEta" /> ETA</span>
+        <span class="check"><input type="checkbox" id="f_layout_showAircraft" /> Aircraft</span>
+        <span class="check"><input type="checkbox" id="f_layout_showAltitude" /> Altitude</span>
+        <span class="check"><input type="checkbox" id="f_layout_showSpeed" /> Speed</span>
+        <span class="check"><input type="checkbox" id="f_layout_showHeading" /> Heading</span>
+        <span class="check"><input type="checkbox" id="f_layout_showVerticalRate" /> Vertical rate</span>
+        <span class="check"><input type="checkbox" id="f_layout_flightNumberOverVr" /> Flight # over vertical rate</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div style="flex:0 0 150px"><label>Text colour</label><input id="f_display_textColor" type="color" /></div>
+        <div><span class="check" style="margin-top:18px"><input type="checkbox" id="f_buttons_enabled" /> Physical buttons enabled</span></div>
+      </div>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="display,layout,buttons">Queue display</button></div></div>
+    </div>
+
+    <div class="card" data-tier="ui">
+      <h2>Tracking &amp; filters</h2>
+      <div class="row">
+        <div><label>Centre latitude</label><input id="f_tracking_centerLat" type="number" step="0.0001" /></div>
+        <div><label>Centre longitude</label><input id="f_tracking_centerLon" type="number" step="0.0001" /></div>
+        <div><label>Radius (km)</label><input id="f_tracking_radiusKm" type="number" step="0.5" /></div>
+      </div>
+      <div class="row">
+        <div><label>Mode</label>
+          <select id="f_tracking_mode"><option value="area">Area around the centre</option><option value="flights">Watched flights only</option></select></div>
+      </div>
+      <span class="check"><input type="checkbox" id="f_tracking_autoLocateOnBoot" /> Re-locate the centre on boot</span>
+      <div class="row">
+        <div><label>Min altitude (ft)</label><input id="f_filters_minAltitudeFt" type="number" /></div>
+        <div><label>Max altitude (ft)</label><input id="f_filters_maxAltitudeFt" type="number" /></div>
+      </div>
+      <span class="check"><input type="checkbox" id="f_filters_excludeOnGround" /> Hide aircraft on the ground</span>
+      <span class="check"><input type="checkbox" id="f_filters_showGeneralAviation" /> Show general aviation / private</span>
+      <span class="check"><input type="checkbox" id="f_filters_hideCargo" /> Hide cargo / freight</span>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="tracking,filters">Queue tracking</button></div></div>
+    </div>
+
+    <div class="card" data-tier="admin">
+      <h2>Sources &amp; keys <span class="pill" data-lock>admin</span></h2>
+      <div class="row">
+        <div><label>Position source</label>
+          <select id="f_api_positionSource">
+            <option value="opensky">OpenSky</option><option value="fr24">Flightradar24</option>
+            <option value="adsblol">adsb.lol</option><option value="server">FlightWall server</option>
+          </select></div>
+        <div><label>Enrichment source</label>
+          <select id="f_api_enrichmentSource">
+            <option value="adsbdb">adsbdb</option><option value="aeroapi">AeroAPI</option><option value="off">Off</option>
+          </select></div>
+        <div><label>Fetch interval (s)</label><input id="f_display_fetchIntervalSeconds" type="number" min="5" /></div>
+      </div>
+      <label>FlightAware AeroAPI key</label>
+      <input id="f_api_aeroApiKey" type="password" placeholder="leave blank to keep the stored one" />
+      <div class="row">
+        <div><label>OpenSky client id</label><input id="f_api_openSkyClientId" /></div>
+        <div><label>OpenSky client secret</label><input id="f_api_openSkyClientSecret" type="password" placeholder="leave blank to keep the stored one" /></div>
+        <div><label>Enrichment cache (s)</label><input id="f_api_enrichmentCacheSeconds" type="number" min="0" /></div>
+      </div>
+      <span class="check"><input type="checkbox" id="f_api_enrichmentFallbackToAeroApi" /> Use AeroAPI as backup when adsbdb misses</span>
+      <small class="help">These decide where data comes from and what it costs. The fetch interval is also
+        how long a queued change waits before the wall collects it.</small>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="api,display">Queue sources</button></div></div>
+    </div>
+
+    <div class="card" data-tier="admin">
+      <h2>Light sensor <span class="pill" data-lock>admin</span></h2>
+      <span class="check"><input type="checkbox" id="f_light_enabled" /> Enabled</span>
+      <div class="row">
+        <div><label>Type</label>
+          <select id="f_light_type">
+            <option value="analog">Analog LDR</option><option value="bh1750">BH1750</option><option value="tcs3472">TCS3472</option>
+          </select></div>
+        <div><label>Analog pin</label><input id="f_light_pin" type="number" /></div>
+      </div>
+      <div class="row">
+        <div><label>Dark threshold</label><input id="f_light_darkThreshold" type="number" /></div>
+        <div><label>Hysteresis</label><input id="f_light_hysteresis" type="number" /></div>
+        <div><label>Dim brightness</label><input id="f_light_dimBrightness" type="number" min="0" max="255" /></div>
+      </div>
+      <span class="check"><input type="checkbox" id="f_light_dimInstead" /> Dim instead of switching off</span>
+      <small class="help">A mis-set threshold blanks the panel and pauses fetching, which looks exactly
+        like a dead device from here.</small>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="light">Queue light sensor</button></div></div>
+    </div>
+
+    <div class="card" data-tier="admin">
+      <h2>HUB75 panel <span class="pill" data-lock>admin</span></h2>
+      <div class="row">
+        <div><label>Panel width</label><input id="f_hardware_panelResX" type="number" /></div>
+        <div><label>Panel height</label><input id="f_hardware_panelResY" type="number" /></div>
+        <div><label>Chained</label><input id="f_hardware_panelChain" type="number" min="1" /></div>
+      </div>
+      <div class="row">
+        <div><label>Driver chip</label>
+          <select id="f_hardware_panelDriverChip">
+            <option value="shift">Generic shift register</option><option value="fm6126a">FM6126A</option>
+            <option value="fm6124">FM6124</option><option value="icn2038s">ICN2038S</option><option value="mbi5124">MBI5124</option>
+          </select></div>
+        <div><label>I2S clock (MHz)</label>
+          <select id="f_hardware_panelI2sSpeedMhz"><option value="8">8</option><option value="16">16</option><option value="20">20</option></select></div>
+        <div><label>Latch blanking</label><input id="f_hardware_panelLatchBlanking" type="number" min="1" max="4" /></div>
+      </div>
+      <span class="check"><input type="checkbox" id="f_hardware_panelClkPhase" /> Clock phase</span>
+      <small class="help"><b>Wrong values blank or scramble the display</b>, and they only take effect after a
+        restart — so a mistake here is a dark wall until someone walks over to it.</small>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="hardware">Queue panel</button></div></div>
+    </div>
+
+    <div class="card" data-tier="admin">
+      <h2>Flash &amp; restart <span class="pill" data-lock>admin</span></h2>
+      <div class="row">
+        <div style="flex:0 0 auto"><button class="ghost" data-action="updateui">Update web UI</button></div>
+        <div style="flex:0 0 auto"><button class="ghost" data-action="updatefw">Update firmware</button></div>
+        <div style="flex:0 0 auto"><button class="danger" data-action="restart">Restart the wall</button></div>
+      </div>
+      <small class="help">Firmware images are signature-checked on the device; one that does not verify is
+        refused and the wall keeps running what it has.</small>
+    </div>
+
+    <div class="card">
+      <h2>Passwords</h2>
+      <div class="row">
+        <div><label>New wall-control password</label><input id="newUiPw" type="password" autocomplete="new-password" /></div>
+        <div style="flex:0 0 auto"><button class="ghost" data-pw="ui">Set</button></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <div><label id="adminPwLabel">New admin password</label><input id="newAdminPw" type="password" autocomplete="new-password" /></div>
+        <div style="flex:0 0 auto"><button class="ghost" data-pw="admin">Set</button></div>
+      </div>
+      <small class="help">At least 8 characters. The <b>device's</b> own token is separate and deliberately
+        not settable here — changing it would leave the wall unable to check in, with no way back but a cable.</small>
+      <div class="err" id="pwErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>Queued, not yet collected</h2>
+      <div id="pending"></div>
+      <div class="err" id="ctlErr"></div>
+    </div>
+  </div>
 
 </div>
 
@@ -458,6 +665,324 @@ $('date').max = utcDay(WINDOW_FUTURE_DAYS);
 $('date').value = localDay(0);
 
 poll();
+
+/* ------------------------------------------------------------------ *
+ * Wall control
+ *
+ * Same page, different trust level. Watched flights are open to anyone
+ * who can reach the URL; everything below needs a password, and the
+ * things that can brick the wall or spend money need a second one.
+ * ------------------------------------------------------------------ */
+
+// sessionStorage rather than a variable: a refresh in the middle of
+// adjusting the wall should not throw the password away, and rather than
+// localStorage so closing the tab ends it.
+var SECRET_KEY = 'flightwall.secret';
+var secret = sessionStorage.getItem(SECRET_KEY) || '';
+var tier = 'none';
+var ctlTimer = null;
+
+// Fields the person is currently editing. Polling repopulates the form
+// from what the wall reports, and without this a value would be yanked
+// back out from under a half-typed number every few seconds.
+var touched = {};
+
+function fields() { return document.querySelectorAll('#ctl [id^="f_"]'); }
+
+// f_display_brightness -> ['display','brightness']. Section names have no
+// underscores and neither do the keys, so a plain split is enough.
+function fieldPath(id) { var p = id.split('_'); return [p[1], p.slice(2).join('_')]; }
+
+function rgbToHex(r, g, b) {
+  function h(n) { n = Math.max(0, Math.min(255, Number(n) || 0)); return (n < 16 ? '0' : '') + n.toString(16); }
+  return '#' + h(r) + h(g) + h(b);
+}
+
+function populate(settings) {
+  if (!settings) return;
+  var els = fields();
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    if (touched[el.id]) continue;
+
+    var path = fieldPath(el.id);
+    var section = settings[path[0]];
+    if (!section) continue;
+
+    // The colour picker is one control over three stored channels.
+    if (el.id === 'f_display_textColor') {
+      el.value = rgbToHex(section.textColorR, section.textColorG, section.textColorB);
+      continue;
+    }
+
+    var v = section[path[1]];
+    if (v === undefined || v === null) continue;
+    if (el.type === 'checkbox') el.checked = !!v;
+    // A stored secret comes back redacted or absent; leaving the box empty
+    // is what makes "blank means keep it" true rather than destructive.
+    else if (el.type === 'password') el.value = '';
+    else el.value = v;
+  }
+}
+
+// Scoped to the card the button lives in, NOT to the whole form.
+//
+// Gathering by section name across the page looks equivalent and is not: a
+// section's fields are spread over several cards -- display.fetchIntervalSeconds
+// sits with the API keys because it decides how often they are spent -- so a
+// page-wide sweep made "Queue display" also submit an admin-only field, and the
+// whole card was refused for a control the person never touched.
+function collect(card, sections) {
+  var want = {};
+  for (var i = 0; i < sections.length; i++) want[sections[i]] = 1;
+
+  var set = {};
+  var els = card.querySelectorAll('[id^="f_"]');
+  for (var j = 0; j < els.length; j++) {
+    var el = els[j];
+    var path = fieldPath(el.id);
+    if (!want[path[0]]) continue;
+
+    if (el.id === 'f_display_textColor') {
+      var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(el.value || '');
+      if (!m) continue;
+      set.display = set.display || {};
+      set.display.textColorR = parseInt(m[1], 16);
+      set.display.textColorG = parseInt(m[2], 16);
+      set.display.textColorB = parseInt(m[3], 16);
+      continue;
+    }
+
+    var v;
+    if (el.type === 'checkbox') v = el.checked;
+    else if (el.type === 'number') { if (el.value === '') continue; v = Number(el.value); if (isNaN(v)) continue; }
+    else { v = el.value; if (el.type === 'password' && v === '') continue; }
+
+    set[path[0]] = set[path[0]] || {};
+    set[path[0]][path[1]] = v;
+  }
+  return set;
+}
+
+async function ctlPost(path, body) {
+  var res = await fetch('/v1/control' + path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + secret },
+    body: JSON.stringify(body),
+  });
+  var text = await res.text();
+  var j = {};
+  try { j = JSON.parse(text); } catch (e) { j = { error: text }; }
+  return { status: res.status, body: j };
+}
+
+async function send(card, sectionList) {
+  var set = collect(card, sectionList.split(','));
+  if (Object.keys(set).length === 0) { $('ctlErr').textContent = 'Nothing filled in to send.'; return; }
+  var r = await ctlPost('/command', { set: set });
+  if (r.status === 201) {
+    $('ctlErr').textContent = '';
+    // Cleared so the next poll shows what the wall actually took, rather
+    // than leaving the form frozen on what was asked for.
+    touched = {};
+  } else {
+    $('ctlErr').textContent = r.body.error || ('Refused (' + r.status + ')');
+  }
+  pollCtl();
+}
+
+async function doAction(action) {
+  var what = action === 'restart' ? 'Restart the wall?'
+    : action === 'updatefw' ? 'Tell the wall to fetch and flash new firmware?'
+    : 'Tell the wall to fetch a new web UI?';
+  if (!confirm(what + ' It runs at the next check-in.')) return;
+  var r = await ctlPost('/command', { action: action });
+  $('ctlErr').textContent = r.status === 201 ? '' : (r.body.error || ('Refused (' + r.status + ')'));
+  pollCtl();
+}
+
+async function setPassword(which) {
+  var el = which === 'ui' ? $('newUiPw') : $('newAdminPw');
+  var pw = el.value;
+  if (pw.length < 8) { $('pwErr').textContent = 'At least 8 characters.'; return; }
+  var r = await ctlPost('/password', { which: which, newPassword: pw });
+  if (r.status !== 200) { $('pwErr').textContent = r.body.error || ('Refused (' + r.status + ')'); return; }
+  el.value = '';
+  $('pwErr').textContent = '';
+  // Adopt the new password only when it replaces the one we are actually
+  // holding, or when it is the first admin password (which upgrades us).
+  //
+  // The case this guards is changing the UI password while holding ADMIN:
+  // adopting there swaps a working admin credential for a weaker one and
+  // demotes the page mid-session, with every admin control greying out and
+  // nothing on screen saying why.
+  var replacesOurs = tier === which || (which === 'admin' && tier === 'ui');
+  if (replacesOurs) {
+    secret = pw;
+    sessionStorage.setItem(SECRET_KEY, pw);
+  }
+  pollCtl();
+}
+
+// Admin-only cards stay visible but inert, so it is obvious the settings
+// exist and obvious why they cannot be touched -- hiding them entirely
+// reads as a missing feature.
+function applyTier(adminAvailable) {
+  var cards = document.querySelectorAll('#ctl [data-tier="admin"]');
+  for (var i = 0; i < cards.length; i++) {
+    var locked = tier !== 'admin';
+    var controls = cards[i].querySelectorAll('input, select, button');
+    for (var j = 0; j < controls.length; j++) controls[j].disabled = locked;
+    cards[i].style.opacity = locked ? '.55' : '';
+    var pill = cards[i].querySelector('[data-lock]');
+    if (pill) {
+      pill.textContent = locked
+        ? (adminAvailable ? 'admin only — press Lock, then sign in with it' : 'no admin password set')
+        : 'unlocked';
+      pill.className = locked ? 'pill warn' : 'pill on';
+    }
+  }
+  $('adminPwLabel').textContent = adminAvailable
+    ? 'Change the admin password' : 'Set an admin password (unlocks the sections above)';
+  // Only the holder of the admin password may change it; before one exists
+  // the ui tier creates it, which is the only way a first one can appear.
+  $('newAdminPw').disabled = adminAvailable && tier !== 'admin';
+}
+
+function renderStatus(st, ageMs) {
+  if (!st) {
+    $('wallStatus').innerHTML = '<div class="line warn">The wall has not checked in yet.</div>';
+    $('ctlNote').textContent = '';
+    return;
+  }
+  // Age, not a timestamp: the reader is asking "is it alive", and a clock
+  // reading makes them do the subtraction against a device that may be in
+  // another time zone.
+  var age = ageMs === null || ageMs === undefined ? '?' : fmtAge(ageMs);
+  var stale = ageMs !== null && ageMs !== undefined && ageMs > 5 * 60 * 1000;
+  var bits = [
+    ['Heard from', age + ' ago'],
+    ['Firmware', st.fwVersion || '?'],
+    ['Address', st.ip || '?'],
+    ['Signal', st.rssi === undefined ? '?' : st.rssi + ' dBm'],
+    ['Showing', (st.flightCount === undefined ? '?' : st.flightCount) + ' flights'],
+    ['Brightness', st.panelOff ? 'panel off' : (st.brightness === undefined ? '?' : String(st.brightness))],
+    ['Uptime', st.uptimeS === undefined ? '?' : fmtAge(st.uptimeS * 1000)],
+  ];
+  var html = '<div class="row">';
+  for (var i = 0; i < bits.length; i++) {
+    html += '<div><label>' + esc(bits[i][0]) + '</label><div>' + esc(String(bits[i][1])) + '</div></div>';
+  }
+  html += '</div>';
+  if (stale) html += '<div class="line warn" style="margin-top:8px"><b>That is old.</b> Anything queued below will sit unclaimed until the wall comes back.</div>';
+  if (st.note) html += '<div class="line" style="margin-top:8px">' + esc(st.note) + '</div>';
+  $('wallStatus').innerHTML = html;
+
+  var hasSettings = !!st.settings;
+  var ctlCards = document.querySelectorAll('#ctl [data-tier]');
+  for (var k = 0; k < ctlCards.length; k++) ctlCards[k].hidden = !hasSettings;
+  $('ctlNote').textContent = hasSettings ? ''
+    : 'This wall has not reported its settings, so the controls are hidden — sending a form full of blanks would overwrite real values with guesses.';
+}
+
+function fmtAge(ms) {
+  var s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  var m = Math.round(s / 60);
+  if (m < 60) return m + 'm';
+  var h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm';
+}
+
+function renderPending(pending) {
+  if (!pending || pending.length === 0) {
+    $('pending').innerHTML = '<div class="line">Nothing waiting. The wall collects commands on its next fetch.</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < pending.length; i++) {
+    var c = pending[i];
+    var what = c.action ? c.action : JSON.stringify(c.set || {});
+    html += '<div class="line">' + esc(what) + '</div>';
+  }
+  $('pending').innerHTML = html;
+}
+
+async function pollCtl() {
+  if (!secret) return;
+  var res;
+  try {
+    res = await fetch('/v1/control', { headers: { authorization: 'Bearer ' + secret } });
+  } catch (e) { $('ctlErr').textContent = 'Could not reach the server.'; return; }
+
+  if (res.status === 401 || res.status === 403) {
+    // The password changed under us, or was never right.
+    secret = '';
+    sessionStorage.removeItem(SECRET_KEY);
+    $('ctl').hidden = true;
+    $('lockCard').hidden = false;
+    $('lockBtn').hidden = true;
+    $('lockErr').textContent = 'That password is no longer accepted.';
+    return;
+  }
+  if (res.status === 404) { $('lockCard').hidden = true; return; } // control disabled server-side
+
+  var j = await res.json();
+  tier = j.tier || 'none';
+  $('lockCard').hidden = true;
+  $('ctl').hidden = false;
+  $('lockBtn').hidden = false;
+  $('defaultWarn').hidden = !j.usingDefaultUiPassword;
+  applyTier(!!j.adminAvailable);
+  renderStatus(j.status, j.statusAgeMs);
+  if (j.status && j.status.settings) populate(j.status.settings);
+  renderPending(j.pending);
+
+  if (ctlTimer) clearTimeout(ctlTimer);
+  ctlTimer = setTimeout(pollCtl, 10000);
+}
+
+async function unlock() {
+  secret = $('pw').value;
+  if (!secret) return;
+  sessionStorage.setItem(SECRET_KEY, secret);
+  $('lockErr').textContent = '';
+  $('pw').value = '';
+  await pollCtl();
+}
+
+// Locking is also how someone SWITCHES password: the admin sections are
+// reachable from the ui tier only by signing back in with the admin one, and
+// without this the page has no way to offer that short of clearing storage.
+function lock() {
+  secret = '';
+  tier = 'none';
+  sessionStorage.removeItem(SECRET_KEY);
+  if (ctlTimer) clearTimeout(ctlTimer);
+  $('ctl').hidden = true;
+  $('lockBtn').hidden = true;
+  $('lockCard').hidden = false;
+  $('lockErr').textContent = '';
+  $('lockCard').scrollIntoView({ block: 'center' });
+}
+
+$('lockBtn').onclick = lock;
+$('unlockBtn').onclick = unlock;
+$('pw').addEventListener('keydown', function(ev){ if (ev.key === 'Enter') unlock(); });
+
+document.addEventListener('input', function(ev){
+  var el = ev.target;
+  if (el && el.id && el.id.indexOf('f_') === 0) touched[el.id] = 1;
+});
+document.addEventListener('click', function(ev){
+  var el = ev.target;
+  if (!el || !el.getAttribute) return;
+  if (el.getAttribute('data-send')) send(el.closest('.card'), el.getAttribute('data-send'));
+  else if (el.getAttribute('data-action')) doAction(el.getAttribute('data-action'));
+  else if (el.getAttribute('data-pw')) setPassword(el.getAttribute('data-pw'));
+});
+
+if (secret) pollCtl();
 </script>
 </body>
 </html>

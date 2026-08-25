@@ -1,205 +1,256 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   handleControl,
-  authorised,
   stripProtected,
   MAX_QUEUE,
   type ControlState,
   type ControlStorage,
 } from '../src/control';
+import {
+  tierFor,
+  hashPassword,
+  verifyPassword,
+  adminFieldsIn,
+  actionNeedsAdmin,
+  DEFAULT_UI_PASSWORD,
+} from '../src/controlAuth';
 
-const TOKEN = 'a-shared-secret';
-const AUTH = `Bearer ${TOKEN}`;
+const DEVICE = 'device-token-abc';
 const NOW = 1_700_000_000_000;
 
 let state: ControlState;
 let store: ControlStorage;
 
 beforeEach(() => {
-  state = { status: null, statusAtMs: null, queue: [] };
-  store = {
-    read: async () => state,
-    write: async (s) => { state = s; },
-  };
+  state = { status: null, statusAtMs: null, queue: [], uiPasswordHash: null, adminPasswordHash: null };
+  store = { read: async () => state, write: async (s) => { state = s; } };
 });
 
-const call = (method: string, path: string, body = '', auth: string | null = AUTH, now = NOW) =>
-  handleControl(method, new URL(`http://x${path}`), body, auth, store, TOKEN, now);
+const call = (method: string, path: string, body = '', secret: string | null = DEFAULT_UI_PASSWORD, now = NOW) =>
+  handleControl(
+    method,
+    new URL(`http://x${path}`),
+    body,
+    secret === null ? null : `Bearer ${secret}`,
+    store,
+    DEVICE,
+    now,
+  );
 
-describe('authorised', () => {
-  it('accepts the exact bearer token and nothing else', () => {
-    expect(authorised(`Bearer ${TOKEN}`, TOKEN)).toBe(true);
-    expect(authorised(`Bearer ${TOKEN}x`, TOKEN)).toBe(false);
-    expect(authorised(`Bearer ${TOKEN.slice(0, -1)}`, TOKEN)).toBe(false);
-    expect(authorised(TOKEN, TOKEN)).toBe(false);        // no scheme
-    expect(authorised('Basic abc', TOKEN)).toBe(false);
-    expect(authorised(null, TOKEN)).toBe(false);
-    expect(authorised(undefined, TOKEN)).toBe(false);
+describe('password hashing', () => {
+  it('round-trips and rejects a wrong password', () => {
+    const h = hashPassword('correct horse battery');
+    expect(verifyPassword('correct horse battery', h)).toBe(true);
+    expect(verifyPassword('Correct horse battery', h)).toBe(false);
+    expect(verifyPassword('', h)).toBe(false);
   });
 
-  it('refuses everything when no token is configured', () => {
-    // Absent configuration must not mean "any request is fine" -- the empty
-    // string would otherwise match an empty bearer.
-    expect(authorised('Bearer ', '')).toBe(false);
-    expect(authorised('Bearer x', '')).toBe(false);
+  it('salts, so the same password hashes differently each time', () => {
+    // Otherwise two deployments sharing a password share a hash, and one leaked
+    // file says something about every other one.
+    expect(hashPassword('same')).not.toBe(hashPassword('same'));
+  });
+
+  it('refuses malformed stored values rather than throwing', () => {
+    for (const bad of [null, undefined, '', 'plaintext', 'scrypt$nothex$nothex', 'bcrypt$a$b']) {
+      expect(verifyPassword('x', bad as string | null)).toBe(false);
+    }
+  });
+});
+
+describe('tierFor', () => {
+  const secrets = (ui: string | null, admin: string | null) => ({
+    deviceToken: DEVICE,
+    uiPasswordHash: ui === null ? null : hashPassword(ui),
+    adminPasswordHash: admin === null ? null : hashPassword(admin),
+  });
+
+  it('recognises the device token', () => {
+    expect(tierFor(DEVICE, secrets(null, null))).toBe('device');
+  });
+
+  it('accepts the shipped default only while no ui password is set', () => {
+    expect(tierFor(DEFAULT_UI_PASSWORD, secrets(null, null))).toBe('ui');
+    // Once a real one exists the default must stop working, or resetting the
+    // password would change nothing at all.
+    expect(tierFor(DEFAULT_UI_PASSWORD, secrets('a-real-password', null))).toBe('none');
+  });
+
+  it('prefers admin when both match, so a shared string is not capped at ui', () => {
+    expect(tierFor('same-password', secrets('same-password', 'same-password'))).toBe('admin');
+  });
+
+  it('gives nothing for an unknown credential', () => {
+    expect(tierFor('nope', secrets('ui-pass', 'admin-pass'))).toBe('none');
+    expect(tierFor(null, secrets('ui-pass', 'admin-pass'))).toBe('none');
+  });
+});
+
+describe('adminFieldsIn', () => {
+  it('names whole admin sections and individual admin keys', () => {
+    expect(adminFieldsIn({ hardware: { panelResX: 64 } })).toEqual(['hardware']);
+    expect(adminFieldsIn({ light: { pin: 3 } })).toEqual(['light']);
+    expect(adminFieldsIn({ display: { fetchIntervalSeconds: 30 } })).toEqual(['display.fetchIntervalSeconds']);
+    expect(adminFieldsIn({ api: { positionSource: 'opensky', aeroApiKey: 'k' } }).sort())
+      .toEqual(['api.aeroApiKey', 'api.positionSource']);
+    // Every API credential, not just the paid one -- a leaked OpenSky secret
+    // is somebody else's quota being spent under this account's name.
+    expect(adminFieldsIn({ api: { openSkyClientSecret: 's', enrichmentCacheSeconds: 60 } }).sort())
+      .toEqual(['api.enrichmentCacheSeconds', 'api.openSkyClientSecret']);
+  });
+
+  it('leaves ordinary settings alone', () => {
+    expect(adminFieldsIn({ display: { brightness: 5, cycleSeconds: 8 }, filters: { hideCargo: true } })).toEqual([]);
+  });
+
+  it('gates every action that flashes, updates or takes the wall down', () => {
+    for (const a of ['restart', 'updateui', 'updatefw']) expect(actionNeedsAdmin(a)).toBe(true);
   });
 });
 
 describe('stripProtected', () => {
-  it('removes api.controlToken but keeps the rest of api', () => {
-    // The second self-destructive setting: changing it remotely locks remote
-    // control out permanently, and the only repair is the LAN page this whole
-    // feature exists to avoid needing.
-    const out = stripProtected({
-      api: { controlToken: 'new', serverUrl: 'https://x', positionSource: 'server' },
+  it('removes network and api.controlToken, keeping the rest', () => {
+    expect(stripProtected({
+      network: { wifiSsid: 'evil' },
+      api: { controlToken: 'new', serverUrl: 'https://x' },
       display: { brightness: 5 },
-    });
-    expect(out).toEqual({
-      api: { serverUrl: 'https://x', positionSource: 'server' },
-      display: { brightness: 5 },
-    });
-  });
-
-  it('drops api entirely when controlToken was all it held', () => {
-    expect(stripProtected({ api: { controlToken: 'x' } })).toEqual({});
-  });
-
-  it('removes network and keeps everything else', () => {
-    const out = stripProtected({
-      network: { wifiSsid: 'evil', wifiPassword: 'x' },
-      display: { brightness: 5 },
-      filters: { hideCargo: true },
-    });
-    expect(out).toEqual({ display: { brightness: 5 }, filters: { hideCargo: true } });
-    expect(out).not.toHaveProperty('network');
+    })).toEqual({ api: { serverUrl: 'https://x' }, display: { brightness: 5 } });
   });
 });
 
-describe('handleControl: auth', () => {
-  it('401s every route without a valid token', async () => {
-    for (const [m, p] of [['GET', '/v1/control'], ['POST', '/v1/control/checkin'], ['POST', '/v1/control/command']]) {
-      const res = await call(m!, p!, '{}', 'Bearer wrong');
-      expect(res.status).toBe(401);
-      expect(res.headers.get('www-authenticate')).toBe('Bearer');
-    }
+describe('tiers on the wire', () => {
+  it('401s an unknown credential and 403s the device outside check-in', async () => {
+    expect((await call('GET', '/v1/control', '', 'wrong')).status).toBe(401);
+    // The device may report; it may not queue or read the control view.
+    expect((await call('GET', '/v1/control', '', DEVICE)).status).toBe(403);
+    expect((await call('POST', '/v1/control/command', '{"action":"restart"}', DEVICE)).status).toBe(403);
   });
 
-  it('does not touch storage on an unauthorised call', async () => {
-    await call('POST', '/v1/control/checkin', '{"fw":"x"}', null);
+  it('refuses a browser trying to check in as the device', async () => {
+    // Otherwise anyone with the UI password could fake what the wall reports,
+    // and the page would show a fiction with a fresh timestamp on it.
+    const res = await call('POST', '/v1/control/checkin', '{"fwVersion":"lies"}');
+    expect(res.status).toBe(403);
     expect(state.status).toBeNull();
   });
-});
 
-describe('handleControl: caching', () => {
-  it('marks every response no-store, including the 401', async () => {
-    // Observed: without this the edge cached these and served a status minutes
-    // old while the device was checking in every cycle. The age field does not
-    // save a reader from that -- the age is cached with the status.
-    for (const res of [
-      await call('GET', '/v1/control'),
-      await call('POST', '/v1/control/checkin', '{}'),
-      await call('GET', '/v1/control', '', 'Bearer wrong'),
-    ]) {
-      expect(res.headers.get('cache-control')).toBe('no-store');
-    }
+  it('tells the page it is running on the shipped default', async () => {
+    const body = (await (await call('GET', '/v1/control')).json()) as
+      { tier: string; usingDefaultUiPassword: boolean; adminAvailable: boolean };
+    expect(body.tier).toBe('ui');
+    expect(body.usingDefaultUiPassword).toBe(true);
+    expect(body.adminAvailable).toBe(false);
   });
 });
 
-describe('handleControl: checkin', () => {
-  it('stores the reported status and returns queued commands, draining them', async () => {
-    await call('POST', '/v1/control/command', JSON.stringify({ action: 'restart' }));
-    expect(state.queue).toHaveLength(1);
-
-    const res = await call('POST', '/v1/control/checkin', JSON.stringify({ fwVersion: '0d68283', flights: 9 }));
-    const body = (await res.json()) as { ok: boolean; commands: { action: string }[] };
-    expect(body.ok).toBe(true);
-    expect(body.commands).toHaveLength(1);
-    expect(body.commands[0]!.action).toBe('restart');
-
-    expect(state.status).toEqual({ fwVersion: '0d68283', flights: 9 });
-    expect(state.statusAtMs).toBe(NOW);
-    // AT-MOST-ONCE: collecting drains. A command that repeated after a reboot
-    // mid-apply would be worse than one a human re-queues.
-    expect(state.queue).toEqual([]);
-
-    const second = (await (await call('POST', '/v1/control/checkin', '{}')).json()) as { commands: unknown[] };
-    expect(second.commands).toEqual([]);
-  });
-
-  it('rejects a non-JSON body without clobbering the last good status', async () => {
-    await call('POST', '/v1/control/checkin', JSON.stringify({ fwVersion: 'good' }));
-    const res = await call('POST', '/v1/control/checkin', 'not json');
-    expect(res.status).toBe(400);
-    expect(state.status).toEqual({ fwVersion: 'good' });
-  });
-});
-
-describe('handleControl: reading state', () => {
-  it('reports the status as an AGE, not a timestamp', async () => {
-    await call('POST', '/v1/control/checkin', JSON.stringify({ fwVersion: 'x' }));
-    const res = await call('GET', '/v1/control', '', AUTH, NOW + 90_000);
-    const body = (await res.json()) as { status: unknown; statusAgeMs: number; pending: unknown[] };
-    expect(body.status).toEqual({ fwVersion: 'x' });
-    expect(body.statusAgeMs).toBe(90_000);
-    expect(body.pending).toEqual([]);
-  });
-
-  it('reports a null age before the device has ever checked in', async () => {
-    // Not zero: "never reported" and "reported just now" must not look alike on
-    // a page whose whole job is saying what the wall is doing.
-    const body = (await (await call('GET', '/v1/control')).json()) as { status: unknown; statusAgeMs: unknown };
-    expect(body.status).toBeNull();
-    expect(body.statusAgeMs).toBeNull();
-  });
-});
-
-describe('handleControl: queueing commands', () => {
-  it('queues a known action', async () => {
+describe('the admin tier', () => {
+  it('refuses admin actions to the ui tier, and says none is set yet', async () => {
     const res = await call('POST', '/v1/control/command', JSON.stringify({ action: 'updatefw' }));
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { needsAdmin: boolean; error: string };
+    expect(body.needsAdmin).toBe(true);
+    expect(body.error).toContain('none has been set yet');
+    expect(state.queue).toEqual([]);
+  });
+
+  it('refuses admin SETTINGS to the ui tier, naming the fields', async () => {
+    // Named rather than generic: "needs the admin password" leaves someone
+    // hunting through a form for which control did it.
+    const res = await call('POST', '/v1/control/command', JSON.stringify({
+      set: { display: { brightness: 5, fetchIntervalSeconds: 30 }, hardware: { panelResX: 64 } },
+    }));
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('hardware');
+    expect(body.error).toContain('display.fetchIntervalSeconds');
+    expect(state.queue).toEqual([]);
+  });
+
+  it('allows ordinary settings to the ui tier', async () => {
+    const res = await call('POST', '/v1/control/command', JSON.stringify({
+      set: { display: { brightness: 5 }, filters: { hideCargo: true } },
+    }));
+    expect(res.status).toBe(201);
+    expect(state.queue).toHaveLength(1);
+  });
+
+  it('bootstraps the first admin password from the ui tier, then locks it', async () => {
+    // Somebody has to be able to create the first one, and the ui password is
+    // the only credential in existence at that point.
+    expect((await call('POST', '/v1/control/password',
+      JSON.stringify({ which: 'admin', newPassword: 'admin-password-1' }))).status).toBe(200);
+
+    // ...and must not be able to change it afterwards.
+    expect((await call('POST', '/v1/control/password',
+      JSON.stringify({ which: 'admin', newPassword: 'another-one-99' }))).status).toBe(403);
+
+    const res = await call('POST', '/v1/control/command',
+      JSON.stringify({ action: 'updatefw' }), 'admin-password-1');
     expect(res.status).toBe(201);
     expect(state.queue[0]!.action).toBe('updatefw');
   });
+});
 
-  it('refuses an unknown action rather than passing it to the device', async () => {
-    const res = await call('POST', '/v1/control/command', JSON.stringify({ action: 'selfdestruct' }));
+describe('changing the ui password', () => {
+  it('replaces the default and stops accepting it', async () => {
+    expect((await call('POST', '/v1/control/password',
+      JSON.stringify({ which: 'ui', newPassword: 'my-new-password' }))).status).toBe(200);
+
+    expect((await call('GET', '/v1/control', '', DEFAULT_UI_PASSWORD)).status).toBe(401);
+    const body = (await (await call('GET', '/v1/control', '', 'my-new-password')).json()) as
+      { usingDefaultUiPassword: boolean };
+    expect(body.usingDefaultUiPassword).toBe(false);
+  });
+
+  it('refuses to set it back to the shipped default', async () => {
+    // Accepting would clear the page's warning while leaving the exposure
+    // exactly as it was -- the worst of both.
+    const res = await call('POST', '/v1/control/password',
+      JSON.stringify({ which: 'ui', newPassword: DEFAULT_UI_PASSWORD }));
     expect(res.status).toBe(400);
-    expect(state.queue).toEqual([]);
+    expect(await res.text()).toContain('shipped default');
   });
 
-  it('strips network from a settings command', async () => {
-    const res = await call('POST', '/v1/control/command', JSON.stringify({
-      set: { network: { wifiSsid: 'evil' }, display: { brightness: 3 } },
-    }));
-    expect(res.status).toBe(201);
-    expect(state.queue[0]!.set).toEqual({ display: { brightness: 3 } });
+  it('refuses a short password', async () => {
+    expect((await call('POST', '/v1/control/password',
+      JSON.stringify({ which: 'ui', newPassword: 'short' }))).status).toBe(400);
+  });
+});
+
+describe('checkin and queueing', () => {
+  it('drains the queue on check-in and records the status', async () => {
+    await call('POST', '/v1/control/command', JSON.stringify({ set: { display: { brightness: 3 } } }));
+    const res = await call('POST', '/v1/control/checkin', JSON.stringify({ fwVersion: 'x' }), DEVICE);
+    const body = (await res.json()) as { commands: unknown[] };
+    expect(body.commands).toHaveLength(1);
+    expect(state.queue).toEqual([]);
+    expect(state.statusAtMs).toBe(NOW);
   });
 
-  it('refuses a command that was ONLY network, rather than queueing a no-op', async () => {
-    // Silently queueing an empty command would report success for a change that
-    // can never happen -- the worst outcome for the one setting deliberately
-    // excluded.
-    const res = await call('POST', '/v1/control/command', JSON.stringify({
-      set: { network: { wifiSsid: 'evil', wifiPassword: 'x' } },
-    }));
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('network settings cannot be set remotely');
-    expect(state.queue).toEqual([]);
-  });
-
-  it('refuses shapes that are neither', async () => {
-    for (const body of ['{}', '{"set":[]}', '{"set":"x"}', 'nope']) {
-      const res = await call('POST', '/v1/control/command', body);
-      expect(res.status).toBe(400);
-    }
-    expect(state.queue).toEqual([]);
+  it('reports the status age, null before any check-in', async () => {
+    const before = (await (await call('GET', '/v1/control')).json()) as { statusAgeMs: unknown };
+    expect(before.statusAgeMs).toBeNull();
+    await call('POST', '/v1/control/checkin', '{"a":1}', DEVICE);
+    const after = (await (await call('GET', '/v1/control', '', DEFAULT_UI_PASSWORD, NOW + 5000)).json()) as
+      { statusAgeMs: number };
+    expect(after.statusAgeMs).toBe(5000);
   });
 
   it('caps the queue', async () => {
     for (let i = 0; i < MAX_QUEUE; i++) {
-      expect((await call('POST', '/v1/control/command', JSON.stringify({ action: 'restart' }))).status).toBe(201);
+      await call('POST', '/v1/control/command', JSON.stringify({ set: { display: { brightness: i } } }));
     }
-    const res = await call('POST', '/v1/control/command', JSON.stringify({ action: 'restart' }));
-    expect(res.status).toBe(429);
-    expect(state.queue).toHaveLength(MAX_QUEUE);
+    expect((await call('POST', '/v1/control/command',
+      JSON.stringify({ set: { display: { brightness: 1 } } }))).status).toBe(429);
+  });
+
+  it('marks every response no-store', async () => {
+    for (const res of [
+      await call('GET', '/v1/control'),
+      await call('POST', '/v1/control/checkin', '{}', DEVICE),
+      await call('GET', '/v1/control', '', 'wrong'),
+    ]) {
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    }
   });
 });
