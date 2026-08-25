@@ -105,17 +105,33 @@ export function tierFor(bearer: string | null | undefined, s: Secrets): Tier {
  * Settings that require the admin tier.
  *
  * Everything here can either break the wall (panel geometry, the light sensor
- * pin) or change what it costs and where its data comes from (the sources, the
- * AeroAPI key, the fetch interval). None of it is something a person adjusts
- * while looking at the wall; all of it is something that can leave the wall
- * blank or spending money, with no way to tell from the page which happened.
+ * type and pin) or change what it costs and where its data comes from (the
+ * sources, the API credentials, the fetch interval). None of it is something a
+ * person adjusts while looking at the wall; all of it is something that can
+ * leave the wall blank or spending money, with no way to tell from the page
+ * which happened.
+ *
+ * The test is that last clause, not "is it about hardware": turning the light
+ * sensor on and off, and saying what counts as dark, are exactly what somebody
+ * standing in front of a too-dim wall needs, so they stay on the main page.
  *
  * Whole sections where the whole section qualifies, individual keys where it
  * does not.
  */
-const ADMIN_SECTIONS = new Set(['hardware', 'light']);
+const ADMIN_SECTIONS = new Set(['hardware']);
 const ADMIN_KEYS: Record<string, Set<string>> = {
   display: new Set(['fetchIntervalSeconds']),
+  // The light sensor splits rather than gating whole. Which sensor it is and
+  // which pin it is on are wiring -- getting them wrong blanks the panel and
+  // pauses fetching, which looks exactly like a dead device from the page.
+  // Whether the sensor is USED and what counts as dark are everyday tuning:
+  // the wall is too dim this evening, or it never comes back on in the
+  // morning. Locking those behind the admin password means walking to the wall
+  // to fix a room that got darker, which is the opposite of the point.
+  //
+  // Hysteresis sits on the wiring side because it is the anti-flapping margin,
+  // not a brightness preference -- and because it was named as admin.
+  light: new Set(['type', 'pin', 'hysteresis']),
   api: new Set([
     'positionSource', 'enrichmentSource', 'enrichmentFallbackToAeroApi', 'serverUrl',
     // Credentials and the two knobs that decide how often they get spent.

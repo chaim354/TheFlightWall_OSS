@@ -91,7 +91,11 @@ describe('tierFor', () => {
 describe('adminFieldsIn', () => {
   it('names whole admin sections and individual admin keys', () => {
     expect(adminFieldsIn({ hardware: { panelResX: 64 } })).toEqual(['hardware']);
-    expect(adminFieldsIn({ light: { pin: 3 } })).toEqual(['light']);
+    // The light sensor splits: wiring is admin, everyday tuning is not.
+    expect(adminFieldsIn({ light: { pin: 3 } })).toEqual(['light.pin']);
+    expect(adminFieldsIn({ light: { type: 'bh1750', hysteresis: 80 } }).sort())
+      .toEqual(['light.hysteresis', 'light.type']);
+    expect(adminFieldsIn({ light: { enabled: true, darkThreshold: 900, dimInstead: true } })).toEqual([]);
     expect(adminFieldsIn({ display: { fetchIntervalSeconds: 30 } })).toEqual(['display.fetchIntervalSeconds']);
     expect(adminFieldsIn({ api: { positionSource: 'opensky', aeroApiKey: 'k' } }).sort())
       .toEqual(['api.aeroApiKey', 'api.positionSource']);
@@ -243,14 +247,17 @@ describe('what each tier may READ', () => {
     api: { openSkyClientId: 'someone@example.com-api-client', positionSource: 'server', serverUrl: 'https://x' },
     filters: { hideCargo: true },
     hardware: { panelResX: 64 },
-    light: { pin: 4 },
+    light: { enabled: true, darkThreshold: 900, pin: 4, hysteresis: 80 },
   };
 
   it('hides from the ui tier exactly what the ui tier may not set', () => {
+    // light survives with its everyday keys and loses only the wiring, so the
+    // on/off switch and the threshold still populate on the main page.
     expect(redactSettingsForTier(settings, 'ui')).toEqual({
       display: { brightness: 5 },
       api: {},
       filters: { hideCargo: true },
+      light: { enabled: true, darkThreshold: 900 },
     });
   });
 
@@ -267,6 +274,8 @@ describe('what each tier may READ', () => {
     const asUi = (await (await call('GET', '/v1/control')).json()) as { status: { settings: Record<string, unknown> } };
     expect(JSON.stringify(asUi.status.settings)).not.toContain('example.com');
     expect(asUi.status.settings.hardware).toBeUndefined();
+    // ...but the ui tier still gets what it is allowed to tune.
+    expect(asUi.status.settings.light).toEqual({ enabled: true, darkThreshold: 900 });
 
     await call('POST', '/v1/control/password', JSON.stringify({ which: 'admin', newPassword: 'admin-password-1' }));
     const asAdmin = (await (await call('GET', '/v1/control', '', 'admin-password-1')).json()) as

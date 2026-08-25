@@ -100,12 +100,23 @@ Everything that can break the wall or spend money:
 
 - **Actions**: `restart`, `updateui`, `updatefw`
 - **The wall's reported status** — firmware version, IP, signal, uptime
-- **Sections**: `hardware` (HUB75 geometry, driver chip, I2S clock), `light`
-  (sensor type, pin, thresholds, hysteresis)
+- **Sections**: `hardware` (HUB75 geometry, driver chip, I2S clock)
+- **Light sensor wiring**: `light.type`, `light.pin`, `light.hysteresis` — but
+  NOT `enabled`, `darkThreshold`, `dimInstead` or `dimBrightness`
 - **Keys**: `display.fetchIntervalSeconds`; `api.positionSource`,
   `enrichmentSource`, `enrichmentFallbackToAeroApi`, `serverUrl`, and every
   credential — `aeroApiKey`, `openSkyClientId`, `openSkyClientSecret`,
   `enrichmentCacheSeconds`
+
+The light sensor splits rather than gating whole, and the split is the rule
+stated precisely. Which sensor it is and where it is plugged in is wiring;
+getting it wrong blanks the panel and pauses fetching, which from the page looks
+exactly like a dead device. Whether the sensor is *used* and what counts as dark
+are everyday tuning — the wall is too dim this evening, or it never came back on
+this morning. Gating those behind the admin password means walking to the wall to
+fix a room that got darker, which is the opposite of the point. Turning the
+sensor off is also the quickest repair for a panel that has gone dark and should
+not have, which is not a thing to make hard.
 
 A refusal names the fields it refused. "Needs the admin password" leaves someone
 hunting through a form for which control did it.

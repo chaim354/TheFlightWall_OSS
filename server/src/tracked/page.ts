@@ -275,24 +275,34 @@ export const trackedPage = `<!doctype html>
       <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="api,display">Save</button></div></div>
     </div>
 
+    <div class="card" data-tier="ui">
+      <h2>Light sensor</h2>
+      <span class="check"><input type="checkbox" id="f_light_enabled" /> Use the light sensor</span>
+      <div class="row">
+        <div><label>Dark threshold</label><input id="f_light_darkThreshold" type="number" /></div>
+        <div><label>Dim brightness</label><input id="f_light_dimBrightness" type="number" min="0" max="255" /></div>
+      </div>
+      <span class="check"><input type="checkbox" id="f_light_dimInstead" /> Dim instead of switching off</span>
+      <small class="help">Turning the sensor off leaves the wall on the brightness above, which is the
+        quickest fix for a panel that has gone dark and should not have. A threshold set too high does
+        the same thing on its own — the wall blanks and pauses fetching, and from here that looks exactly
+        like a dead device.</small>
+      <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="light">Save</button></div></div>
+    </div>
+
     <div class="card" data-tier="admin">
-      <h2>Light sensor <span class="pill" data-lock>admin</span></h2>
-      <span class="check"><input type="checkbox" id="f_light_enabled" /> Enabled</span>
+      <h2>Light sensor wiring <span class="pill" data-lock>admin</span></h2>
       <div class="row">
         <div><label>Type</label>
           <select id="f_light_type">
             <option value="analog">Analog LDR</option><option value="bh1750">BH1750</option><option value="tcs3472">TCS3472</option>
           </select></div>
         <div><label>Analog pin</label><input id="f_light_pin" type="number" /></div>
-      </div>
-      <div class="row">
-        <div><label>Dark threshold</label><input id="f_light_darkThreshold" type="number" /></div>
         <div><label>Hysteresis</label><input id="f_light_hysteresis" type="number" /></div>
-        <div><label>Dim brightness</label><input id="f_light_dimBrightness" type="number" min="0" max="255" /></div>
       </div>
-      <span class="check"><input type="checkbox" id="f_light_dimInstead" /> Dim instead of switching off</span>
-      <small class="help">A mis-set threshold blanks the panel and pauses fetching, which looks exactly
-        like a dead device from here.</small>
+      <small class="help">Which sensor it is and where it is plugged in. Hysteresis is the margin that
+        stops the wall flapping on and off at dusk — it is here rather than beside the threshold because
+        it is a wiring characteristic, not a preference.</small>
       <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="light">Save</button></div></div>
     </div>
 
