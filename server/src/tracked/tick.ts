@@ -15,6 +15,31 @@ import type { PositionResult } from './opensky';
  */
 export const DAILY_RESOLVE_CEILING = 50;
 
+/**
+ * How many AIRBORNE entries may be polled in one tick.
+ *
+ * THIS is the OpenSky guard, and it is a concurrency limit rather than a
+ * store-size one. Only an airborne entry costs credits: a pending flight two
+ * weeks out, or one that has landed, costs nothing at all. The entry cap used
+ * to stand in for this, which made it far too blunt -- a calendar's worth of
+ * travel is dozens of journeys spread over a fortnight with only a handful
+ * ever in the air together, and capping the STORE punished the many for the
+ * cost of the few.
+ *
+ * MEASURED: a single-icao24 query costs FOUR credits against an authenticated
+ * allowance of 4000/day, so the real budget is ~1000 queries. At the 300s tick
+ * an eight-hour flight costs 96 of them, so ten concurrent is 960 -- the
+ * honest ceiling, and why this is 10 rather than a rounder-feeling number.
+ * Raising it means lengthening TRACKED_TICK_MS in server.ts by the same
+ * factor; the two are one budget seen from opposite ends.
+ *
+ * Binding is a DEGRADATION, not a failure: an unpolled entry keeps its last
+ * fix and stays airborne, so the card dead-reckons exactly as it already does
+ * across an ocean gap. It is logged, because a wall quietly showing estimated
+ * positions for everything would otherwise look like working live tracking.
+ */
+export const MAX_AIRBORNE_POLLS = 10;
+
 /** Transport retries before an entry is declared unresolved. */
 const MAX_ATTEMPTS = 3;
 
@@ -42,6 +67,8 @@ export async function runTrackedTick(
   if (entries.length === 0) return;
 
   let resolvesUsed = deps.resolvesUsedToday;
+  let polled = 0;
+  let overBudgetLogged = false;
   const next: TrackedEntry[] = [];
   let changed = false;
 
@@ -124,6 +151,20 @@ export async function runTrackedTick(
         updated = { ...updated, attempts: updated.attempts + 1 };
       }
     } else if (d.action === 'poll' && updated.icao24) {
+      if (polled >= MAX_AIRBORNE_POLLS) {
+        // Keep the entry exactly as it is: still airborne, still holding its
+        // last fix, so serve.ts dead-reckons from it rather than dropping the
+        // card. Logged per tick, not per entry, so a busy sky says so once.
+        if (!overBudgetLogged) {
+          overBudgetLogged = true;
+          console.error(
+            `tracked: more than ${MAX_AIRBORNE_POLLS} airborne; the rest dead-reckon this tick`,
+          );
+        }
+        next.push(updated);
+        continue;
+      }
+      polled++;
       const p = await deps.position(updated.icao24);
       changed = true;
       if (p.ok && p.position) {

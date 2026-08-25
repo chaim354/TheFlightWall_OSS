@@ -6,13 +6,30 @@ import { startOfUtcDay } from './lifecycle';
 /**
  * Hard cap on stored entries.
  *
- * Load-bearing, not cosmetic: this endpoint is unauthenticated by explicit
- * decision, so this and the date window below are what stop a stranger who
- * finds the URL from queueing unbounded work. Keep it consistent with the
- * daily resolution ceiling in tick.ts -- 20 entries x 2 calls each is 40, and
- * a ceiling below that would deadlock a legitimately full store.
+ * Still load-bearing on a server with no control token set, where this and the
+ * date window are what stop a stranger who finds the URL from queueing
+ * unbounded work. But it is NO LONGER the OpenSky guard, and 20 was far too
+ * blunt for that job.
+ *
+ * Only an AIRBORNE entry costs credits. One pending two weeks out costs
+ * nothing, and one that has landed costs nothing. A calendar's worth of travel
+ * is dozens of journeys across a fortnight with only a handful ever in the air
+ * together, so capping the STORE charged the many for the cost of the few and
+ * made the feature refuse flights it could have tracked for free. The real
+ * limit now lives where the spending does: MAX_AIRBORNE_POLLS in tick.ts.
+ *
+ * 60 is roughly four flights a day across the 15-day window -- more than a
+ * heavily-travelled calendar produces, while still a bound.
+ *
+ * DAILY_RESOLVE_CEILING (50) is deliberately NOT raised to match 60 x 2. It is
+ * a daily RATE limit on AeroDataBox, and entries resolve near their own
+ * departure date rather than on arrival in the store, so 60 entries spread over
+ * the window cost roughly eight calls a day, not 120. Raising it to cover a
+ * same-day pileup of all 60 would exceed the ~64 calls/day of measured spare
+ * this feature was given. A pileup instead defers: tick.ts logs and the entry
+ * WAITS, still pending, rather than being marked unresolved.
  */
-export const MAX_ENTRIES = 20;
+export const MAX_ENTRIES = 60;
 const DAY_MS = 24 * 60 * 60_000;
 export const WINDOW_PAST_DAYS = 1;
 export const WINDOW_FUTURE_DAYS = 14;

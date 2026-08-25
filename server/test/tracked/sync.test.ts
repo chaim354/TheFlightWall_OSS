@@ -3,6 +3,7 @@ import { reconcile, runCalendarSync } from '../../src/tracked/sync';
 import type { CalendarFlight } from '../../src/tracked/calendar';
 import type { TrackedEntry } from '../../src/tracked/types';
 import type { TrackedStorage } from '../../src/tracked/store';
+import { MAX_ENTRIES } from '../../src/tracked/routes';
 
 const NOW = Date.UTC(2026, 8, 14, 12, 0, 0);
 
@@ -100,19 +101,24 @@ describe('reconcile: adding', () => {
   });
 
   it('fills to the cap soonest first, and reports what it skipped', () => {
-    const flights = Array.from({ length: 25 }, (_, i) =>
+    // Expressed in terms of MAX_ENTRIES, not a literal: the cap is a tuning
+    // decision that has already moved once (20 -> 60, when the OpenSky guard
+    // moved to MAX_AIRBORNE_POLLS where the spending actually is), and a test
+    // that restates the number just breaks the next time it is tuned.
+    const over = 5;
+    const flights = Array.from({ length: MAX_ENTRIES + over }, (_, i) =>
       flight(`DL${1000 + i}`, '2026-09-15', NOW + i * 60_000),
     );
     const { next, skipped } = reconcile([], flights, NOW);
-    expect(next).toHaveLength(20);
+    expect(next).toHaveLength(MAX_ENTRIES);
     expect(next[0]!.number).toBe('DL1000');
-    expect(next[19]!.number).toBe('DL1019');
-    expect(skipped).toBe(5);
+    expect(next[MAX_ENTRIES - 1]!.number).toBe(`DL${1000 + MAX_ENTRIES - 1}`);
+    expect(skipped).toBe(over);
   });
 
   it('counts existing entries against the cap', () => {
     // Hand-added, so they survive reconcile and genuinely occupy slots.
-    const existing = Array.from({ length: 19 }, (_, i) =>
+    const existing = Array.from({ length: MAX_ENTRIES - 1 }, (_, i) =>
       entry({ id: `x${i}`, number: `AA${100 + i}`, date: '2026-09-14', source: 'manual' }),
     );
     const { next, skipped } = reconcile(
@@ -120,7 +126,7 @@ describe('reconcile: adding', () => {
       [flight('DL1', '2026-09-15'), flight('DL2', '2026-09-16')],
       NOW,
     );
-    expect(next).toHaveLength(20);
+    expect(next).toHaveLength(MAX_ENTRIES);
     expect(skipped).toBe(1);
   });
 });

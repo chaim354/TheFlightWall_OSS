@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runTrackedTick, DAILY_RESOLVE_CEILING } from '../../src/tracked/tick';
+import { runTrackedTick, DAILY_RESOLVE_CEILING, MAX_AIRBORNE_POLLS } from '../../src/tracked/tick';
 import type { TrackedEntry } from '../../src/tracked/types';
 import type { TrackedStorage } from '../../src/tracked/store';
 
@@ -196,5 +196,52 @@ describe('runTrackedTick', () => {
       expect(line).toContain('expired from landed');
       log.mockRestore();
     });
+  });
+});
+
+describe('the OpenSky budget is a CONCURRENCY limit, not a store-size one', () => {
+  // Entries are cheap; only `airborne` ones cost credits. A calendar's worth of
+  // flights spread over a fortnight can far exceed the store cap that used to
+  // stand in for this, while only a handful are ever in the air at once. The
+  // guard belongs where the cost is.
+  const airborne = (i: number): TrackedEntry =>
+    entry({
+      ...resolved,
+      id: `a${i}`, number: `XX${100 + i}`, state: 'airborne', icao24: `hex${i}`,
+      reresolved: true,
+    });
+
+  const fix = { ok: true as const, position: { lat: 51, lon: -1, altFt: 30000, groundspeedKt: 450, headingDeg: 90, verticalRateFpm: 0, onGround: false } };
+
+  it('polls every airborne entry while under the cap', async () => {
+    const store = memStore(Array.from({ length: 6 }, (_, i) => airborne(i)));
+    const positionFn = vi.fn().mockResolvedValue(fix);
+    await runTrackedTick(store, DAY_START + 20 * 3600_000, {
+      resolve: vi.fn(), position: positionFn, resolvesUsedToday: 0,
+    });
+    expect(positionFn).toHaveBeenCalledTimes(6);
+  });
+
+  it('stops at MAX_AIRBORNE_POLLS rather than blowing the daily credit budget', async () => {
+    // A single-icao24 query costs FOUR credits against 4000/day, so the real
+    // budget is ~1000 queries. At the 300s tick an eight-hour flight costs 96,
+    // which is what makes ten the honest concurrent ceiling.
+    const store = memStore(Array.from({ length: MAX_AIRBORNE_POLLS + 5 }, (_, i) => airborne(i)));
+    const positionFn = vi.fn().mockResolvedValue(fix);
+    await runTrackedTick(store, DAY_START + 20 * 3600_000, {
+      resolve: vi.fn(), position: positionFn, resolvesUsedToday: 0,
+    });
+    expect(positionFn).toHaveBeenCalledTimes(MAX_AIRBORNE_POLLS);
+  });
+
+  it('leaves an unpolled entry airborne with its last fix, to dead-reckon from', async () => {
+    // Not an error and not a drop: the card keeps rendering off the last known
+    // position, which is the same path an ocean gap already takes.
+    const store = memStore(Array.from({ length: MAX_AIRBORNE_POLLS + 1 }, (_, i) => airborne(i)));
+    await runTrackedTick(store, DAY_START + 20 * 3600_000, {
+      resolve: vi.fn(), position: vi.fn().mockResolvedValue(fix), resolvesUsedToday: 0,
+    });
+    const last = store.current[store.current.length - 1]!;
+    expect(last.state).toBe('airborne');
   });
 });
