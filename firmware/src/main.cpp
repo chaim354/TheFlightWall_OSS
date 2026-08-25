@@ -738,8 +738,37 @@ static void controlCheckIn()
             Serial.println("[control] firmware already current");
         else
         {
+            // PANEL DARK FOR THE DOWNLOAD. Not a nicety -- it is what makes an
+            // over-the-air update possible at all on this hardware.
+            //
+            // MEASURED, 2026-08-25: two OTA attempts failed with
+            // `download failed (-11)` -- HTTPC_ERROR_READ_TIMEOUT -- against
+            // the 30s budget setTimeout already allows. The server served the
+            // full 1213056 bytes with a 200 both times, so nothing was wrong
+            // with the image, the signature or the flash: the connection
+            // simply stalled for over half a minute mid-stream.
+            //
+            // A 1-per-second ping in the same window read 4% loss, which is
+            // why this looked survivable and was not. The ping barely loads
+            // the radio; a 1.2MB stream saturates it, and THAT is when the
+            // panel's I2S DMA starves it -- the same mechanism §1 of HANDOFF
+            // documents, and the same one AP setup mode already works around
+            // ten lines of Serial output away ("panel lit for a minute; wifi
+            // will struggle until it is dark again").
+            //
+            // stopOutput() halts the DMA, not the brightness setting, so it
+            // does NOT reach decideIdle() -- that reads effectiveBrightness.
+            // Suppressing fetches here would be self-defeating, since the
+            // check-in loop is what delivers the update in the first place.
+            Serial.println("[ota] panel dark; radio has the bus for the download");
+            g_display.stopOutput();
+
             // Reboots on success, so nothing after this runs.
             const FirmwareUpdater::ApplyResult r = FirmwareUpdater::apply(g_settings.serverUrl, a);
+
+            // Failure only. The panel must come back, or a failed update is
+            // indistinguishable from a dead wall.
+            g_display.startOutput();
             Serial.printf("[control] firmware update failed: %s\n", r.error.c_str());
         }
     }
