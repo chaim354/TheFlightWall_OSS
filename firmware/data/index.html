@@ -562,7 +562,17 @@ async function loadStatus(){
       // Only shown when true -- the FlightWall server itself is degraded
       // (schedule or position data served from cache after a provider
       // failure). Flights keep rendering normally either way.
-      (s.serverStale ? `<span class="pill off">server: stale</span>` : '');
+      (s.serverStale ? `<span class="pill off">server: stale</span>` : '')+
+      // A dark panel with every SETTING saying "lit" is the case these exist
+      // for: brightness resolves from four sources, and two of them -- the
+      // button off-toggle and a button brightness ramp -- live only in the
+      // device's RAM and appear in no settings document. Guarded with `in` like
+      // the heap pills above, so older firmware shows fewer pills rather than
+      // "undefined".
+      ('panelBrightness' in s && s.panelBrightness === 0
+        ? `<span class="pill off">panel dark${s.panelOff ? ' — button off' : ''}</span>` : '')+
+      ('manualBrightness' in s && s.manualBrightness >= 0
+        ? `<span class="pill">manual brightness ${s.manualBrightness}</span>` : '');
     // Board-specific pins, reported by the device (the ESP32 and S3 maps differ).
     if('i2cSda' in s){ const p=$('i2cPins'); if(p) p.textContent = `SDA ${s.i2cSda} / SCL ${s.i2cScl}`; }
     if('adc1Min' in s){ const a=$('adc1Range'); if(a) a.textContent = `${s.adc1Min}-${s.adc1Max}`; }

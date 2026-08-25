@@ -56,6 +56,22 @@ public:
     void setServerStale(bool stale) { _serverStale = stale; }
 
     // Latest ambient light reading, surfaced in /api/status for calibration.
+    // The RESOLVED panel state, after every override has been folded in.
+    //
+    // Diagnostic, and it earned its place: the panel went dark with every
+    // configured source saying "lit" -- schedule on a day hour at brightness
+    // 20, sensor disabled, base brightness 20 -- because a button had toggled
+    // it off. That flag lives only in main.cpp's RAM, so /api/status showed
+    // nothing capable of explaining a dark panel, and the only reachable
+    // diagnosis was "everything says lit, yet fetch is paused". A wall-mounted
+    // board has no other channel; this is the one.
+    void setPanelState(int appliedBrightness, bool panelOff, int manualBrightness)
+    {
+        _panelBrightness = appliedBrightness;
+        _panelOff = panelOff;
+        _manualBrightness = manualBrightness;
+    }
+
     void setLightStatus(int level, bool dark)
     {
         _lightLevel = level;
@@ -76,6 +92,9 @@ private:
     bool _serverStale = false;
     int _lightLevel = -1;
     bool _lightDark = false;
+    int _panelBrightness = -1;   // resolved, -1 until the first applyBrightness()
+    bool _panelOff = false;      // the button-A toggle
+    int _manualBrightness = -1;  // a button ramp, -1 when none is in force
 
     volatile bool _settingsChanged = false;
     volatile bool _restartRequested = false;
