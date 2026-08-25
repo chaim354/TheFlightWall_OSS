@@ -8,8 +8,13 @@
  *
  * Names are deliberately short — the panel is 64px wide.
  *
- * Unknown codes return null; the caller shows the bare code, which is honest
- * and self-correcting once an entry is added.
+ * Unknown codes return null, and callers must PASS THAT NULL ON rather than
+ * substituting the bare code. enrich.ts used to substitute, and it cost us:
+ * the wall reads any non-empty name as authoritative, so "SV" pre-empted the
+ * "Saudia" its own utils/AirlineNames.h had all along. This table is 44
+ * marketing carriers; the device's is 177 operating ones. Null is what lets
+ * the better-stocked table answer -- and if it cannot, the device shows the
+ * operator code, so the honest bare code is still where the chain ends.
  */
 const NAMES: Readonly<Record<string, string>> = {
   AA: 'American', DL: 'Delta', UA: 'United', B6: 'JetBlue', WN: 'Southwest',

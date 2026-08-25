@@ -62,27 +62,25 @@ describe('enrich', () => {
     expect(f.ac).toBe('CRJ9');
   });
 
-  it('falls back to the bare carrier code when the name is unknown', () => {
-    // DEVIATION FROM THE PLAN: the plan's version of this test spreads
-    // sched[0] (callsign: null) and only overrides carrierIata to 'ZZ'. With
-    // the aircraft's default callsign EDV5075, that row is unreachable: EDV
-    // is a known operator narrowed to carrier candidates ['DL'] in join.ts,
-    // 'ZZ' isn't in that list, so matchSchedule's "known operator narrows to
-    // zero -> null, never fall back to an unnarrowed collision" rule (the
-    // fix from Task 4, join.test.ts "returns null when a known operator
-    // narrows to zero...") rejects the row before enrich() ever calls
-    // airlineName('ZZ'). Verified empirically: matchSchedule('EDV5075', ...,
-    // [{callsign: null, carrierIata: 'ZZ', number: '5075', ...}]) returns
-    // null, so the plan's literal fixture makes f.al null, not 'ZZ', and the
-    // test as written would fail -- not because enrich.ts is wrong (blank on
-    // no-match is exactly the intended behavior), but because the fixture
-    // can never reach the airlineName-fallback line it means to exercise.
-    // Fixed here by giving the row a matching operating callsign, which
-    // takes join.ts's exact-match path -- the one path that skips carrier
-    // narrowing entirely, same as a provider-supplied callsign would in
-    // production.
-    const rows = [{ ...sched[0]!, carrierIata: 'ZZ', callsign: 'EDV5075' }];
-    expect(enrich(ac(), rows, {}, NOW_MS)!.al).toBe('ZZ');
+  it('leaves the name null when the carrier is unknown, so the device can resolve it', () => {
+    // REGRESSION: SVA022, AAR221, NCA115 and BWA005 all rendered on the panel as
+    // bare two-letter codes. This line used to emit `row.carrierIata` whenever
+    // airlineName() had no entry, on the reasoning that a bare code is honest.
+    // It is -- for a screen. But the only consumer is the WALL, and it treats any
+    // non-empty `al` as authoritative: FlightDataFetcher::applyLocalIdentity
+    // consults its own ICAO->name table (utils/AirlineNames.h, which has all four
+    // of those carriers) ONLY when the field is empty. So "SV" outranked the
+    // better local answer. Null lets that table win, and if it has no entry
+    // either the device still falls back to the operator code -- so the honest
+    // bare code survives, it just stops pre-empting a real name.
+    //
+    // Reaching this line needs a row carrying an operating callsign: that is the
+    // one path skipping carrier narrowing, which is why the ZZ/EDV5075 fixture
+    // this replaces had to do the same. Not contrived -- AeroDataBox supplies
+    // callsigns for ~44% of its rows (see schedule/panynj.ts), which is exactly
+    // how these four reached it in production.
+    const rows = [{ ...sched[0]!, carrierIata: 'SV', number: '22', callsign: 'SVA022' }];
+    expect(enrich(ac({ callsign: 'SVA022' }), rows, {}, NOW_MS)!.al).toBeNull();
   });
 
   it('computes distance and bearing when the feed did not supply them', () => {

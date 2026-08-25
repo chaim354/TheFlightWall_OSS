@@ -241,7 +241,13 @@ export function enrich(a: Aircraft, rows: readonly ScheduleRow[], opts: EnrichOp
   return {
     cs,
     flt: row ? `${row.carrierIata}${row.number}` : null,
-    al: row ? airlineName(row.carrierIata) ?? row.carrierIata : null,
+    // NULL, not the bare carrier code, when airlineName() has no entry. The
+    // consumer is the wall, and it reads any non-empty `al` as authoritative --
+    // applyLocalIdentity only consults utils/AirlineNames.h when this is empty.
+    // A code here therefore SUPPRESSES a better answer the device already has
+    // (it named SV/OZ/KZ/BW correctly all along); null lets it through, and a
+    // device that also has no entry still shows the operator code.
+    al: row ? airlineName(row.carrierIata) : null,
     reg: a.registration,
     ac: a.typeIcao,
     from: row?.origIata ?? null,
