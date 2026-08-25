@@ -36,6 +36,22 @@ const utcDateOf = (epochSeconds: number): string =>
   new Date(epochSeconds * 1000).toISOString().slice(0, 10);
 
 /**
+ * The calendar date at the DEPARTURE AIRPORT, from AeroDataBox's own local
+ * timestamp -- "2026-08-24 12:30+01:00" -> "2026-08-24".
+ *
+ * Read straight off the string rather than converted from the UTC epoch,
+ * because the offset that matters is the airport's, on that date, and the
+ * payload already states it. Deriving it any other way would mean shipping a
+ * timezone database to answer a question the response has already answered.
+ */
+const localDateOf = (localTime: unknown): string | null => {
+  const s = str(localTime);
+  if (!s) return null;
+  const d = s.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+};
+
+/**
  * AeroDataBox itself spells it "Canceled" (single-l); tolerate "Cancelled"
  * too since that is the more common spelling and a payload variant is cheap
  * to guard against.
@@ -96,6 +112,8 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
  * inert forever as a result -- see decideTracked's `resolved`-with-no-
  * departure-time handling in lifecycle.ts for the second half of that bug.
  *
+ * `date` throughout is the calendar date at the DEPARTURE AIRPORT, not in UTC.
+ *
  * Selection, in order:
  *   1. Drop cancelled rows.
  *   2. Require a scheduled departure time.
@@ -130,7 +148,21 @@ export function parseByNumber(payload: unknown, date: string): ResolvedFlight | 
     const arrAirport = (arr.airport ?? null) as Record<string, unknown> | null;
 
     const depEpoch = epoch((dep.scheduledTime as { utc?: unknown } | undefined)?.utc);
-    if (depEpoch === null || utcDateOf(depEpoch) !== date) continue;
+    if (depEpoch === null) continue;
+    // `date` is the date AT THE DEPARTURE AIRPORT -- what a boarding pass says.
+    // It used to be compared against the UTC date, which is a different day for
+    // any evening departure west of Greenwich (a 20:55 JFK departure is already
+    // tomorrow in UTC) and forced the person adding a flight to do that
+    // conversion in their head. It also disagreed with the REQUEST: the
+    // by-number endpoint reads its date parameter as local, so the filter was
+    // rejecting on one definition what the query had asked for on another.
+    //
+    // Falls back to the UTC date only when a row carries no local timestamp,
+    // which keeps a row that is otherwise usable from being dropped outright.
+    const depLocalDate =
+      localDateOf((dep.scheduledTime as { local?: unknown } | undefined)?.local) ??
+      utcDateOf(depEpoch);
+    if (depLocalDate !== date) continue;
     if (!str(depAirport?.iata) || !str(arrAirport?.iata)) continue;
 
     if (depEpoch < bestDepEpoch) {

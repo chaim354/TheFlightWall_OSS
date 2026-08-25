@@ -105,6 +105,50 @@ describe('parseByNumber', () => {
     expect(r!.schedDepEpoch).not.toBeNull();
   });
 
+  // The date is the one at the DEPARTURE AIRPORT, not in UTC. These two are a
+  // different day for any evening departure west of Greenwich -- DL1732 leaves
+  // JFK at 20:55 local on the 24th, which is 00:55Z on the 25th -- and the
+  // person adding the flight reads it off a boarding pass, which says the 24th.
+  const jfkEvening = [{
+    number: 'DL 1732',
+    callSign: 'DAL1732',
+    aircraft: { reg: 'N717TW', modeS: 'A997CC', model: 'Boeing 757-200' },
+    departure: {
+      airport: { iata: 'JFK', location: { lat: 40.6413, lon: -73.7781 } },
+      scheduledTime: { utc: '2026-08-25 00:55Z', local: '2026-08-24 20:55-04:00' },
+    },
+    arrival: {
+      airport: { iata: 'SFO', location: { lat: 37.6188, lon: -122.3756 } },
+      scheduledTime: { utc: '2026-08-25 07:15Z', local: '2026-08-25 00:15-07:00' },
+    },
+  }];
+
+  it('selects by the departure airport local date, not the UTC one', () => {
+    const r = parseByNumber(jfkEvening, '2026-08-24');
+    expect(r).not.toBeNull();
+    expect(r!.icao24).toBe('a997cc');
+    expect(r!.origIata).toBe('JFK');
+  });
+
+  it('does NOT select that row for the UTC date of the same departure', () => {
+    // The old behaviour, now explicitly wrong: asking for the 25th must not
+    // return a flight that left on the evening of the 24th.
+    expect(parseByNumber(jfkEvening, '2026-08-25')).toBeNull();
+  });
+
+  it('falls back to the UTC date when a row carries no local timestamp', () => {
+    // Rather than dropping an otherwise usable row outright.
+    const noLocal = [{
+      ...jfkEvening[0]!,
+      departure: {
+        ...jfkEvening[0]!.departure,
+        scheduledTime: { utc: '2026-08-25 00:55Z' },
+      },
+    }];
+    expect(parseByNumber(noLocal, '2026-08-25')).not.toBeNull();
+    expect(parseByNumber(noLocal, '2026-08-24')).toBeNull();
+  });
+
   it('rejects a cancelled row (AeroDataBox spells it "Canceled", single-l)', () => {
     const rows = [{
       status: 'Canceled',
