@@ -198,6 +198,10 @@ static const AirlineName kAirlineNames[] = {
     {"TWB", "T'way Air"},
     {"UAE", "Emirates"},
     {"UAL", "United Airlines"},
+    // Norse Atlantic UK, the UK AOC. NBT above is Norse Atlantic Airways, the
+    // Norwegian one -- a separate airline with its own ICAO code, which is why
+    // UBT70A rendered with a route and no airline until both tables learned it.
+    {"UBT", "Norse Atlantic"},
     {"UCA", "CommutAir"},
     {"UPS", "UPS Airlines"},
     {"UZB", "Uzbekistan Airways"},
