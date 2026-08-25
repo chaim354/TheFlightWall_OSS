@@ -29,6 +29,7 @@ Run loop:
 #include <ESPmDNS.h>
 #include <ArduinoJson.h>
 #include "core/Settings.h"
+#include "core/AssetUpdater.h"
 #include "core/HttpJson.h"
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
@@ -196,6 +197,8 @@ static void applyWifiRegion(uint8_t nchan)
 
 /** Defined below; called once the STA lease is up. */
 static void useReliableDns();
+/** Defined below; pulls any logo tile this cycle's flights need. */
+static void fetchMissingLogos();
 
 static bool connectWifiSta()
 {
@@ -589,12 +592,54 @@ static void doFetchAndRender()
     g_web.setServerStale(g_fetcher->lastFetchStale());
 
     g_lastFlights = std::move(flights);
+    fetchMissingLogos();
     // A fetch always supplies fresh data: force a recompose even if the cycled
     // index is unchanged. The 200ms re-render path deliberately does NOT do this.
     g_display.markFlightsUpdated();
     g_display.displayFlights(g_lastFlights);
     g_lastRenderMs = millis();
     g_firstFetchDone = true;
+}
+
+// Pull any logo tile this cycle's flights need and the device does not have.
+//
+// HERE rather than inside tileFor(): that runs on the render path, and a card
+// must never wait on a network call to draw. By the time this runs the fetch is
+// already done, the flights are in hand, and blocking briefly costs nothing
+// that is on screen.
+//
+// Bounded per cycle. A wall that has just been flashed sees a dozen unfamiliar
+// operators at once, and fetching all of them back to back would stall the loop
+// through the whole carousel -- on a radio this panel already degrades. Two per
+// cycle catches up within a few minutes and is invisible while it does.
+static void fetchMissingLogos()
+{
+    if (g_settings.serverUrl.length() == 0)
+        return; // nothing to fetch from; the built-in tiles are all there is
+
+    const int kMaxPerCycle = 2;
+    int fetched = 0;
+    for (const FlightInfo &f : g_lastFlights)
+    {
+        if (fetched >= kMaxPerCycle)
+            break;
+        if (f.operator_icao.length() == 0)
+            continue;
+        const AssetUpdater::LogoResult r =
+            AssetUpdater::ensureLogo(g_settings.serverUrl, f.operator_icao);
+        if (r == AssetUpdater::LogoResult::Downloaded)
+        {
+            // Replace the cached MISS, or the operator stays logo-less until
+            // that entry happens to be evicted -- which on a quiet carousel
+            // could be a very long time.
+            g_display.reloadTile(f.operator_icao);
+            fetched++;
+        }
+        else if (r == AssetUpdater::LogoResult::Failed)
+        {
+            fetched++; // a failure still costs a request; do not retry in a tight loop
+        }
+    }
 }
 
 // Returns true when loop() should return early because the panel is dark.

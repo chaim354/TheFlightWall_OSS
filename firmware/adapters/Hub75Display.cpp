@@ -358,7 +358,25 @@ const Hub75Display::LogoTile *Hub75Display::tileFor(const String &key)
         return nullptr;
     if (LogoTile *hit = _logoCache.find(key))
         return hit; // hit — including a cached miss (w==0)
+    return loadTile(key);
+}
 
+void Hub75Display::reloadTile(const String &key)
+{
+    // Bypasses the cache LOOKUP but not the cache: a tile downloaded after a
+    // miss was already cached must replace that w==0 sentinel, or the operator
+    // stays logo-less until the entry happens to be evicted. put() overwrites,
+    // so this needs no erase() -- which the LRU deliberately does not have.
+    //
+    // Returns nothing: LogoTile is private to the class, and the one caller
+    // wants the cache corrected rather than the tile itself.
+    if (key.length() == 0)
+        return;
+    (void)loadTile(key);
+}
+
+const Hub75Display::LogoTile *Hub75Display::loadTile(const String &key)
+{
     LogoTile tile; // stays w==0 on any failure below -> negative cache entry
 
     String path = String("/logos/") + key + ".rgb565";

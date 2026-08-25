@@ -63,4 +63,29 @@ namespace AssetUpdater
     /** Delete the cached UI, so the built-in page is served again. The escape
      * hatch for a download that is valid, current, and bad. */
     bool clearCachedUi();
+
+    enum class LogoResult
+    {
+        AlreadyPresent, // already on the filesystem; nothing was fetched
+        Downloaded,     // fetched, verified, written
+        NotOnServer,    // the server does not have this operator's tile (404)
+        Failed,         // transport, verification or filesystem problem
+    };
+
+    /**
+     * Make sure `/logos/<ICAO>.rgb565` exists, fetching it once if it does not.
+     *
+     * Fetched BY NAME rather than from a manifest: a listing of 154 tiles is
+     * something the device has no use for, and a miss on a specific operator is
+     * exactly the evidence that one is wanted.
+     *
+     * A 404 is remembered for the rest of the boot. Without that, an operator
+     * genuinely absent from the server would be re-requested every carousel
+     * cycle, forever -- the wall asking the same question several times a
+     * minute and always getting the same no.
+     */
+    LogoResult ensureLogo(const String &serverUrl, const String &icao);
+
+    /** How many operators have been recorded as absent this boot. Diagnostic. */
+    size_t missingLogoCount();
 }
