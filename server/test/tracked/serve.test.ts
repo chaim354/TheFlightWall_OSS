@@ -13,7 +13,7 @@ const CENTER = { lat: 40.6413, lon: -73.7781 };
 
 const airborne = (over: Partial<TrackedEntry> = {}): TrackedEntry => ({
   id: 'e1', number: 'BA181', date: '2026-09-14', state: 'airborne', reason: null,
-  attempts: 0, stateAtMs: DAY, reresolved: true, icao24: '4008f3', callsign: 'BAW181', reg: 'G-STBA',
+  attempts: 0, stateAtMs: DAY, reresolved: true, source: 'manual', icao24: '4008f3', callsign: 'BAW181', reg: 'G-STBA',
   aircraftModel: null, aircraftType: 'B77W', origIata: 'JFK', destIata: 'LHR',
   orig: { lat: 40.6413, lon: -73.7781 }, dest: { lat: 51.47, lon: -0.4543 },
   schedDepEpoch: dep / 1000, schedArrEpoch: arr / 1000,

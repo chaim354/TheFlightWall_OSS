@@ -155,3 +155,20 @@ describe('the merged watched-flights and control page', () => {
     expect(trackedPage).toContain('id="defaultWarn"');
   });
 });
+
+describe('entry provenance on the page', () => {
+  it('marks where an entry came from, since that decides who may remove it', () => {
+    // A calendar entry reappears on the next sync if you remove it here and it
+    // is still in the feed, and leaves on its own when it drops out. Neither
+    // is explicable without the page saying which entries the sync owns.
+    expect(trackedPage).toContain("e.source === 'calendar'");
+    expect(trackedPage).toContain("e.source === 'manual'");
+  });
+
+  it('says nothing at all for an entry stored before source existed', () => {
+    // Rendering those as "by hand" would be a plausible-looking lie: nobody
+    // knows how they got there. The ternaries above emit '' for null.
+    const marker = trackedPage.split("e.source === 'manual'")[1] ?? '';
+    expect(marker.slice(0, 60)).toContain("''");
+  });
+});

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { TrackedEntry } from './types';
+import type { TrackedEntry, TrackedSource } from './types';
 import type { TrackedStorage } from './store';
 import { startOfUtcDay } from './lifecycle';
 
@@ -35,6 +35,40 @@ export function normaliseNumber(raw: string): string | null {
   return /[A-Z]/.test(prefix) ? s : null;
 }
 
+/**
+ * First and last acceptable day, as midnight-UTC instants.
+ *
+ * One definition, used by validateEntry below and by isDateInWindow beside it.
+ * The two callers need different things from the same arithmetic -- the
+ * endpoint needs to say WHICH end was missed, the sync only needs yes or no --
+ * and computing the bounds separately in each would be two chances for them to
+ * disagree about what is trackable.
+ */
+function windowBounds(nowMs: number): { firstMs: number; lastMs: number } {
+  const todayMs = startOfUtcDay(new Date(nowMs).toISOString().slice(0, 10));
+  return {
+    firstMs: todayMs - WINDOW_PAST_DAYS * DAY_MS,
+    lastMs: todayMs + WINDOW_FUTURE_DAYS * DAY_MS,
+  };
+}
+
+/**
+ * Is this ISO date inside the accepted today-1 .. today+14 window?
+ *
+ * The calendar sync (src/tracked/sync.ts) asks this twice: once to filter the
+ * feed, and once to decide whether an ageing entry is still its business
+ * rather than lifecycle's.
+ *
+ * NaN for a malformed date is false, not a throw -- an unparseable date is
+ * simply not in the window.
+ */
+export function isDateInWindow(date: string, nowMs: number): boolean {
+  const dayMs = startOfUtcDay(date);
+  if (Number.isNaN(dayMs)) return false;
+  const { firstMs, lastMs } = windowBounds(nowMs);
+  return dayMs >= firstMs && dayMs <= lastMs;
+}
+
 export interface EntryInput {
   number: string;
   date: string;
@@ -64,18 +98,29 @@ export function validateEntry(input: EntryInput, nowMs: number, currentCount: nu
     return { ok: false, reason: 'date must be YYYY-MM-DD' };
   }
 
-  const todayMs = startOfUtcDay(new Date(nowMs).toISOString().slice(0, 10));
-  if (dayMs < todayMs - WINDOW_PAST_DAYS * DAY_MS) {
+  const { firstMs, lastMs } = windowBounds(nowMs);
+  if (dayMs < firstMs) {
     return { ok: false, reason: 'date is in the past' };
   }
-  if (dayMs > todayMs + WINDOW_FUTURE_DAYS * DAY_MS) {
+  if (dayMs > lastMs) {
     return { ok: false, reason: `date is more than ${WINDOW_FUTURE_DAYS} days ahead` };
   }
 
   return { ok: true, number, date: input.date };
 }
 
-export function newEntry(number: string, date: string, nowMs: number): TrackedEntry {
+/**
+ * `source` defaults to 'manual' rather than being required, because manual is
+ * what every pre-existing caller meant: this endpoint is a person typing into
+ * a form. Only the calendar sync passes anything else, and only it is allowed
+ * to delete what it passed.
+ */
+export function newEntry(
+  number: string,
+  date: string,
+  nowMs: number,
+  source: TrackedSource = 'manual',
+): TrackedEntry {
   return {
     id: randomUUID(),
     number,
@@ -85,6 +130,7 @@ export function newEntry(number: string, date: string, nowMs: number): TrackedEn
     attempts: 0,
     stateAtMs: nowMs,
     reresolved: false,
+    source,
     icao24: null,
     callsign: null,
     reg: null,

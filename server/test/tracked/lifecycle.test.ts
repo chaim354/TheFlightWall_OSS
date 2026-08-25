@@ -16,6 +16,7 @@ function entry(over: Partial<TrackedEntry> = {}): TrackedEntry {
     attempts: 0,
     stateAtMs: 0,
     reresolved: false,
+    source: 'manual',
     icao24: null,
     callsign: null,
     reg: null,

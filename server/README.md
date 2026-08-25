@@ -64,6 +64,7 @@ All read from the environment, with defaults for everything except the key:
 | `SCHEDULE_PATH`    | `./data/schedule.json`      | Docker image overrides this to `/app/data/schedule.json` (see Dockerfile). |
 | `REFRESH_QUIET_HOURS` | `0-6`                     | Local-hour window `START-END` (end exclusive) during which the AeroDataBox schedule refresh is skipped. `off` disables it (always refresh); malformed values are also treated as `off` rather than guessed at, since a typo that became an all-day window would stop refreshes and look like an upstream outage. |
 | `REFRESH_QUIET_TZ` | `America/New_York`           | IANA zone the window above is read in. |
+| `TRACKED_ICS_URL`  | *(none)*                    | Published calendar feed to sync tracked flights from; `webcal://` accepted. Missing -> no sync. **A secret** (capability URL). See [Syncing tracked flights from a calendar](#syncing-tracked-flights-from-a-calendar). |
 
 **The quiet-hours window must end before your panel wakes.** `server.ts`'s
 refresh covers roughly +/-6h centred on the moment the schedule table was
@@ -113,6 +114,50 @@ is ~1000 queries/day. The 300s tick is sized so roughly ten concurrent
 eight-hour flights (960 queries) fit -- i.e. the 20-entry cap binds before the
 OpenSky budget does. Raise the interval before tracking more than that; see
 `docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md`.
+
+### Syncing tracked flights from a calendar
+
+Set **`TRACKED_ICS_URL`** to a published calendar feed and the server keeps the
+tracked list in step with it -- adding flights it finds, removing the ones it
+added when they leave the feed. Unset, nothing runs. It also needs the OpenSky
+pair above, since it writes into a store that only exists with them.
+
+The feed is any published `.ics`. For Flighty on iOS, turn on Calendar Export,
+then publish the calendar it writes into: Calendar app -> Calendars -> the info
+button -> **Public Calendar** -> Share Link. `webcal://` is accepted and
+rewritten, so paste the link as given.
+
+**Two things to get right before it works:**
+
+- **The calendar must be an iCloud calendar.** One under "On My iPhone" or "On
+  My Mac" cannot be published to a URL at all.
+- **Point it at a calendar that holds flights and nothing else.** Publishing is
+  public to anyone holding the link, and a flight-number parser on a general
+  calendar has false positives -- "Room 2B 101" is a valid-looking flight
+  number. If Flighty offers no destination picker, make a dedicated calendar and
+  set it as the iOS default (Settings -> Calendar -> Default Calendar).
+
+**`TRACKED_ICS_URL` is a secret.** It is a capability URL: anyone holding it
+reads every flight in that calendar. It is never rendered on the page, never
+returned by an endpoint, and only its host appears in logs.
+
+**What the sync will and will not delete.** It removes an entry only when all
+four hold -- the entry is calendar-sourced, is not `airborne`, is still inside
+the date window, and is absent from the feed. So flights added by hand are never
+touched, an aircraft in the air is never yanked off the panel, and expiry stays
+lifecycle's job. A **failed fetch changes nothing at all**: a transient 503, or
+an HTML error page served with status 200, must not read as "the calendar is
+empty" and wipe the list. A feed that genuinely parses to zero flights does
+delete.
+
+Runs inside the tracked tick, hourly, rather than on its own timer -- the entry
+store is read-whole/write-whole with no protection against two writers, and
+interleaving would silently lose either a position update or a new entry.
+
+**On dates.** A `DTSTART` carrying a `TZID` gives the origin-local departure
+date, which is what AeroDataBox resolves against. A bare `Z` instant does not,
+and the UTC date is then used instead -- a day late for a late-evening westbound
+departure. The first sync logs which form your feed uses.
 
 ## Docker
 

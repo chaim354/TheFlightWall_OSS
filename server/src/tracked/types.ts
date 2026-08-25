@@ -55,6 +55,9 @@ export interface ResolvedFlight {
   schedArrEpoch: number | null;
 }
 
+/** Who put an entry in the store. See TrackedEntry.source. */
+export type TrackedSource = 'manual' | 'calendar';
+
 export interface TrackedEntry {
   id: string;
   /** Normalised: uppercase, no spaces. "ba 181" -> "BA181". */
@@ -70,6 +73,16 @@ export interface TrackedEntry {
   stateAtMs: number;
   /** True once resolve #2 has run, so it runs at most once. */
   reresolved: boolean;
+  /**
+   * Who put this entry here, and therefore who is allowed to remove it.
+   *
+   * Null on entries stored before this field existed -- the same
+   * back-compatible-nullable shape `callsign` and `aircraftType` use. Null is
+   * READ AS 'manual', which is the safe direction: the calendar sync deletes
+   * only what it can prove it created, so an entry of unknown provenance is
+   * never something it feels entitled to remove.
+   */
+  source: TrackedSource | null;
   icao24: string | null;
   /** Operating ADS-B callsign; see ResolvedFlight.callsign. Null on entries
    * resolved before this field existed -- serve.ts falls back to `number`. */

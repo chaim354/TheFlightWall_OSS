@@ -4,12 +4,14 @@ import { fileStorage } from './schedule/fileStorage';
 import { refreshSchedule, refreshPanynj, BOARD_FETCH_DELAY_MS } from './schedule/refresh';
 import { PAGE_DELAY_MS } from './schedule/panynj';
 import { parseQuietHours, inQuietHours, shouldRefresh, type QuietWindow } from './schedule/quietHours';
-import { handleTracked } from './tracked/routes';
+import { handleTracked, MAX_ENTRIES } from './tracked/routes';
 import { trackedPage } from './tracked/page';
-import { fileTrackedStorage } from './tracked/store';
+import { fileTrackedStorage, type TrackedStorage } from './tracked/store';
 import { runTrackedTick } from './tracked/tick';
 import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
+import { runCalendarSync } from './tracked/sync';
+import { fetchIcs } from './tracked/calendar';
 import { assetManifest, serveAsset } from './assets';
 import { handleControl, resolveTier, fileControlStorage, type ControlStorage } from './control';
 
@@ -79,6 +81,21 @@ export interface ServerConfig {
   /** Where tracked-flight entries are persisted; see src/tracked/store.ts. */
   trackedPath?: string;
   /**
+   * Published calendar feed to sync tracked flights from; see
+   * src/tracked/sync.ts. `webcal://` is accepted and rewritten.
+   *
+   * Absent disables the sync entirely -- the same inert-rather-than-broken
+   * posture the tracked routes take without OpenSky credentials. It also
+   * requires those credentials, since the sync writes into a store that only
+   * exists when they are set.
+   *
+   * TREAT AS A SECRET. It is a capability URL: anyone holding it can read
+   * every flight the calendar describes, the maintainer's and their friends'.
+   * It is never rendered on the page, never returned by an endpoint, and only
+   * its HOST is ever logged.
+   */
+  trackedIcsUrl?: string;
+  /**
    * Directory the device downloads its web UI (and later logo tiles and
    * firmware) from. On the VOLUME rather than in the image, so adding one logo
    * does not require a redeploy -- see src/assets.ts.
@@ -93,6 +110,23 @@ export interface ServerConfig {
   controlToken?: string;
   /** Where the command queue and last-reported status live; see src/control.ts. */
   controlPath?: string;
+}
+
+/**
+ * The host of a URL, for logging a failure without logging the URL.
+ *
+ * The calendar feed URL is a capability URL -- holding it IS read access to
+ * every flight in the calendar -- and an error line naming the whole thing is
+ * the easiest way for one to end up in a pasted log. "(unparseable)" rather
+ * than a throw, because this only ever runs on a path that is already
+ * reporting a failure.
+ */
+function hostOf(url: string): string {
+  try {
+    return new URL(url.replace(/^webcal:\/\//, 'https://')).host;
+  } catch {
+    return '(unparseable)';
+  }
 }
 
 const DEFAULT_PORT = 8787;
@@ -189,6 +223,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     openSkyClientId: env.OPENSKY_CLIENT_ID ?? '',
     openSkyClientSecret: env.OPENSKY_CLIENT_SECRET ?? '',
     trackedPath: env.TRACKED_PATH ?? DEFAULT_TRACKED_PATH,
+    trackedIcsUrl: env.TRACKED_ICS_URL ?? '',
     assetsPath: env.ASSETS_PATH ?? DEFAULT_ASSETS_PATH,
     controlToken: env.CONTROL_TOKEN ?? '',
     controlPath: env.CONTROL_PATH ?? DEFAULT_CONTROL_PATH,
@@ -535,6 +570,63 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
   let resolvesUsedToday = 0;
   let resolveDay = new Date().getUTCDate();
 
+  /**
+   * Calendar sync cadence. Hourly, and NOT an env var: the tick above already
+   * quantises this to multiples of 300s, so a knob here would mostly be a way
+   * to set a value that silently rounds to something else. A published feed
+   * changes when a person books a flight, which is not an hourly event.
+   */
+  const CALENDAR_SYNC_MS = 3600_000;
+  const icsUrl = config.trackedIcsUrl ?? '';
+  let lastCalendarSyncMs = 0;
+  let loggedDateRegime = false;
+
+  /**
+   * Sync the calendar, if it is configured and an hour has passed.
+   *
+   * RUNS INSIDE THE TRACKED TICK, deliberately, and this is the reason: the
+   * store is read-whole-array / write-whole-array (see store.ts), with no
+   * protection against two writers. On its own timer this would interleave its
+   * read-modify-write with the tick's across an await, and whichever wrote
+   * second would silently clobber the other -- losing a position update, or
+   * losing a just-added entry. Sharing the callback serialises them for free.
+   *
+   * A calendar failure must never stop position polling, so everything here is
+   * caught: the tick that follows is the feature people actually watch.
+   */
+  const syncCalendar = async (storage: TrackedStorage, nowMs: number): Promise<void> => {
+    if (!icsUrl || nowMs - lastCalendarSyncMs < CALENDAR_SYNC_MS) return;
+    lastCalendarSyncMs = nowMs;
+    try {
+      const result = await runCalendarSync(storage, nowMs, { fetchIcs: () => fetchIcs(icsUrl) });
+      if (!result) {
+        // Host only, never the URL: it is a capability URL, and a log line is
+        // the easiest place for one to leak into a paste.
+        console.error(`calendar sync: fetch failed (${hostOf(icsUrl)}); store left unchanged`);
+        return;
+      }
+      if (result.added || result.deleted || result.skipped) {
+        console.log(
+          `calendar sync: +${result.added} -${result.deleted}` +
+            (result.skipped ? ` (${result.skipped} over the ${MAX_ENTRIES}-entry cap, not tracked)` : ''),
+        );
+      }
+      // Once per boot. Which DTSTART form the feed uses decides whether dates
+      // are origin-local or a UTC guess, and a UTC guess is a day LATE for a
+      // late-evening westbound departure -- worth stating plainly once rather
+      // than rediscovering it from a flight that resolved to the wrong day.
+      if (!loggedDateRegime && (result.zonedDates || result.floatingDates)) {
+        loggedDateRegime = true;
+        console.log(
+          `calendar sync: ${result.zonedDates} zoned / ${result.floatingDates} UTC-only dates` +
+            (result.floatingDates ? ' -- UTC-only dates can be a day late for evening westbound departures' : ''),
+        );
+      }
+    } catch (e) {
+      console.error('calendar sync failed:', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const trackedTimer = trackedStorage
     ? setInterval(() => {
         const today = new Date().getUTCDate();
@@ -542,14 +634,21 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
           resolveDay = today;
           resolvesUsedToday = 0;
         }
-        void runTrackedTick(trackedStorage, Date.now(), {
-          resolve: async (n, d) => {
-            resolvesUsedToday++;
-            return resolveFlight(n, d, config.aerodataboxKey);
-          },
-          position: (hex) => fetchPosition(hex, openSkyClientId, openSkyClientSecret),
-          resolvesUsedToday,
-        }).catch((e) => console.error('tracked tick failed:', e instanceof Error ? e.message : String(e)));
+        const nowMs = Date.now();
+        // Sync BEFORE the tick, so a flight the calendar just added is
+        // resolved in this same pass rather than waiting out another 300s.
+        void syncCalendar(trackedStorage, nowMs)
+          .then(() =>
+            runTrackedTick(trackedStorage, nowMs, {
+              resolve: async (n, d) => {
+                resolvesUsedToday++;
+                return resolveFlight(n, d, config.aerodataboxKey);
+              },
+              position: (hex) => fetchPosition(hex, openSkyClientId, openSkyClientSecret),
+              resolvesUsedToday,
+            }),
+          )
+          .catch((e) => console.error('tracked tick failed:', e instanceof Error ? e.message : String(e)));
       }, TRACKED_TICK_MS)
     : undefined;
 

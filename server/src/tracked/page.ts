@@ -554,7 +554,17 @@ function entryHtml(e, now){
   var h = '<div class="entry">';
   h += '<div class="top"><div class="ids"><span class="num">' + esc(e.number) + '</span>' +
        '<span class="' + p.cls + '">' + esc(p.text) + '</span>' +
-       '<span class="pill">' + esc(e.date) + '</span></div>' +
+       '<span class="pill">' + esc(e.date) + '</span>' +
+       // Provenance, because it decides who may remove this entry. A
+       // calendar-sourced entry comes back on the next sync if you delete it
+       // here and it is still in the feed, and vanishes on its own when it
+       // leaves the feed -- neither of which makes sense without the marker.
+       // Entries stored before the source field existed report nothing rather
+       // than claiming to be hand-added. No backticks in here: this comment
+       // lives inside the page's own template literal, and one would end it.
+       (e.source === 'calendar' ? '<span class="pill">calendar</span>' : '') +
+       (e.source === 'manual' ? '<span class="pill">by hand</span>' : '') +
+       '</div>' +
        '<button class="danger" data-del="' + esc(e.id) + '" data-num="' + esc(e.number) + '">Remove</button></div>';
   h += routeLine(e);
   h += aircraftLine(e);
