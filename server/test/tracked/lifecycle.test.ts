@@ -20,6 +20,7 @@ function entry(over: Partial<TrackedEntry> = {}): TrackedEntry {
     callsign: null,
     reg: null,
     aircraftModel: null,
+    aircraftType: null,
     origIata: null,
     destIata: null,
     orig: null,
@@ -51,8 +52,10 @@ describe('startOfUtcDay', () => {
 });
 
 describe('decideTracked - pending', () => {
-  it('does nothing before the entry date begins', () => {
-    const d = decideTracked(entry(), DAY_START - 1);
+  const TZ_LEAD = 14 * 60 * 60_000;
+
+  it('does nothing before the entry date can have begun anywhere on earth', () => {
+    const d = decideTracked(entry(), DAY_START - TZ_LEAD - 1);
     expect(d).toEqual({ state: 'pending', action: 'none' });
   });
 
@@ -61,6 +64,20 @@ describe('decideTracked - pending', () => {
     // so the trigger is the start of the date itself.
     const d = decideTracked(entry(), DAY_START);
     expect(d).toEqual({ state: 'pending', action: 'resolve' });
+  });
+
+  it('resolves BEFORE 00:00 UTC, because the date is local to the departure airport', () => {
+    // The regression this guards: `date` is the calendar date at the departure
+    // airport, so a 07:00 departure from Tokyo on the 25th is 22:00Z on the
+    // 24th. A trigger keyed on 00:00Z of the 25th fires two hours after the
+    // aircraft has left. 14h of lead covers UTC+14, the largest real offset.
+    expect(decideTracked(entry(), DAY_START - TZ_LEAD)).toEqual({
+      state: 'pending', action: 'resolve',
+    });
+    // Tokyo's own local midnight, 15:00Z the day before, is comfortably inside.
+    expect(decideTracked(entry(), DAY_START - 9 * 60 * 60_000)).toEqual({
+      state: 'pending', action: 'resolve',
+    });
   });
 });
 

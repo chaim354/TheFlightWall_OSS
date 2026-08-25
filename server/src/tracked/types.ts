@@ -38,6 +38,15 @@ export interface ResolvedFlight {
   reg: string | null;
   /** e.g. "Boeing 777-300ER Passenger" -- AeroDataBox's aircraft.model. */
   aircraftModel: string | null;
+  /**
+   * ICAO type code, e.g. "B77W" -- hexdb.io, keyed on the hex above.
+   *
+   * The field the panel actually renders, because it is the one an AREA card
+   * carries (adsb.lol's typeIcao) and a pinned card should not name the same
+   * aircraft in a different vocabulary. aircraftModel is kept as the fallback
+   * for when hexdb has nothing: see src/tracked/aircraftType.ts.
+   */
+  aircraftType: string | null;
   origIata: string | null;
   destIata: string | null;
   orig: LatLon | null;
@@ -67,6 +76,9 @@ export interface TrackedEntry {
   callsign: string | null;
   reg: string | null;
   aircraftModel: string | null;
+  /** ICAO type code; see ResolvedFlight.aircraftType. Null on entries resolved
+   * before this field existed, and whenever hexdb has no answer. */
+  aircraftType: string | null;
   origIata: string | null;
   destIata: string | null;
   orig: LatLon | null;

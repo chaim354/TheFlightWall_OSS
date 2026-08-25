@@ -188,7 +188,11 @@ export function trackedCards(
       flt: e.number,
       al: prefix ? airlineName(prefix) : null,
       reg: e.reg,
-      ac: e.aircraftModel,
+      // The ICAO type code when hexdb had one, so a pinned card names the
+      // aircraft exactly as an area card does ("B752", not "Boeing 757-200").
+      // AeroDataBox's model name is the fallback -- it is what shipped before,
+      // and a long one truncating mid-designation is still better than blank.
+      ac: e.aircraftType ?? e.aircraftModel,
       from: e.origIata,
       to: e.destIata,
       alt: e.lastAltFt,

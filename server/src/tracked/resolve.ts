@@ -1,4 +1,5 @@
 import type { LatLon, ResolvedFlight } from './types';
+import { fetchIcaoTypeCode } from './aircraftType';
 
 const API_HOST = 'aerodatabox.p.rapidapi.com';
 const BASE = `https://${API_HOST}`;
@@ -66,6 +67,10 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
     callsign: (() => { const c = str(row.callSign); return c ? c.toUpperCase() : null; })(),
     reg: str(aircraft.reg),
     aircraftModel: str(aircraft.model),
+    // Not in this payload at all -- AeroDataBox carries a model name and no
+    // type code. resolveFlight fills it from hexdb once the hex is known, so
+    // this parser stays a pure function of the response it was given.
+    aircraftType: null,
     origIata: str(depAirport?.iata),
     destIata: str(arrAirport?.iata),
     orig: coord(depAirport),
@@ -177,5 +182,12 @@ export async function resolveFlight(
   if (!flight) {
     return { ok: false, retryable: false, reason: `not operating ${date}` };
   }
-  return { ok: true, flight };
+
+  // One free, keyless hexdb call to turn the hex we just paid for into the same
+  // ICAO type code an area card carries. Deliberately AFTER the success above
+  // and unable to affect it: fetchIcaoTypeCode never throws and returns null on
+  // every failure, leaving aircraftModel as the fallback. A resolve must not
+  // become unresolvable because a cosmetic lookup was down.
+  const aircraftType = flight.icao24 ? await fetchIcaoTypeCode(flight.icao24) : null;
+  return { ok: true, flight: { ...flight, aircraftType } };
 }

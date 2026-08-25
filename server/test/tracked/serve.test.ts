@@ -14,7 +14,7 @@ const CENTER = { lat: 40.6413, lon: -73.7781 };
 const airborne = (over: Partial<TrackedEntry> = {}): TrackedEntry => ({
   id: 'e1', number: 'BA181', date: '2026-09-14', state: 'airborne', reason: null,
   attempts: 0, stateAtMs: DAY, reresolved: true, icao24: '4008f3', callsign: 'BAW181', reg: 'G-STBA',
-  aircraftModel: null, origIata: 'JFK', destIata: 'LHR',
+  aircraftModel: null, aircraftType: 'B77W', origIata: 'JFK', destIata: 'LHR',
   orig: { lat: 40.6413, lon: -73.7781 }, dest: { lat: 51.47, lon: -0.4543 },
   schedDepEpoch: dep / 1000, schedArrEpoch: arr / 1000,
   lastLat: null, lastLon: null, lastPosAtMs: null,
@@ -132,7 +132,9 @@ describe('trackedCards', () => {
     })], now, CENTER);
     expect(cards).toHaveLength(1);
     const c = cards[0]!;
-    expect(c.ac).toBe('Boeing 777-300ER Passenger');
+    // The ICAO type code, the same vocabulary an area card uses -- the factory
+    // sets aircraftType 'B77W' alongside the model name, and the code wins.
+    expect(c.ac).toBe('B77W');
     expect(c.al).toBe('British Airways'); // BA181 -> carrier prefix "BA"
     expect(c.alt).toBe(37000);
     expect(c.spd).toBe(480);
@@ -143,6 +145,20 @@ describe('trackedCards', () => {
     expect(c.eta_min).not.toBeNull();
     expect(c.eta_src).toBe('scheduled');
     expect(c.eta_text).not.toBeNull();
+  });
+
+  it('falls back to the model name when hexdb had no type code', () => {
+    // hexdb answers an unknown hex with a body that simply has no ICAOTypeCode,
+    // and entries stored before this field existed have none either. Either way
+    // the card keeps AeroDataBox's model name -- what shipped before -- rather
+    // than rendering the aircraft line blank.
+    const now = dep + 3600_000;
+    const [card] = trackedCards([airborne({
+      aircraftModel: 'Boeing 777-300ER Passenger',
+      aircraftType: null,
+      lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now,
+    })], now, CENTER);
+    expect(card!.ac).toBe('Boeing 777-300ER Passenger');
   });
 
   it('does not carry lat/lon on the wire -- the firmware never parses them', () => {
