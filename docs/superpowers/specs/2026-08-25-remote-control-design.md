@@ -159,8 +159,26 @@ as they do for a LAN save.
 
 **One page, not two.** The controls live on the watched-flights page at `/`, so
 there is a single address for the wall; `/control` 301s there for anyone who was
-given the old URL. Watched flights stay unauthenticated above the fold and the
-wall controls sit behind the password below them.
+given the old URL.
+
+**The whole page is behind the password**, watched flights included. An
+anonymous visitor sees a sign-in card and nothing else — no header, no flight
+count, no wall status. `/v1/tracked` is gated with the same credential, because
+hiding the UI while leaving the API that drives it open would be a curtain
+rather than a lock: anyone could still add and remove flights with one curl.
+The device is unaffected — it calls `/v1/flights`, `/v1/assets/manifest` and
+`/v1/control/checkin`, never `/v1/tracked` — and a device token presenting there
+gets 403, since it is not a browser that forgot its password but something using
+the wrong key. Absent `CONTROL_TOKEN` there is no password mechanism at all, so
+the route stays open rather than locking everyone out of a server with no way to
+let them back in.
+
+**Admin sections are absent, not greyed out**, unless the password signed in with
+was the admin one. Disabling them still rendered every field, and the values were
+the sensitive part; the server already withholds them from a non-admin caller, so
+a visible card could only ever show blanks. One short line stays behind to say
+some settings need the admin password, which keeps the tier discoverable without
+naming anything inside it.
 
 It offers the same controls the LAN page has, minus WiFi and the device token,
 and the fields auto-populate from the settings the device reports on each
@@ -177,10 +195,8 @@ often they are spent — so a page-wide sweep made "Queue display" also submit a
 admin-only field and the whole card was refused for a control the person never
 touched.
 
-Admin cards stay visible but inert at the ui tier, so it is obvious the settings
-exist and obvious why they cannot be touched; hiding them reads as a missing
-feature. A `Lock` control clears the held password and returns to the sign-in
-card, which is also how someone at the ui tier signs back in with the admin one.
+A `Lock` control clears the held password and returns to the sign-in card, which
+is also how someone at the ui tier signs back in with the admin one.
 
 Every value is stamped with how long ago the wall checked in — an age, not a
 timestamp, because the reader is asking "is it alive" and a clock reading makes

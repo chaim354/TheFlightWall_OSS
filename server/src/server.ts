@@ -11,7 +11,7 @@ import { runTrackedTick } from './tracked/tick';
 import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
 import { assetManifest, serveAsset } from './assets';
-import { handleControl, fileControlStorage, type ControlStorage } from './control';
+import { handleControl, resolveTier, fileControlStorage, type ControlStorage } from './control';
 
 /** Everything server.ts needs, read from process.env with a default for
  * every var except the API key -- there is no sensible default for that. */
@@ -317,6 +317,23 @@ async function handleRequest(
       res.writeHead(404, { 'content-type': 'text/plain' });
       res.end('not found');
       return;
+    }
+    // Gated behind the same password as the page, when there is one to gate
+    // with. Absent CONTROL_TOKEN there is no password mechanism at all, so
+    // this stays open rather than locking everyone out of a server that has
+    // no way to let them back in -- the same inert-rather-than-broken posture
+    // the control routes take.
+    if (control) {
+      const tier = await resolveTier(control.storage, control.token, req.headers.authorization);
+      if (tier !== 'ui' && tier !== 'admin') {
+        res.writeHead(tier === 'device' ? 403 : 401, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          ...(tier === 'device' ? {} : { 'www-authenticate': 'Bearer' }),
+        });
+        res.end(JSON.stringify({ ok: false, error: 'unauthorised' }));
+        return;
+      }
     }
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);

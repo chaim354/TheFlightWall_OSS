@@ -203,6 +203,29 @@ export function redactStatus(status: Record<string, unknown>): Record<string, un
 }
 
 /**
+ * Resolve a request's credential to a tier, for routes outside this module.
+ *
+ * `/v1/tracked` is gated with it: hiding the watched-flight UI behind a
+ * password while leaving the API that drives it open would be a curtain, not a
+ * lock -- anyone could still add and remove flights with one curl.
+ */
+export async function resolveTier(
+  storage: ControlStorage,
+  deviceToken: string,
+  authHeader: string | null | undefined,
+): Promise<Tier> {
+  const state = await storage.read();
+  const bearer = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.slice('Bearer '.length)
+    : null;
+  return tierFor(bearer, {
+    deviceToken,
+    uiPasswordHash: state.uiPasswordHash ?? null,
+    adminPasswordHash: state.adminPasswordHash ?? null,
+  });
+}
+
+/**
  * The status as a given tier is allowed to see it.
  *
  * redactStatus() removes what NOBODY should see; this removes what THIS caller

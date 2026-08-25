@@ -194,6 +194,60 @@ describe('startServer', () => {
     expect((await fetch(`${base}/assets/..%2f..%2fetc%2fpasswd`)).status).toBe(404);
   });
 
+  it('gates /v1/tracked behind the page password, and leaves it open without one', async () => {
+    const base = () => `http://127.0.0.1:${running!.port}`;
+    const cfg = (extra: Record<string, unknown>) => ({
+      port: 0,
+      aerodataboxKey: '',
+      boards: 'KJFK',
+      schedulePath: join(dir, 'schedule.json'),
+      openSkyClientId: 'id',
+      openSkyClientSecret: 'secret',
+      trackedPath: join(dir, 'tracked.json'),
+      panynjIntervalMs: 0,
+      panynjPageDelayMs: 0,
+      refreshIntervalMs: 24 * 60 * 60 * 1000,
+      trackedTickMs: 24 * 60 * 60 * 1000,
+      quietHours: null,
+      quietHoursTimeZone: 'America/New_York',
+      boardFetchDelayMs: 0,
+      ...extra,
+    });
+
+    // No CONTROL_TOKEN: there is no password mechanism, so gating would lock
+    // everyone out of a server with no way to let them back in.
+    running = await startServer(cfg({}));
+    expect((await fetch(`${base()}/v1/tracked`)).status).toBe(200);
+    await running.close();
+
+    running = await startServer(cfg({
+      controlToken: 'sekrit',
+      controlPath: join(dir, 'control-tracked.json'),
+    }));
+
+    // Hiding the UI while leaving this open would be a curtain, not a lock.
+    const noAuth = await fetch(`${base()}/v1/tracked`);
+    expect(noAuth.status).toBe(401);
+    expect(noAuth.headers.get('www-authenticate')).toBe('Bearer');
+
+    // The DEVICE never calls this route; a token presenting here is not a
+    // browser that forgot its password, it is something using the wrong key.
+    expect((await fetch(`${base()}/v1/tracked`, {
+      headers: { authorization: 'Bearer sekrit' },
+    })).status).toBe(403);
+
+    expect((await fetch(`${base()}/v1/tracked`, {
+      headers: { authorization: 'Bearer flightwall123' },
+    })).status).toBe(200);
+
+    // Writes too, not just the read.
+    expect((await fetch(`${base()}/v1/tracked`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ number: 'BA181', date: '2026-08-25' }),
+    })).status).toBe(401);
+  });
+
   it('404s the control routes when CONTROL_TOKEN is unset, and serves them when it is', async () => {
     running = await startServer({
       port: 0,

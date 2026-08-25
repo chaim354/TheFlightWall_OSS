@@ -92,15 +92,28 @@ export const trackedPage = `<!doctype html>
 <body>
 
 <header>
-  <h1>FlightWall · watched flights</h1>
-  <span class="pill" id="countPill">…</span>
+  <h1>FlightWall</h1>
+  <span class="pill" id="countPill" hidden>…</span>
   <span class="spacer"></span>
-  <span class="pill" id="freshPill">loading…</span>
-  <button class="ghost" id="refreshBtn">Refresh</button>
+  <span class="pill" id="freshPill" hidden>loading…</span>
+  <button class="ghost" id="refreshBtn" hidden>Refresh</button>
   <button class="ghost" id="lockBtn" hidden>Lock</button>
 </header>
 
 <div class="wrap">
+
+  <div class="card" id="lockCard">
+    <h2>Sign in</h2>
+    <div class="line">This page watches flights and controls the wall. If nobody has changed it, the
+      shipped password is <b>flightwall123</b> — a page cannot tell you whether that still works without
+      being given it, so it says what it shipped with rather than guessing.</div>
+    <label for="pw" style="display:block;font-size:12px;color:var(--muted);margin:12px 0 4px">Password</label>
+    <input id="pw" type="password" autocomplete="current-password" />
+    <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button id="unlockBtn">Unlock</button></div></div>
+    <div class="err" id="lockErr"></div>
+  </div>
+
+<div id="app" hidden>
 
   <div class="card" id="offCard" hidden>
     <h2>Watched flights are switched off</h2>
@@ -137,20 +150,6 @@ export const trackedPage = `<!doctype html>
   <div class="card">
     <h2>Watching</h2>
     <div id="list"><small class="help">loading…</small></div>
-  </div>
-
-  <small class="help" style="text-align:center">Watched flights are unauthenticated, exactly like the API
-    they drive — anyone who can reach this page can add and remove them. The wall controls below are not.</small>
-
-  <div class="card" id="lockCard">
-    <h2>Wall control</h2>
-    <div class="line">Settings, status and updates for the wall itself. If nobody has changed it,
-      the shipped default is <b>flightwall123</b> — a page cannot tell you whether it still works
-      without the password, so it says what it shipped with rather than guessing.</div>
-    <label for="pw" style="display:block;font-size:12px;color:var(--muted);margin:12px 0 4px">Password</label>
-    <input id="pw" type="password" autocomplete="current-password" />
-    <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button id="unlockBtn">Unlock</button></div></div>
-    <div class="err" id="lockErr"></div>
   </div>
 
   <div id="ctl" hidden>
@@ -324,7 +323,7 @@ export const trackedPage = `<!doctype html>
         <div><label>New wall-control password</label><input id="newUiPw" type="password" autocomplete="new-password" /></div>
         <div style="flex:0 0 auto"><button class="ghost" data-pw="ui">Set</button></div>
       </div>
-      <div class="row" style="margin-top:6px">
+      <div class="row" style="margin-top:6px" id="adminPwRow">
         <div><label id="adminPwLabel">New admin password</label><input id="newAdminPw" type="password" autocomplete="new-password" /></div>
         <div style="flex:0 0 auto"><button class="ghost" data-pw="admin">Set</button></div>
       </div>
@@ -340,9 +339,20 @@ export const trackedPage = `<!doctype html>
     </div>
   </div>
 
+  <small class="help" id="adminHint" style="text-align:center" hidden>Some settings — flashing, updates,
+    restarts, the panel and the light sensor — need the admin password. Press <b>Lock</b> and sign in
+    with it to see them.</small>
+
+</div><!-- #app -->
+
 </div>
 
 <script>
+// Declared first because the watched-flight calls above the control block read
+// it too: one credential for the whole page, not one per section.
+var SECRET_KEY = 'flightwall.secret';
+var secret = sessionStorage.getItem(SECRET_KEY) || '';
+
 var MAX = ${MAX_ENTRIES};
 var FRESH_MS = ${FIX_FRESH_MS};
 var DAY_MS = 86400000;
@@ -570,9 +580,20 @@ function stamp(ok){
 }
 
 var timer = null, busy = false, disabled = false, atCap = false;
+// The watched-flight poll does not start until a password is in hand.
+var polling = false;
+
+// Every call carries the password. The watched-flight routes are gated behind
+// the same credential as the wall controls, so a page that hides its contents
+// while leaving the API open would be a curtain, not a lock.
+function authed(extra) {
+  var h = extra || {};
+  h.authorization = 'Bearer ' + secret;
+  return h;
+}
 
 async function load(){
-  var res = await fetch('/v1/tracked');
+  var res = await fetch('/v1/tracked', { headers: authed() });
   if (res.status === 404) {
     // The server has no OpenSky credentials. Nothing here will start working
     // without a redeploy, so stop polling rather than reprinting the same 404
@@ -618,7 +639,7 @@ async function add(){
   try {
     var res = await fetch('/v1/tracked', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ number: number, date: date })
     });
     var j = await res.json();
@@ -644,7 +665,7 @@ async function add(){
 async function del(id, number){
   if (!confirm('Stop watching ' + number + '?')) return;
   try {
-    var res = await fetch('/v1/tracked/' + encodeURIComponent(id), { method: 'DELETE' });
+    var res = await fetch('/v1/tracked/' + encodeURIComponent(id), { method: 'DELETE', headers: authed() });
     var j = await res.json();
     if (!j.ok) $('addErr').textContent = j.error || 'Could not remove that flight.';
   } catch (err) {
@@ -664,8 +685,6 @@ $('date').min = utcDay(-WINDOW_PAST_DAYS);
 $('date').max = utcDay(WINDOW_FUTURE_DAYS);
 $('date').value = localDay(0);
 
-poll();
-
 /* ------------------------------------------------------------------ *
  * Wall control
  *
@@ -677,8 +696,6 @@ poll();
 // sessionStorage rather than a variable: a refresh in the middle of
 // adjusting the wall should not throw the password away, and rather than
 // localStorage so closing the tab ends it.
-var SECRET_KEY = 'flightwall.secret';
-var secret = sessionStorage.getItem(SECRET_KEY) || '';
 var tier = 'none';
 var ctlTimer = null;
 
@@ -824,29 +841,33 @@ async function setPassword(which) {
   pollCtl();
 }
 
-// Admin-only cards stay visible but inert, so it is obvious the settings
-// exist and obvious why they cannot be touched -- hiding them entirely
-// reads as a missing feature.
-function applyTier(adminAvailable) {
-  var cards = document.querySelectorAll('#ctl [data-tier="admin"]');
+// Admin cards are removed from the page, not greyed out.
+//
+// Disabling them still renders every field the wall reports, and the values
+// were the sensitive part -- the API credentials, the panel geometry. The
+// server stops sending those to a non-admin caller, so a visible card would
+// only ever show blanks anyway. A short hint keeps the tier discoverable
+// without naming anything inside it.
+function applyTier(adminAvailable, hasSettings) {
+  var locked = tier !== 'admin';
+  var cards = document.querySelectorAll('#ctl [data-tier]');
   for (var i = 0; i < cards.length; i++) {
-    var locked = tier !== 'admin';
-    var controls = cards[i].querySelectorAll('input, select, button');
-    for (var j = 0; j < controls.length; j++) controls[j].disabled = locked;
-    cards[i].style.opacity = locked ? '.55' : '';
+    // Two reasons a settings card stays away, resolved together: the tier may
+    // not see it, or the wall has never said what to put in it. Deciding them
+    // in two functions meant whichever ran last won, and renderStatus ran last.
+    var isAdmin = cards[i].getAttribute('data-tier') === 'admin';
+    cards[i].hidden = (isAdmin && locked) || !hasSettings;
     var pill = cards[i].querySelector('[data-lock]');
-    if (pill) {
-      pill.textContent = locked
-        ? (adminAvailable ? 'admin only — press Lock, then sign in with it' : 'no admin password set')
-        : 'unlocked';
-      pill.className = locked ? 'pill warn' : 'pill on';
-    }
+    if (pill) { pill.textContent = 'admin'; pill.className = 'pill on'; }
   }
+  $('adminHint').hidden = !(locked && adminAvailable);
+
+  // The admin password row: settable by the ui tier only to create the FIRST
+  // one, and after that only by whoever holds it.
+  var canSetAdmin = !adminAvailable || tier === 'admin';
+  $('adminPwRow').hidden = !canSetAdmin;
   $('adminPwLabel').textContent = adminAvailable
-    ? 'Change the admin password' : 'Set an admin password (unlocks the sections above)';
-  // Only the holder of the admin password may change it; before one exists
-  // the ui tier creates it, which is the only way a first one can appear.
-  $('newAdminPw').disabled = adminAvailable && tier !== 'admin';
+    ? 'Change the admin password' : 'Set an admin password (unlocks flashing, the panel and the sensor)';
 }
 
 function renderStatus(st, ageMs) {
@@ -878,10 +899,7 @@ function renderStatus(st, ageMs) {
   if (st.note) html += '<div class="line" style="margin-top:8px">' + esc(st.note) + '</div>';
   $('wallStatus').innerHTML = html;
 
-  var hasSettings = !!st.settings;
-  var ctlCards = document.querySelectorAll('#ctl [data-tier]');
-  for (var k = 0; k < ctlCards.length; k++) ctlCards[k].hidden = !hasSettings;
-  $('ctlNote').textContent = hasSettings ? ''
+  $('ctlNote').textContent = st.settings ? ''
     : 'This wall has not reported its settings, so the controls are hidden — sending a form full of blanks would overwrite real values with guesses.';
 }
 
@@ -919,10 +937,7 @@ async function pollCtl() {
     // The password changed under us, or was never right.
     secret = '';
     sessionStorage.removeItem(SECRET_KEY);
-    $('ctl').hidden = true;
-    $('lockCard').hidden = false;
-    $('lockBtn').hidden = true;
-    $('lockErr').textContent = 'That password is no longer accepted.';
+    showLocked('That password is no longer accepted.');
     return;
   }
   if (res.status === 404) { $('lockCard').hidden = true; return; } // control disabled server-side
@@ -930,10 +945,12 @@ async function pollCtl() {
   var j = await res.json();
   tier = j.tier || 'none';
   $('lockCard').hidden = true;
+  $('app').hidden = false;
   $('ctl').hidden = false;
-  $('lockBtn').hidden = false;
+  for (var h = 0; h < HEADER_BITS.length; h++) $(HEADER_BITS[h]).hidden = false;
+  if (!polling) { polling = true; poll(); }
   $('defaultWarn').hidden = !j.usingDefaultUiPassword;
-  applyTier(!!j.adminAvailable);
+  applyTier(!!j.adminAvailable, !!(j.status && j.status.settings));
   renderStatus(j.status, j.statusAgeMs);
   if (j.status && j.status.settings) populate(j.status.settings);
   renderPending(j.pending);
@@ -954,17 +971,26 @@ async function unlock() {
 // Locking is also how someone SWITCHES password: the admin sections are
 // reachable from the ui tier only by signing back in with the admin one, and
 // without this the page has no way to offer that short of clearing storage.
-function lock() {
+// The header pills and buttons are as much "signed in" state as the cards are;
+// a count of watched flights beside a sign-in prompt says how many there are.
+var HEADER_BITS = ['countPill', 'freshPill', 'refreshBtn', 'lockBtn'];
+
+function showLocked(message) {
   secret = '';
   tier = 'none';
   sessionStorage.removeItem(SECRET_KEY);
   if (ctlTimer) clearTimeout(ctlTimer);
+  if (timer) clearTimeout(timer);
+  polling = false;
+  $('app').hidden = true;
   $('ctl').hidden = true;
-  $('lockBtn').hidden = true;
+  for (var h = 0; h < HEADER_BITS.length; h++) $(HEADER_BITS[h]).hidden = true;
   $('lockCard').hidden = false;
-  $('lockErr').textContent = '';
-  $('lockCard').scrollIntoView({ block: 'center' });
+  $('lockErr').textContent = message || '';
+  window.scrollTo(0, 0);
 }
+
+function lock() { showLocked(''); }
 
 $('lockBtn').onclick = lock;
 $('unlockBtn').onclick = unlock;
@@ -983,6 +1009,7 @@ document.addEventListener('click', function(ev){
 });
 
 if (secret) pollCtl();
+else showLocked('');
 </script>
 </body>
 </html>

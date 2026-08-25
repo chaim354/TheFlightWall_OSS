@@ -27,9 +27,36 @@ function cards(html: string): string[] {
 describe('the merged watched-flights and control page', () => {
   it('carries both concerns, so there is one address for the wall', () => {
     expect(trackedPage).toContain('id="lockCard"');
-    expect(trackedPage).toContain('Watched flights');
+    expect(trackedPage).toContain('Watch a flight');
     expect(trackedPage).toContain('/v1/control');
     expect(trackedPage).toContain('/v1/tracked');
+  });
+
+  it('puts the sign-in card ahead of everything it protects', () => {
+    // Ordering IS the gate here: #app wraps the rest and starts hidden, so a
+    // card that drifted above the wrapper would render to a stranger.
+    const lock = trackedPage.indexOf('id="lockCard"');
+    const app = trackedPage.indexOf('<div id="app" hidden>');
+    expect(lock).toBeGreaterThan(-1);
+    expect(app).toBeGreaterThan(lock);
+    for (const id of ['id="addCard"', 'id="ctl"', 'id="list"', 'id="pending"']) {
+      expect(trackedPage.indexOf(id), `${id} is outside #app`).toBeGreaterThan(app);
+    }
+  });
+
+  it('sends the password with every watched-flight call', () => {
+    // The API is gated server-side now; an unauthenticated fetch here would
+    // 401 and read as "the feature is broken".
+    // By line rather than by regex over the whole call: encodeURIComponent(id)
+    // closes the first paren, so a naive [^)]* match ends before the headers.
+    const lines = trackedPage.split('\n');
+    const sites = lines
+      .map((line, i) => [line, lines.slice(i, i + 4).join('\n')] as const)
+      .filter(([line]) => line.includes("fetch('/v1/tracked"));
+    expect(sites.length).toBeGreaterThanOrEqual(3);
+    for (const [line, block] of sites) {
+      expect(block, `unauthenticated: ${line.trim()}`).toContain('authed(');
+    }
   });
 
   it('offers no field that would strand the wall', () => {
