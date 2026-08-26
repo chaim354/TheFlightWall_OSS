@@ -1,0 +1,18 @@
+# 8MB layout for the Adafruit MatrixPortal S3, which has half the flash of the
+# N16R8 DevKit. Same shape as partitions_16MB.csv, scaled down: 2x 2.5MB app
+# slots (the binary is ~1.2MB, so still ~2x headroom AND OTA-capable) and ~3MB
+# filesystem.
+#
+# The filesystem drop from 9.9MB to 3MB is not a squeeze: the logo library is
+# ~154 tiles at ~2KB and the gzipped web UI is ~11KB, so real usage is well
+# under 1MB. nvs stays separate so it survives `uploadfs`.
+#
+# Offsets are contiguous and end exactly at 0x800000 (8MB); a gap or an overrun
+# here is a board that flashes and will not boot.
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x5000,
+otadata,    data, ota,      0xe000,    0x2000,
+app0,       app,  ota_0,    0x10000,   0x280000,
+app1,       app,  ota_1,    0x290000,  0x280000,
+spiffs,     data, spiffs,   0x510000,  0x2E0000,
+coredump,   data, coredump, 0x7F0000,  0x10000,

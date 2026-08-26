@@ -6,7 +6,31 @@ namespace HardwareConfiguration
 {
     // HUB75 RGB LED matrix pin mapping. Compile-time per target (panel geometry is
     // editable from the web UI). Change to match your board / breakout.
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+// The MatrixPortal S3 is ALSO an ESP32-S3, so CONFIG_IDF_TARGET_ESP32S3 cannot
+// tell the two apart -- hence an explicit board flag from platformio.ini. Its
+// HUB75 pins are FIXED BY THE PCB (the panel plugs straight into a 2x8 header),
+// so unlike the DevKit map below these are not a wiring choice and must not be
+// "tidied". Taken from CircuitPython's own board definition for this board.
+//
+// Note 41/42 are G1/R1 here, which is exactly where the DevKit map puts I2C --
+// so I2C moves to the STEMMA QT pins (16/17) further down. That collision is
+// the reason this board needs its own block rather than an override or two.
+#if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
+    static const int8_t HUB75_R1 = 42;
+    static const int8_t HUB75_G1 = 41;
+    static const int8_t HUB75_B1 = 40;
+    static const int8_t HUB75_R2 = 38;
+    static const int8_t HUB75_G2 = 39;
+    static const int8_t HUB75_B2 = 37;
+    static const int8_t HUB75_A = 45;
+    static const int8_t HUB75_B = 36;
+    static const int8_t HUB75_C = 48;
+    static const int8_t HUB75_D = 35;
+    static const int8_t HUB75_E = 21;
+    static const int8_t HUB75_CLK = 2;
+    static const int8_t HUB75_LAT = 47;
+    static const int8_t HUB75_OE = 14;
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
     // ESP32-S3-DevKitC-1 N16R8 map. Every pin exists on the S3 (GPIO 0-21, 26-48)
     // and AVOIDS: 26-32 (SPI flash), 33-37 (octal PSRAM), 0/3/45/46 (strapping),
     // 19/20 (native USB), 43/44 (UART0). Verify against your wiring.
@@ -51,7 +75,17 @@ namespace HardwareConfiguration
     // bug survived: it worked on the board being tested.
     // An unwired pin reads HIGH (= released), so enabling buttons with no hardware
     // attached is inert rather than a stream of phantom presses.
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
+    // ONBOARD buttons, no wiring at all: this board carries UP on 6 and DOWN on
+    // 7. It must come FIRST in this chain -- the generic S3 choice below is
+    // wrong here twice over, since 18 is this board's UART TX and 21 is HUB75_E.
+    //
+    // UNVERIFIED ON HARDWARE: polarity is assumed active-low with an internal
+    // pull-up, matching Buttons.cpp and Adafruit's usual arrangement. If presses
+    // read inverted, this is the first line to check.
+    static const int8_t BUTTON_A_PIN = 6;
+    static const int8_t BUTTON_B_PIN = 7;
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
     // I2C is on 41/42 here, so 21 is genuinely free.
     static const int8_t BUTTON_A_PIN = 18;
     static const int8_t BUTTON_B_PIN = 21;
@@ -70,7 +104,18 @@ namespace HardwareConfiguration
     // ---- Ambient light sensor -------------------------------------------------
     // Board-guarded for the same reason the HUB75 map above is: the ESP32 values are
     // physically wrong on the S3, silently.
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
+    // The STEMMA QT connector, which already has pull-ups to 3.3V and an onboard
+    // LIS3DH on the same bus. 41/42 (the DevKit's I2C) are G1/R1 here.
+    static const int8_t I2C_SDA = 16;
+    static const int8_t I2C_SCL = 17;
+    // ADC1 is GPIO 1-10 on the S3. On THIS board 2 is HUB75_CLK, 4 is the
+    // NeoPixel, 6/7 are the buttons and 8 is UART RX, so the clean contiguous
+    // window is 9-10. 3 is a strapping pin and 1/5 are free but isolated.
+    static const uint8_t LIGHT_ANALOG_PIN = 9;
+    static const uint8_t ADC1_PIN_MIN = 1;
+    static const uint8_t ADC1_PIN_MAX = 10;
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
     // The S3 has NO GPIO 22-25 (it goes 0-21, then 26-48), so the classic ESP32's
     // SDA=21/SCL=22 cannot work here. 41/42 are plain digital pins clear of HUB75
     // (4-17), SPI flash (26-32), octal PSRAM (33-37), native USB (19/20 — the Serial
@@ -133,7 +178,10 @@ namespace HardwareConfiguration
     // range-checked against it, so a pin the UI advertised was accepted and
     // analogRead() was pointed at an RGB line. On the classic ESP32 the same
     // collision is one pin wide: HUB75_E is 32, the bottom of ADC1's 32-39.
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
+    static const uint8_t ADC1_FREE_MIN = 9;
+    static const uint8_t ADC1_FREE_MAX = 10;
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
     static const uint8_t ADC1_FREE_MIN = 1;
     static const uint8_t ADC1_FREE_MAX = 3;
 #else
