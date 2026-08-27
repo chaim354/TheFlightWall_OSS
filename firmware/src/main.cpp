@@ -169,7 +169,6 @@ static String setupScreenText(unsigned long secsToDark)
     return out;
 }
 
-
 // ---- Helpers --------------------------------------------------------------
 
 // 2.4GHz regulatory domain. The channel COUNT differs by role, and that
@@ -207,8 +206,6 @@ static void applyWifiRegion(uint8_t nchan)
 
 /** Defined below; called once the STA lease is up. */
 static void useReliableDns();
-/** Defined below; pulls any logo tile this cycle's flights need. */
-static void fetchMissingLogos();
 /** Defined below; reports to the server and applies anything queued there. */
 static void controlCheckIn();
 
@@ -618,7 +615,6 @@ static void doFetchAndRender()
     // A no-op on a cable-flashed build, which is not pending anything.
     FirmwareUpdater::markRunningImageValid();
 
-    fetchMissingLogos();
     controlCheckIn();
     // A fetch always supplies fresh data: force a recompose even if the cycled
     // index is unchanged. The 200ms re-render path deliberately does NOT do this.
@@ -639,35 +635,6 @@ static void doFetchAndRender()
 // operators at once, and fetching all of them back to back would stall the loop
 // through the whole carousel -- on a radio this panel already degrades. Two per
 // cycle catches up within a few minutes and is invisible while it does.
-static void fetchMissingLogos()
-{
-    if (g_settings.serverUrl.length() == 0)
-        return; // nothing to fetch from; the built-in tiles are all there is
-
-    const int kMaxPerCycle = 2;
-    int fetched = 0;
-    for (const FlightInfo &f : g_lastFlights)
-    {
-        if (fetched >= kMaxPerCycle)
-            break;
-        if (f.operator_icao.length() == 0)
-            continue;
-        const AssetUpdater::LogoResult r =
-            AssetUpdater::ensureLogo(g_settings.serverUrl, f.operator_icao);
-        if (r == AssetUpdater::LogoResult::Downloaded)
-        {
-            // Replace the cached MISS, or the operator stays logo-less until
-            // that entry happens to be evicted -- which on a quiet carousel
-            // could be a very long time.
-            g_display.reloadTile(f.operator_icao);
-            fetched++;
-        }
-        else if (r == AssetUpdater::LogoResult::Failed)
-        {
-            fetched++; // a failure still costs a request; do not retry in a tight loop
-        }
-    }
-}
 
 // Report to the server and apply anything queued there.
 //

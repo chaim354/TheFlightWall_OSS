@@ -5,7 +5,6 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <mbedtls/sha256.h>
-#include <set>
 
 namespace
 {
@@ -111,35 +110,8 @@ namespace
      * genuinely-absent operator on every carousel cycle, several times a
      * minute, forever.
      */
-    std::set<String> g_missingLogos;
 
-    /**
-     * Does this file actually look like a 32x32 logo tile?
-     *
-     * The hash proves the bytes arrived intact; it says nothing about what they
-     * ARE. Someone uploading a PNG to logos/JZA.rgb565 produces a perfectly
-     * intact file that tileFor() would then read a bogus width and height out
-     * of. Header first, then the exact byte count it implies -- the same layout
-     * tileFor() parses, checked before the file is allowed to become real.
-     */
-    bool looksLikeTile(const char *path)
-    {
-        File f = LittleFS.open(path, "r");
-        if (!f)
-            return false;
-        uint8_t hdr[4];
-        const bool readHdr = f.read(hdr, 4) == 4;
-        const size_t size = f.size();
-        f.close();
-        if (!readHdr)
-            return false;
-        const int w = hdr[0] | (hdr[1] << 8);
-        const int h = hdr[2] | (hdr[3] << 8);
-        if (w <= 0 || h <= 0 || w > 64 || h > 64)
-            return false;
-        return size == 4 + (size_t)w * (size_t)h * 2;
-    }
-
+    
     /**
      * Stream a URL into `destPath`, and only publish it if the hash matches.
      *
@@ -309,53 +281,8 @@ namespace AssetUpdater
         return LittleFS.remove(kUiCachePath);
     }
 
-    size_t missingLogoCount()
-    {
-        return g_missingLogos.size();
-    }
-
-    LogoResult ensureLogo(const String &serverUrl, const String &icao)
-    {
-        if (icao.length() == 0 || serverUrl.length() == 0)
-            return LogoResult::Failed;
-
-        const String path = String("/logos/") + icao + ".rgb565";
-        if (LittleFS.exists(path))
-            return LogoResult::AlreadyPresent;
-        if (g_missingLogos.count(icao))
-            return LogoResult::NotOnServer;
-
-        String err;
-        const String url = serverUrl + "/assets/logos/" + icao + ".rgb565";
-        if (!streamVerified(url, path.c_str(), String(), err))
-        {
-            // A 404 is an ANSWER, not a failure: this operator has no tile, and
-            // asking again this boot would waste a request per carousel cycle.
-            // Anything else -- a dropped connection, a bad hash -- is worth
-            // retrying, so it is deliberately not remembered.
-            if (err == "HTTP 404")
-            {
-                g_missingLogos.insert(icao);
-                return LogoResult::NotOnServer;
-            }
-            Serial.printf("[logo] %s: %s\n", icao.c_str(), err.c_str());
-            return LogoResult::Failed;
-        }
-
-        if (!looksLikeTile(path.c_str()))
-        {
-            // Intact bytes that are not a tile. Removed rather than left for
-            // tileFor() to read a bogus width out of.
-            LittleFS.remove(path);
-            g_missingLogos.insert(icao); // do not re-fetch the same bad file
-            Serial.printf("[logo] %s: downloaded file is not a 32x32 tile\n", icao.c_str());
-            return LogoResult::Failed;
-        }
-
-        Serial.printf("[logo] %s: downloaded\n", icao.c_str());
-        return LogoResult::Downloaded;
-    }
-
+    
+    
     FetchResult updateUi(const String &serverUrl)
     {
         FetchResult r;
