@@ -1,4 +1,5 @@
 #include "core/ControlClient.h"
+#include "core/ServerConnection.h"
 #include "core/Settings.h"
 
 #include <HTTPClient.h>
@@ -7,18 +8,6 @@
 
 namespace
 {
-    WiFiClientSecure &secureClient()
-    {
-        static WiFiClientSecure client;
-        static bool configured = false;
-        if (!configured)
-        {
-            client.setInsecure();
-            configured = true;
-        }
-        return client;
-    }
-
     /**
      * Cap on one command batch.
      *
@@ -77,9 +66,16 @@ namespace ControlClient
             return o; // not configured: no request, no error, nothing to report
 
         HTTPClient http;
-        if (!http.begin(secureClient(), serverUrl + "/v1/control/checkin"))
+        // THE SAME CONNECTION THE FLIGHT FETCH JUST USED. checkIn() is called
+        // from doFetchAndRender() immediately after FlightWallServerFetcher has
+        // talked to this very host, so the socket is already open and warm:
+        // reusing it turns what used to be a second full TLS handshake per cycle
+        // into a plain request. See core/ServerConnection.h for the measurement
+        // that motivated it and for why reset() exists.
+        if (!http.begin(ServerConnection::client(), serverUrl + "/v1/control/checkin"))
         {
             o.error = "connect failed";
+            ServerConnection::reset();
             return o;
         }
         http.setTimeout(8000);
@@ -91,6 +87,7 @@ namespace ControlClient
         {
             o.error = String("HTTP ") + code;
             http.end();
+            ServerConnection::reset();
             return o;
         }
 

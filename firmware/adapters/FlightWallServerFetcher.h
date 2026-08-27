@@ -40,9 +40,4 @@ public:
                       uint8_t maxFlights,
                       std::vector<FlightInfo> &outFlights,
                       bool &outStale);
-
-private:
-    WiFiClientSecure m_secure;
-    bool m_secureInit = false;
-    WiFiClientSecure &secureClient();
 };
