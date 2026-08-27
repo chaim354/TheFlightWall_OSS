@@ -2,8 +2,57 @@
 
 Status snapshot for the next agent. Fork `chaim354/TheFlightWall_OSS` (`origin`).
 Read §0 and §2 before touching anything, and §5 FIRST if you are about to push.
-As of 2026-08-25 the current line of work is `main` at `8fee649`; earlier work is
+As of 2026-08-25 the current line of work is `main` at `2384e7d`; earlier work is
 on `flightwall-mini-parity`.
+
+---
+
+## 0a. STATE AT THE END OF 2026-08-25 — read this before anything else
+
+**BOTH BOARDS ARE DOWN. The server is healthy and doing its job.** Nothing in
+the software is known-broken; the open problems are hardware.
+
+| | state |
+|---|---|
+| DevKit (the wall), `192.168.1.221` | **OFFLINE.** Left USB and WiFi at the same instant, ~23:28Z, and did not return. Unexplained. |
+| MatrixPortal S3, `192.168.1.58` | **DEGRADED.** Boots, joins WiFi, but RSSI fell from -55 to -66/-80 the moment the panel was plugged in; fetches fail. |
+| Server `flightwall.tinkerex.com` | **HEALTHY**, everything below deployed and verified live. |
+
+**THE SINGLE HIGHEST-VALUE ACTION: flash `9d5c716` (or later) to the DevKit.**
+It adds `resetReason` to `/api/status` and the check-in — brownout vs panic vs
+watchdog — which is *the* field that separates the two live hypotheses for why
+that board dies. It was committed 23:36Z, EIGHT MINUTES AFTER the board went
+offline, so it has never run on hardware. The whole evening was spent arguing
+from ping statistics because this field did not exist. Do not repeat that.
+
+**Open threads, in the order worth doing:**
+
+1. **DevKit dies on all interfaces at once.** Flash `9d5c716` first, then follow
+   §"The board drops off USB AND WiFi together": panel state -> replug USB ->
+   measure 5V at the ESP32 VIN *under load*. Do NOT open with ping tests; they
+   measure the victim.
+2. **MatrixPortal antenna sits on the panel's ground plane.** Try a HUB75 ribbon
+   so the board mounts away from the panel — free, and it is simultaneously the
+   fix and a controlled A/B on one board. See its row below.
+3. **Light sensor on the DevKit is armed and mis-calibrated** (`dark<50`, needs
+   `>200` to recover, read 70-102 in daylight). The maintainer chose to leave it;
+   it will blank the panel and halt fetching when it trips.
+4. **MatrixPortal filesystem/UI**: `uploadfs` now succeeds, but `uiSource` still
+   reports `builtin`; it should flip to `server` on its own — confirm it does.
+
+**WHAT IS LIVE AND VERIFIED ON THE SERVER** (all deployed, 623 tests passing):
+calendar sync pulling real flights from a published iCloud feed; tracked-flight
+fixes for cancelled-leg selection, time-aware leg choice, and ADS-B hex recovery
+when AeroDataBox has no aircraft; OTA fixed and *proven* by an update that
+completed; the entry cap re-based on airborne concurrency rather than store size.
+
+**A METHOD WARNING, because it cost the whole evening.** Two hardware diagnoses
+were asserted from a single before/after ping pair each — "it's the ribbon", then
+"it's the power" — and both were contradicted within hours. This fault swings
+~32x between identical runs (§1). One pair proves nothing. Either take many
+paired runs per condition, or find a measurement that is not a ping at all: the
+USB dropout and the LED on the bring-up image were each worth more than every
+ping taken that night.
 
 ---
 
