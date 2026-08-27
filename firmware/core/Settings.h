@@ -138,10 +138,20 @@ struct Settings
     // Base URL of the FlightWall server, e.g. "https://flightwall.example.workers.dev".
     // Stored without a trailing slash (normalised on load). Empty means the
     // server source is unusable and the fetcher falls back to AdsbLol.
-    String serverUrl;
+    //
+    // DEFAULTED, with positionSource below, so a freshly flashed board reaches
+    // the server without being configured by hand. A device that comes up on
+    // OpenSky instead is not merely different, it is the HEAVY path: 1 + up to
+    // 2*maxFlights TLS connections per cycle against this source's one. On a
+    // board whose radio has repeatedly proven marginal, defaulting to the cheap
+    // path is worth more than defaulting to the neutral one.
+    String serverUrl = "https://flightwall.tinkerex.com";
 
     // ---- Position source (Area mode) ----
-    PositionSource positionSource = PositionSource::OpenSky;
+    // Pairs with serverUrl above. Safe as a default because it degrades rather
+    // than fails: FlightDataFetcher::fetchServerMode falls back to AdsbLol on
+    // any failure, so a device that cannot reach the server still shows flights.
+    PositionSource positionSource = PositionSource::FlightWallServer;
 
     // ---- Flight enrichment (route/airline/aircraft) ----
     EnrichmentSource enrichmentSource = EnrichmentSource::Adsbdb;
