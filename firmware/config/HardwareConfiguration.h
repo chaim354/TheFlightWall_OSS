@@ -80,9 +80,12 @@ namespace HardwareConfiguration
     // 7. It must come FIRST in this chain -- the generic S3 choice below is
     // wrong here twice over, since 18 is this board's UART TX and 21 is HUB75_E.
     //
-    // UNVERIFIED ON HARDWARE: polarity is assumed active-low with an internal
-    // pull-up, matching Buttons.cpp and Adafruit's usual arrangement. If presses
-    // read inverted, this is the first line to check.
+    // POLARITY VERIFIED against Adafruit's pinout, not assumed: "the up and down
+    // buttons do not have any pull-up resistors connected to them and pressing
+    // either of them pulls the input low". So the internal pull-up is REQUIRED
+    // rather than merely conventional -- without it these pins float. That is
+    // exactly what Buttons.cpp already does (INPUT_PULLUP, pressed == LOW), so
+    // the driver needs no board-specific handling.
     static const int8_t BUTTON_A_PIN = 6;
     static const int8_t BUTTON_B_PIN = 7;
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -105,14 +108,29 @@ namespace HardwareConfiguration
     // Board-guarded for the same reason the HUB75 map above is: the ESP32 values are
     // physically wrong on the S3, silently.
 #if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
-    // The STEMMA QT connector, which already has pull-ups to 3.3V and an onboard
-    // LIS3DH on the same bus. 41/42 (the DevKit's I2C) are G1/R1 here.
+    // The STEMMA QT connector: a keyed plug with 3.3V pull-ups already fitted,
+    // which is a real improvement over the DevKit's flying leads -- the loose
+    // I2C wiring there is a documented source of a sensor that reads nothing
+    // (see HANDOFF on reseating 41/42/3V3/GND). An onboard LIS3DH sits on this
+    // same bus at 0x19; harmless, but it means the bus is never empty, so an
+    // I2C scan finding only 0x19 means the light sensor is absent, not the bus.
+    //
+    // 41/42 -- the DevKit's I2C -- are G1/R1 here, which is what forced this
+    // board into its own block rather than a couple of overrides.
     static const int8_t I2C_SDA = 16;
     static const int8_t I2C_SCL = 17;
-    // ADC1 is GPIO 1-10 on the S3. On THIS board 2 is HUB75_CLK, 4 is the
-    // NeoPixel, 6/7 are the buttons and 8 is UART RX, so the clean contiguous
-    // window is 9-10. 3 is a strapping pin and 1/5 are free but isolated.
-    static const uint8_t LIGHT_ANALOG_PIN = 9;
+
+    // ANALOG: use the board's broken-out A-pins, and mind which ADC they are on.
+    // Adafruit exposes A0 on a 3-pin JST (jumper-selectable 3V/5V) and A1-A4 on
+    // pads, mapping to GPIO 12, 3, 9, 10, 11 respectively.
+    //
+    // THE CONVENIENT ONE IS THE UNUSABLE ONE. A0 (GPIO 12) and A4 (GPIO 11) are
+    // on ADC2, which cannot be read while WiFi is up -- so the JST connector,
+    // the obvious place to plug a light sensor, is silently useless for analog
+    // on this firmware. A1 (GPIO 3) is ADC1 but a strapping pin. That leaves
+    // A2 (9) and A3 (10) as the only broken-out ADC1 pins, and they are what
+    // the window below advertises.
+    static const uint8_t LIGHT_ANALOG_PIN = 9; // = A2
     static const uint8_t ADC1_PIN_MIN = 1;
     static const uint8_t ADC1_PIN_MAX = 10;
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -179,6 +197,10 @@ namespace HardwareConfiguration
     // analogRead() was pointed at an RGB line. On the classic ESP32 the same
     // collision is one pin wide: HUB75_E is 32, the bottom of ADC1's 32-39.
 #if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
+    // A2 and A3. Not an elimination result like the DevKit's window above --
+    // these are the only two of the board's five broken-out analog pins that
+    // are both on ADC1 and not a strapping pin. See the note beside
+    // LIGHT_ANALOG_PIN for why A0's JST connector does not qualify.
     static const uint8_t ADC1_FREE_MIN = 9;
     static const uint8_t ADC1_FREE_MAX = 10;
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
