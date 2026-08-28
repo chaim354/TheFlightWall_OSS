@@ -85,7 +85,19 @@ namespace ControlClient
         const int code = http.POST(statusJson);
         if (code != HTTP_CODE_OK)
         {
-            o.error = String("HTTP ") + code;
+            // The BODY, not just the code. The server distinguishes its
+            // refusals and says which one this is -- 401 `unauthorised` means
+            // the credential is unknown, while 403 `not the device` means it is
+            // a VALID credential of the wrong tier: the UI or admin page
+            // password rather than CONTROL_TOKEN. Those need opposite fixes and
+            // the status code alone cannot tell them apart, which cost a real
+            // debugging session. adsb.lol taught the same lesson in the same
+            // week (see AdsbLolFetcher).
+            String why = http.getString();
+            why.replace('\n', ' ');
+            if (why.length() > 160)
+                why = why.substring(0, 160) + "...";
+            o.error = String("HTTP ") + code + " -- " + why;
             http.end();
             ServerConnection::reset();
             return o;
