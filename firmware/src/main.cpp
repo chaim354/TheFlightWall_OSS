@@ -44,6 +44,7 @@ Run loop:
 #include "adapters/FlightWallServerFetcher.h"
 #include "core/FlightDataFetcher.h"
 #include "core/WebConfigServer.h"
+#include "core/RadioDiag.h"
 #include "core/SerialConsole.h"
 #include "adapters/Hub75Display.h"
 #include "adapters/LightSensor.h"
@@ -213,6 +214,10 @@ static bool connectWifiSta()
 {
     if (!g_settings.hasWifi())
         return false;
+
+    // BEFORE WiFi.begin(), or the first association's events are missed --
+    // which are exactly the ones that matter on a board that fails at boot.
+    RadioDiag::begin();
 
     WiFi.mode(WIFI_STA);
     applyWifiRegion(kStaChannels); // unlock ch 12-13 before associating
@@ -1191,6 +1196,22 @@ void loop()
     // after applyBrightness() above -- see fetchSuppressedWhileDark() for why,
     // and why a suppressed pass must never touch g_consecutiveFailures or
     // g_consecutiveEmpty.
+    // RADIO HEARTBEAT, deliberately ABOVE the dark gate.
+    //
+    // The per-fetch snapshot below only fires when a fetch runs, and a dark
+    // panel suppresses fetches entirely -- so on the night this was written the
+    // board sat for hours logging nothing at all about a radio we are actively
+    // trying to characterise. The fault is intermittent and has twice appeared
+    // and cleared unobserved; a disconnect at 03:00 with no line in the log is
+    // a lost measurement. Thirty seconds is cheap and matches the fetch cadence,
+    // so lit and dark periods produce comparable series.
+    static unsigned long s_lastRadioLogMs = 0;
+    if (millis() - s_lastRadioLogMs >= 30000UL)
+    {
+        s_lastRadioLogMs = millis();
+        RadioDiag::logSnapshot("heartbeat");
+    }
+
     if (fetchSuppressedWhileDark())
     {
         delay(5);
@@ -1209,6 +1230,9 @@ void loop()
     if (!g_firstFetchDone || (now - g_lastFetchMs >= intervalMs))
     {
         g_lastFetchMs = now;
+        // Pairs every fetch outcome with the radio state that produced it, so a
+        // failure can be read against RSSI/BSSID/channel instead of guessed at.
+        RadioDiag::logSnapshot("pre-fetch");
         doFetchAndRender();
     }
     else if (now - g_lastRenderMs >= 200)
