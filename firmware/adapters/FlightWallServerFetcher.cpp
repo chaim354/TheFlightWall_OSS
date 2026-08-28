@@ -11,6 +11,11 @@
 // silently corrupts the nearest-first ordering the display depends on.
 static constexpr double kNmToKm = 1.852;
 
+// ONE constant for the read budget and the log line that reports it. They were
+// briefly two -- a setTimeout(10000) beside a printf saying "budget 4000ms" --
+// which is precisely the drift that makes a log lie about the code it describes.
+static constexpr int kHttpBudgetMs = 10000;
+
 static String optStr(JsonObject o, const char *key)
 {
     const char *v = o[key] | "";
@@ -74,19 +79,27 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         url += "&max_alt_ft=" + String(g_settings.filters.maxAltitudeFt);
 
     HTTPClient http;
+    // Phase timings. `HTTP -1` on its own does not say WHICH failure it was:
+    // a refusal or DNS miss returns in tens of ms, while a handshake dying to
+    // packet loss burns the whole 4s budget first. Same code, opposite causes.
+    const unsigned long t0 = millis();
     http.begin(ServerConnection::client(), url);
-    // 4s, matching ServerConnection's handshake timeout -- see the comment there for
-    // why this source uses a much shorter bound than the other fetchers' 15s. This
-    // one covers the read side: a healthy reply's body is a couple KB behind a
-    // request that answers in tens of milliseconds, so 4s is generous margin for a
-    // slow response, not a bound sized to how long the response actually takes.
-    http.setTimeout(4000);
+    // 10s, matching ServerConnection's handshake timeout -- see the measurements
+    // there for why both moved up from 4s. This one covers the READ side, which
+    // the same instrumentation showed was never the problem: the body arrives in
+    // 1-2ms once the connection exists. It is raised only to stay consistent with
+    // the handshake bound, so one slow phase cannot be cut short by the other.
+    http.setTimeout(kHttpBudgetMs);
     http.addHeader("Accept", "application/json");
 
     int code = http.GET();
     if (code != 200)
     {
-        Serial.printf("FlightWallServerFetcher: HTTP %d\n", code);
+        Serial.printf("FlightWallServerFetcher: HTTP %d after %lums (budget %dms) -- %s\n",
+                      code, (unsigned long)(millis() - t0), kHttpBudgetMs,
+                      (millis() - t0) >= (kHttpBudgetMs - 500)
+                          ? "hit the budget: consistent with packet loss"
+                          : "under budget: refused/reset/DNS, NOT a timeout");
         http.end();
         // The connection is shared and kept alive now, so a bad exchange would
         // otherwise be inherited by controlCheckIn() one line later in
@@ -95,8 +108,12 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         return false;
     }
 
+    const unsigned long tGet = millis();
     String body = http.getString();
     http.end();
+    Serial.printf("[fetch] server ok: connect+GET %lums, body %lums, %u bytes\n",
+                  (unsigned long)(tGet - t0), (unsigned long)(millis() - tGet),
+                  (unsigned)body.length());
 
     // Small by design -- the server sends ~2KB, not the ~70KB an area feed does.
     // Small, but parsed OUT of internal RAM anyway: see PsramAllocator above for

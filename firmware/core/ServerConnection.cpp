@@ -32,22 +32,36 @@ namespace ServerConnection
         {
             c.setInsecure();
 
-            // 4s, carried over from FlightWallServerFetcher::secureClient(),
-            // where it was chosen and justified: adsb.lol sits behind this
-            // source as a fallback, so a fast failure that hands off promptly
-            // beats a slow one that only delays the same handoff. The server
-            // answers a healthy request in tens of milliseconds, so 4s is room
-            // for a genuinely slow handshake several times over, not a bound
-            // sized to the response.
+            // 10s. This was 4s, inherited with the reasoning that 4s left
+            // "room for a genuinely slow handshake several times over". THAT
+            // ASSUMPTION IS NOW FALSIFIED BY MEASUREMENT. Instrumented on
+            // 2026-08-27 with per-phase timings, on a link showing 12-20%
+            // packet loss at RSSI -47 and zero disconnects:
+            //
+            //   success  connect+TLS 3186ms, body 1ms
+            //   success  connect+TLS 4020ms, body 2ms
+            //   FAIL     timed out at 4581ms
+            //   FAIL     timed out at 5597ms
+            //
+            // A healthy handshake was taking 3.2-4.0s, so 4s was not generous
+            // headroom -- it was the failure boundary, and fetches were being
+            // discarded by a couple of hundred milliseconds. Note the body
+            // moves in 1-2ms once connected: this is packet loss during setup,
+            // not a slow link, so a longer budget costs nothing when the link
+            // is healthy and rescues the fetch when it is not.
+            //
+            // The old bound also assumed a working fallback to hand off TO.
+            // adsb.lol had been returning 403 on every attempt (see
+            // AdsbLolFetcher), so failing fast bought nothing at all.
             //
             // CONSEQUENCE OF SHARING, stated because it IS a behaviour change:
             // ControlClient previously handshook with the framework default and
-            // now inherits this 4s. That is deliberate and benign -- a check-in
-            // that misses simply retries on the next fetch cycle, so the cost of
-            // giving up early is one interval of remote-control latency, while
-            // the cost of hanging on is a multi-second stall in a loop that also
-            // drives the display.
-            c.setHandshakeTimeout(4);
+            // now inherits this bound. Benign -- a check-in that misses simply
+            // retries on the next fetch cycle. The worst case is a 10s stall in
+            // a loop that also drives the display, against a 30s fetch interval;
+            // that is the price of a fetch surviving a lossy link, and the panel
+            // holds its last frame rather than blanking.
+            c.setHandshakeTimeout(10);
             configured = true;
         }
 
