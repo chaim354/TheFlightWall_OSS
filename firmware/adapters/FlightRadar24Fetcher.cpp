@@ -109,9 +109,13 @@ bool FlightRadar24Fetcher::fetchStateVectors(double centerLat,
     // Content-Length or chunked framing, and getString() below honours both.
     http.setTimeout(15000);
     // These headers are what separate a 200 from a 403 — the endpoint checks them.
-    http.addHeader("User-Agent",
-                   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/122.0 Safari/537.36");
+    //
+    // setUserAgent(), NOT addHeader(): the latter silently drops User-Agent (see
+    // the long note in AdsbLolFetcher). This fetcher's own comment says the
+    // headers are what earn a 200, while the most important one was being
+    // discarded and `ESP32HTTPClient` sent in its place.
+    http.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/122.0 Safari/537.36");
     http.addHeader("Accept", "application/json");
     http.addHeader("Origin", "https://www.flightradar24.com");
     http.addHeader("Referer", "https://www.flightradar24.com/");

@@ -70,6 +70,7 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
                  "/lon/" + String(centerLon, 4) + "/dist/" + String(radiusNm);
 
     HTTPClient http;
+    const unsigned long t0 = millis();
     http.begin(secureClient(), url);
     // HTTP/1.1 deliberately, NOT useHTTP10(true) — see the long note in
     // FlightRadar24Fetcher.cpp. Under 1.0 the body is delimited by connection
@@ -77,12 +78,36 @@ bool AdsbLolFetcher::fetchStateVectors(double centerLat,
     // is processed, truncating any response spanning TLS records.
     http.setTimeout(15000);
     http.addHeader("Accept", "application/json");
-    http.addHeader("User-Agent", "TheFlightWall/1.0 (+https://github.com/)");
+    // setUserAgent(), NOT addHeader(). THIS IS THE BUG THAT KILLED THE FALLBACK.
+    //
+    // HTTPClient::addHeader() silently DISCARDS User-Agent -- its first
+    // statement is a guard listing the headers "handled by code" (Connection,
+    // User-Agent, Host, Authorization), and a match is dropped with no error
+    // and no return value to check. So every request this fetcher ever made
+    // went out as HTTPClient's default `ESP32HTTPClient`, and adsb.lol answered
+    // every one of them `403 User-Agent too generic; include valid contact
+    // info.` The fallback has never worked on any board.
+    //
+    // The evidence was already in the tree: HANDOFF's remote-diagnosis recipe
+    // greps the server log for `req_user_agent=ESP32HTTPClient`, which is the
+    // device telling us its User-Agent was never ours. Confirmed the other way
+    // too -- curl from a laptop sending this exact string gets a 200, so the
+    // string was never the problem, the API to set it was.
+    http.setUserAgent("TheFlightWall/1.0 (+https://github.com/chaim354/TheFlightWall_OSS)");
 
     int code = http.GET();
     if (code != 200)
     {
-        Serial.printf("AdsbLolFetcher: HTTP %d\n", code);
+        // A non-200 here reached the server and was answered, so unlike a
+        // transport failure the BODY carries the reason -- rate limit, blocked
+        // user-agent, bad path. Logging the code alone turned a 403 into a
+        // mystery when the server was explaining itself all along.
+        String why = http.getString();
+        why.replace('\n', ' ');
+        if (why.length() > 180)
+            why = why.substring(0, 180) + "...";
+        Serial.printf("AdsbLolFetcher: HTTP %d after %lums -- body: %s\n",
+                      code, (unsigned long)(millis() - t0), why.c_str());
         http.end();
         return false;
     }
