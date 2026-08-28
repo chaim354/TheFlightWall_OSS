@@ -88,10 +88,28 @@ namespace HardwareConfiguration
     // the driver needs no board-specific handling.
     static const int8_t BUTTON_A_PIN = 6;
     static const int8_t BUTTON_B_PIN = 7;
+
+    // EXTERNAL buttons, wired in PARALLEL with the onboard pair above: a
+    // momentary switch from the pin to GND, no resistor, because these get the
+    // same INPUT_PULLUP the onboard ones do. Either switch presses; neither
+    // disables the other.
+    //
+    // A3 and A4. The board breaks out five analog pads and only these two pairs
+    // are usable at all -- A1 (GPIO 3) is a strapping pin, and A0/A4 are on
+    // ADC2. Note what choosing A3 costs: GPIO 10 was half of the advertised
+    // ADC1 window, so the window below narrows to A2 alone. That is the whole
+    // price, and it is only a price if an ANALOG light sensor is wanted; the
+    // default sensor is I2C on the STEMMA QT connector and is unaffected.
+    static const int8_t BUTTON_A_EXT_PIN = 10; // A3
+    static const int8_t BUTTON_B_EXT_PIN = 11; // A4
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     // I2C is on 41/42 here, so 21 is genuinely free.
     static const int8_t BUTTON_A_PIN = 18;
     static const int8_t BUTTON_B_PIN = 21;
+    // No external pair wired on this board. -1 means "absent", and Buttons.cpp
+    // skips any pin below zero rather than calling pinMode(-1).
+    static const int8_t BUTTON_A_EXT_PIN = -1;
+    static const int8_t BUTTON_B_EXT_PIN = -1;
 #else
     // The classic ESP32's budget is nearly exhausted: HUB75 takes 14 pins, SPI flash
     // 6, UART0 2, I2C 2. Free WITH an internal pull-up is exactly {0, 2, 18, 33} —
@@ -102,6 +120,11 @@ namespace HardwareConfiguration
     // cannot coexist on this target. LightSensor::begin() cross-checks and refuses.
     static const int8_t BUTTON_A_PIN = 18;
     static const int8_t BUTTON_B_PIN = 33;
+    // See the S3 note: -1 is "absent". The classic ESP32 has no pins to spare
+    // for a second pair anyway -- the comment above spells out that free-with-
+    // pull-up is exactly {0, 2, 18, 33}.
+    static const int8_t BUTTON_A_EXT_PIN = -1;
+    static const int8_t BUTTON_B_EXT_PIN = -1;
 #endif
 
     // ---- Ambient light sensor -------------------------------------------------
@@ -197,12 +220,17 @@ namespace HardwareConfiguration
     // analogRead() was pointed at an RGB line. On the classic ESP32 the same
     // collision is one pin wide: HUB75_E is 32, the bottom of ADC1's 32-39.
 #if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
-    // A2 and A3. Not an elimination result like the DevKit's window above --
-    // these are the only two of the board's five broken-out analog pins that
-    // are both on ADC1 and not a strapping pin. See the note beside
-    // LIGHT_ANALOG_PIN for why A0's JST connector does not qualify.
+    // A2 ALONE, and it used to be A2+A3. A3 (GPIO 10) became BUTTON_A_EXT_PIN,
+    // so advertising it here would hand the web UI a pin that pinMode() has
+    // already claimed as an input with a pull-up -- the analog read would then
+    // sample a pin a button can yank to ground.
+    //
+    // Narrowed HERE rather than left to the runtime cross-check in
+    // LightSensor::begin(), because a range the UI offers is a promise: the
+    // check catches the mistake after someone makes it, this stops it being
+    // offered at all. Both exist; they are not redundant.
     static const uint8_t ADC1_FREE_MIN = 9;
-    static const uint8_t ADC1_FREE_MAX = 10;
+    static const uint8_t ADC1_FREE_MAX = 9;
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     static const uint8_t ADC1_FREE_MIN = 1;
     static const uint8_t ADC1_FREE_MAX = 3;
@@ -229,6 +257,40 @@ namespace HardwareConfiguration
                   "BUTTON_A_PIN collides with I2C -- this exact bug already shipped once");
     static_assert(BUTTON_B_PIN != I2C_SDA && BUTTON_B_PIN != I2C_SCL,
                   "BUTTON_B_PIN collides with I2C -- this exact bug already shipped once");
+
+    // The external pair, held to exactly the same rules. A pin that is -1 is
+    // absent and must skip every check -- hence the `< 0 ||` guard on each,
+    // which is what lets one board declare a pair and the others decline
+    // without a second set of asserts.
+    static_assert(BUTTON_A_EXT_PIN < 0 || !isHub75Pin(BUTTON_A_EXT_PIN),
+                  "BUTTON_A_EXT_PIN collides with a HUB75 line");
+    static_assert(BUTTON_B_EXT_PIN < 0 || !isHub75Pin(BUTTON_B_EXT_PIN),
+                  "BUTTON_B_EXT_PIN collides with a HUB75 line");
+    static_assert(BUTTON_A_EXT_PIN < 0 || BUTTON_A_EXT_PIN != BUTTON_B_EXT_PIN,
+                  "both external buttons are on the same pin");
+    static_assert(BUTTON_A_EXT_PIN < 0 ||
+                      (BUTTON_A_EXT_PIN != I2C_SDA && BUTTON_A_EXT_PIN != I2C_SCL),
+                  "BUTTON_A_EXT_PIN collides with I2C");
+    static_assert(BUTTON_B_EXT_PIN < 0 ||
+                      (BUTTON_B_EXT_PIN != I2C_SDA && BUTTON_B_EXT_PIN != I2C_SCL),
+                  "BUTTON_B_EXT_PIN collides with I2C");
+    // And against the ONBOARD pair -- paralleling a pin with itself would make
+    // one switch appear to press both actions.
+    static_assert(BUTTON_A_EXT_PIN < 0 ||
+                      (BUTTON_A_EXT_PIN != BUTTON_A_PIN && BUTTON_A_EXT_PIN != BUTTON_B_PIN),
+                  "BUTTON_A_EXT_PIN duplicates an onboard button pin");
+    static_assert(BUTTON_B_EXT_PIN < 0 ||
+                      (BUTTON_B_EXT_PIN != BUTTON_A_PIN && BUTTON_B_EXT_PIN != BUTTON_B_PIN),
+                  "BUTTON_B_EXT_PIN duplicates an onboard button pin");
+    // The advertised analog window must not contain an external button either.
+    // This is the assert that fires if A3 is ever handed back to the ADC window
+    // while it is still wired to a switch.
+    static_assert(BUTTON_A_EXT_PIN < 0 ||
+                      BUTTON_A_EXT_PIN < ADC1_FREE_MIN || BUTTON_A_EXT_PIN > ADC1_FREE_MAX,
+                  "BUTTON_A_EXT_PIN is inside the advertised ADC1 window");
+    static_assert(BUTTON_B_EXT_PIN < 0 ||
+                      BUTTON_B_EXT_PIN < ADC1_FREE_MIN || BUTTON_B_EXT_PIN > ADC1_FREE_MAX,
+                  "BUTTON_B_EXT_PIN is inside the advertised ADC1 window");
 
     static_assert(!isHub75Pin(LIGHT_ANALOG_PIN), "the default light-sensor pin is a HUB75 line");
     static_assert(LIGHT_ANALOG_PIN >= ADC1_FREE_MIN && LIGHT_ANALOG_PIN <= ADC1_FREE_MAX,

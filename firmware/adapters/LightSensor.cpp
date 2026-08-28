@@ -131,15 +131,27 @@ void LightSensor::begin()
         // collision is reachable straight from the web UI. Two subsystems silently
         // fighting over one pin is exactly the bug that produced the 18/21 mistake;
         // say so out loud instead of letting it be debugged twice.
-        if (g_settings.buttonsEnabled &&
-            (_pin == (uint8_t)HardwareConfiguration::BUTTON_A_PIN ||
-             _pin == (uint8_t)HardwareConfiguration::BUTTON_B_PIN))
+        // The EXTERNAL pair counts too. On the MatrixPortal these are A3/A4,
+        // and A3 sits in the analog pads a person would naturally reach for --
+        // so this is not a theoretical overlap, it is the most likely one on
+        // that board. A negative pin is absent and can never match.
+        const bool hitsButton =
+            _pin == (uint8_t)HardwareConfiguration::BUTTON_A_PIN ||
+            _pin == (uint8_t)HardwareConfiguration::BUTTON_B_PIN ||
+            (HardwareConfiguration::BUTTON_A_EXT_PIN >= 0 &&
+             _pin == (uint8_t)HardwareConfiguration::BUTTON_A_EXT_PIN) ||
+            (HardwareConfiguration::BUTTON_B_EXT_PIN >= 0 &&
+             _pin == (uint8_t)HardwareConfiguration::BUTTON_B_EXT_PIN);
+        if (g_settings.buttonsEnabled && hitsButton)
         {
-            Serial.printf("LightSensor: pin %u is already a button (A=%d, B=%d); "
-                          "analog sensor disabled. Disable buttons or pick another pin.\n",
+            Serial.printf("LightSensor: pin %u is already a button "
+                          "(A=%d, B=%d, ext A=%d, ext B=%d); analog sensor disabled. "
+                          "Disable buttons or pick another pin.\n",
                           (unsigned)_pin,
                           (int)HardwareConfiguration::BUTTON_A_PIN,
-                          (int)HardwareConfiguration::BUTTON_B_PIN);
+                          (int)HardwareConfiguration::BUTTON_B_PIN,
+                          (int)HardwareConfiguration::BUTTON_A_EXT_PIN,
+                          (int)HardwareConfiguration::BUTTON_B_EXT_PIN);
             break;
         }
         if (!isValidAdc1Pin(_pin))
