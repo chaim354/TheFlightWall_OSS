@@ -112,6 +112,17 @@ namespace ControlClient
             return o;
         }
         o.checkedIn = true;
+        // SUCCESS WAS THE ONLY OUTCOME WITHOUT A LINE. Every failure logged, so
+        // silence used to mean either "checked in perfectly" or "never tried"
+        // -- the unconfigured path returns just as quietly. Those are opposite
+        // situations and they looked identical from outside the device, which
+        // is exactly how a control token that had not applied was mistaken for
+        // one that had. With this line, silence can only mean unconfigured.
+        Serial.printf("[control] checked in ok (%u bytes reported, %u command(s))\n",
+                      (unsigned)statusJson.length(),
+                      (unsigned)(doc["commands"].is<JsonArray>()
+                                     ? doc["commands"].as<JsonArray>().size()
+                                     : 0));
 
         JsonArray cmds = doc["commands"].as<JsonArray>();
         if (cmds.isNull())
