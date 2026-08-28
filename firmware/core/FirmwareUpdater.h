@@ -50,6 +50,26 @@ namespace FirmwareUpdater
     /** True while the running image still owes the bootloader a verdict. */
     bool awaitingValidation();
 
+    /**
+     * The build target this image was compiled for: "matrixportal_s3",
+     * "esp32s3" or "esp32dev".
+     *
+     * WHY THE OTA PATH NEEDS THIS. There is ONE firmware slot on the server and
+     * the device verifies only the SIGNATURE -- which proves the image is
+     * authentic, not that it is meant for this board. A correctly signed
+     * MatrixPortal image installed on a DevKit is a boot loop: different pin
+     * map, qio_qspi against the N16R8's octal PSRAM (platformio.ini: "qio_opi
+     * on this board leaves the PSRAM uninitialised and it boot-loops"), and a
+     * different partition layout. Recovery needs a cable, which is precisely
+     * what OTA exists to avoid.
+     *
+     * Derived from the same macros HardwareConfiguration.h dispatches on, in
+     * the same order -- the MatrixPortal test MUST come first, because that
+     * board is also an ESP32-S3 and CONFIG_IDF_TARGET_ESP32S3 cannot tell them
+     * apart.
+     */
+    const char *buildTarget();
+
     struct Available
     {
         bool ok = false;
@@ -57,6 +77,7 @@ namespace FirmwareUpdater
         String sha256;    // expected hash of the image
         size_t size = 0;
         String sigB64;    // base64 DER ECDSA signature over that hash
+        String target;    // the board the offered image was built for
         String error;
     };
 

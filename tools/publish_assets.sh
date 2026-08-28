@@ -149,7 +149,7 @@ publish_logos() {
 
 publish_firmware() {
   local d="dist/firmware"
-  for f in firmware.bin firmware.sig version.txt; do
+  for f in firmware.bin firmware.sig version.txt target.txt; do
     [ -f "$d/$f" ] || { echo "no $d/$f -- run tools/sign_firmware.sh first" >&2; return 1; }
   done
 
@@ -184,14 +184,15 @@ publish_firmware() {
   # there is nothing to install, rather than being offered an image whose
   # signature belongs to a different build.
   put "$d/version.txt" "/app/data/assets/firmware/version.txt"
+  put "$d/target.txt" "/app/data/assets/firmware/target.txt"
   put "$d/firmware.sig" "/app/data/assets/firmware/firmware.sig"
   put "$d/firmware.bin" "/app/data/assets/firmware/firmware.bin"
 
-  local want got ver
+  local want got ver tgt
   want="$(sha_of "$d/firmware.bin")"
-  read -r got ver <<<"$(manifest | python3 -c 'import json,sys; f=json.load(sys.stdin).get("firmware") or {}; print(f.get("sha256",""), f.get("version",""))')"
+  read -r got ver tgt <<<"$(manifest | python3 -c 'import json,sys; f=json.load(sys.stdin).get("firmware") or {}; print(f.get("sha256",""), f.get("version",""), f.get("target",""))')"
   if [ "$want" = "$got" ]; then
-    echo "  firmware  ok  $ver  ${want:0:12}…  ($(wc -c < "$d/firmware.bin" | tr -d ' ') bytes)"
+    echo "  firmware  ok  $ver  target=$tgt  ${want:0:12}…  ($(wc -c < "$d/firmware.bin" | tr -d ' ') bytes)"
   else
     echo "  firmware  MISMATCH: uploaded ${want:0:12}… but the server advertises ${got:0:12}…" >&2
     return 1

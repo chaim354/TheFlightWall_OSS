@@ -112,6 +112,17 @@ export interface FirmwareInfo extends AssetInfo {
   version: string;
   /** base64 DER ECDSA-P256 signature over the image's SHA-256. */
   sig: string;
+  /**
+   * The board this image was built for: matrixportal_s3 | esp32s3 | esp32dev.
+   *
+   * There is one firmware slot and every device reads it, while the signature
+   * only proves the image is AUTHENTIC -- never that it belongs on the board
+   * asking. A MatrixPortal image on a DevKit boot-loops (different pin map,
+   * quad vs octal PSRAM, different partition table) and needs a cable to undo,
+   * which is the one thing OTA exists to avoid. The device refuses a mismatch,
+   * and refuses a manifest that omits this outright.
+   */
+  target: string;
 }
 
 /**
@@ -134,25 +145,31 @@ async function firmwareEntry(root: string): Promise<FirmwareInfo | null> {
   const binPath = resolveAssetPath(root, 'firmware/firmware.bin');
   const sigPath = resolveAssetPath(root, 'firmware/firmware.sig');
   const verPath = resolveAssetPath(root, 'firmware/version.txt');
-  if (!binPath || !sigPath || !verPath) return null;
+  // target.txt joins the required set rather than being optional: an entry
+  // without it is one no current device will install anyway, so advertising it
+  // would only offer an update that every board refuses.
+  const tgtPath = resolveAssetPath(root, 'firmware/target.txt');
+  if (!binPath || !sigPath || !verPath || !tgtPath) return null;
 
   const info = await assetInfo(binPath);
   if (!info) return null;
 
   let sig: string;
   let version: string;
+  let target: string;
   try {
     // Buffer.from() around the read: the signature is BINARY DER, and taking
     // the string-returning overload here would mangle it through a text decode
     // before it ever reached base64.
     sig = Buffer.from(await readFile(sigPath)).toString('base64');
     version = Buffer.from(await readFile(verPath)).toString('utf8').trim();
+    target = Buffer.from(await readFile(tgtPath)).toString('utf8').trim();
   } catch {
     return null;
   }
-  if (!sig || !version) return null;
+  if (!sig || !version || !target) return null;
 
-  return { ...info, version, sig };
+  return { ...info, version, sig, target };
 }
 
 export async function assetManifest(root: string): Promise<Response> {

@@ -141,6 +141,21 @@ namespace FirmwareUpdater
             Serial.println("[ota] could not mark the image valid -- it will roll back");
     }
 
+    const char *buildTarget()
+    {
+        // Same dispatch order as HardwareConfiguration.h. The MatrixPortal is
+        // ALSO an ESP32-S3, so its explicit board flag must be tested before
+        // CONFIG_IDF_TARGET_ESP32S3 or every MatrixPortal would call itself a
+        // DevKit -- which is exactly the confusion this function prevents.
+#if defined(FLIGHTWALL_BOARD_MATRIXPORTAL_S3)
+        return "matrixportal_s3";
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+        return "esp32s3";
+#else
+        return "esp32dev";
+#endif
+    }
+
     Available check(const String &serverUrl)
     {
         Available a;
@@ -186,6 +201,34 @@ namespace FirmwareUpdater
         a.sha256 = fw["sha256"].as<String>();
         a.size = fw["size"].as<size_t>();
         a.sigB64 = fw["sig"].as<String>();
+        a.target = fw["target"].as<String>();
+
+        // TARGET GATE, and it FAILS CLOSED on purpose.
+        //
+        // A signature proves the image is authentic; it says nothing about
+        // which board it was built for. One slot serves every device, so an
+        // unchecked download is how a DevKit ends up running a MatrixPortal
+        // image and boot-looping until someone finds a cable.
+        //
+        // A manifest with no target at all is refused rather than assumed
+        // compatible: silence used to mean "no check", and treating it as
+        // permission would leave exactly the hazard this closes. An old server
+        // therefore stops offering updates to new firmware until it is
+        // republished -- a visible, recoverable state, and the safe direction
+        // to fail in. The reason lands in otaError, so it is readable from the
+        // control page without a cable.
+        if (a.target.length() == 0)
+        {
+            a.error = "server did not state a firmware target; refusing";
+            return a;
+        }
+        if (a.target != buildTarget())
+        {
+            a.error = String("firmware is for '") + a.target + "', this board is '" +
+                      buildTarget() + "'; refusing";
+            return a;
+        }
+
         a.ok = a.version.length() && a.sha256.length() && a.sigB64.length() && a.size > 0;
         if (!a.ok)
             a.error = "incomplete firmware entry";

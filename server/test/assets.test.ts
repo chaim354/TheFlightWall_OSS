@@ -99,25 +99,48 @@ describe('assetManifest', () => {
 });
 
 describe('assetManifest firmware entry', () => {
-  const layDownFirmware = (bin: string, sig: Buffer, version: string): void => {
+  const layDownFirmware = (
+    bin: string,
+    sig: Buffer,
+    version: string,
+    target = 'esp32s3',
+  ): void => {
     mkdirSync(join(root, 'firmware'), { recursive: true });
     writeFileSync(join(root, 'firmware', 'firmware.bin'), bin);
     writeFileSync(join(root, 'firmware', 'firmware.sig'), sig);
     writeFileSync(join(root, 'firmware', 'version.txt'), version + '\n');
+    writeFileSync(join(root, 'firmware', 'target.txt'), target + '\n');
   };
 
-  it('reports version, size, hash and the signature', async () => {
+  it('reports version, target, size, hash and the signature', async () => {
     const sig = Buffer.from([0x30, 0x45, 0x02, 0x21, 0xde, 0xad]);
-    layDownFirmware('IMAGE', sig, '2e05f4d');
+    layDownFirmware('IMAGE', sig, '2e05f4d', 'matrixportal_s3');
     const body = (await (await assetManifest(root)).json()) as {
-      firmware: { version: string; size: number; sha256: string; sig: string } | null;
+      firmware: {
+        version: string; size: number; sha256: string; sig: string; target: string;
+      } | null;
     };
     expect(body.firmware).toEqual({
       version: '2e05f4d',           // trailing newline trimmed
+      target: 'matrixportal_s3',     // likewise, and it gates the install
       size: 5,
       sha256: sha('IMAGE'),          // from the BYTES, not from anything uploaded
       sig: sig.toString('base64'),
     });
+  });
+
+  it('is null when target.txt is missing, so no board is offered an unlabelled image', async () => {
+    // One slot serves every board and the signature proves only authenticity,
+    // never fitness. An image with no stated target is one every current device
+    // refuses, so advertising it would offer an update nothing can install --
+    // and worse, an older device that does not check would take it.
+    const sig = Buffer.from([0x30, 0x45]);
+    mkdirSync(join(root, 'firmware'), { recursive: true });
+    writeFileSync(join(root, 'firmware', 'firmware.bin'), 'IMAGE');
+    writeFileSync(join(root, 'firmware', 'firmware.sig'), sig);
+    writeFileSync(join(root, 'firmware', 'version.txt'), '2e05f4d\n');
+    const body = (await (await assetManifest(root)).json()) as { firmware: unknown };
+    expect(body.firmware).toBeNull();
   });
 
   it('is null when any of the three files is missing', async () => {

@@ -91,6 +91,21 @@ if [ -z "$VERSION" ]; then
   exit 2
 fi
 
+# THE BUILD TARGET, taken from the path rather than asked for. PlatformIO puts
+# every image at .pio/build/<env>/firmware.bin, so the parent directory IS the
+# env name and cannot disagree with the bytes beside it -- whereas a flag would
+# be one more thing to get wrong on the release that matters. The device refuses
+# an image whose target is not its own; see FirmwareUpdater::buildTarget().
+TARGET="$(basename "$(dirname "$BIN")")"
+case "$TARGET" in
+  esp32dev|esp32s3|matrixportal_s3) ;;
+  *)
+    echo "unrecognised build target '$TARGET' derived from $BIN" >&2
+    echo "expected the image at firmware/.pio/build/<env>/firmware.bin" >&2
+    exit 2
+    ;;
+esac
+
 mkdir -p "$OUT"
 cp "$BIN" "$OUT/firmware.bin"
 
@@ -100,6 +115,7 @@ cp "$BIN" "$OUT/firmware.bin"
 # device.
 openssl dgst -sha256 -sign "$KEY" -out "$OUT/firmware.sig" "$OUT/firmware.bin"
 printf '%s' "$VERSION" > "$OUT/version.txt"
+printf '%s' "$TARGET" > "$OUT/target.txt"
 
 SHA="$(shasum -a 256 "$OUT/firmware.bin" | cut -d' ' -f1)"
 SIZE="$(wc -c < "$OUT/firmware.bin" | tr -d ' ')"
@@ -124,9 +140,11 @@ cat <<EOF
 
   image    $OUT/firmware.bin
   version  $VERSION
+  target   $TARGET
   size     $SIZE bytes
   sha256   $SHA
   sig      $OUT/firmware.sig ($(wc -c < "$OUT/firmware.sig" | tr -d ' ') bytes, DER)
 
-Upload all three to the server's asset volume under assets/firmware/.
+Upload all four to the server's asset volume under assets/firmware/.
+Only boards built as '$TARGET' will accept this image.
 EOF
