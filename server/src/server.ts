@@ -14,7 +14,7 @@ import { runCalendarSync } from './tracked/sync';
 import { fetchIcs } from './tracked/calendar';
 import { matchByFlightNumber, searchCentre, SEARCH_RADIUS_NM } from './tracked/findHex';
 import { fetchAircraft } from './adsblol';
-import { assetManifest, serveAsset, writeFirmware } from './assets';
+import { assetManifest, serveAsset, writeFirmware, writeUi } from './assets';
 import { handleControl, resolveTier, fileControlStorage, type ControlStorage } from './control';
 
 /** Everything server.ts needs, read from process.env with a default for
@@ -296,7 +296,9 @@ async function handleRequest(
    * body: the image is the only large part, and multipart parsing here would be
    * a dependency and an attack surface for no gain.
    */
-  if (req.method === 'POST' && url.pathname === '/v1/control/firmware') {
+  if (req.method === 'POST' &&
+      (url.pathname === '/v1/control/firmware' || url.pathname === '/v1/control/ui')) {
+    const isUi = url.pathname === '/v1/control/ui';
     if (!control) {
       res.writeHead(404, { 'content-type': 'text/plain' });
       res.end('not found');
@@ -315,7 +317,7 @@ async function handleRequest(
       });
       res.end(JSON.stringify({
         ok: false,
-        error: status === 401 ? 'unauthorised' : 'publishing firmware needs the admin password',
+        error: status === 401 ? 'unauthorised' : 'publishing assets needs the admin password',
       }));
       return;
     }
@@ -337,13 +339,16 @@ async function handleRequest(
       return;
     }
 
+    const body = Buffer.concat(chunks);
     const sigHeader = req.headers['x-firmware-sig'];
-    const result = await writeFirmware(assetsRoot, {
-      bin: Buffer.concat(chunks),
-      sig: Array.isArray(sigHeader) ? (sigHeader[0] ?? '') : (sigHeader ?? ''),
-      version: url.searchParams.get('version') ?? '',
-      target: url.searchParams.get('target') ?? '',
-    });
+    const result = isUi
+      ? await writeUi(assetsRoot, body)
+      : await writeFirmware(assetsRoot, {
+          bin: body,
+          sig: Array.isArray(sigHeader) ? (sigHeader[0] ?? '') : (sigHeader ?? ''),
+          version: url.searchParams.get('version') ?? '',
+          target: url.searchParams.get('target') ?? '',
+        });
     res.writeHead(result.ok ? 200 : 400, {
       'content-type': 'application/json',
       'cache-control': 'no-store',

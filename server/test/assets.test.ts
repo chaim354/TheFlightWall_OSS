@@ -8,7 +8,7 @@ import {
   assetInfo,
   assetManifest,
   serveAsset,
-  clearAssetHashCache, writeFirmware } from '../src/assets';
+  clearAssetHashCache, writeFirmware, writeUi } from '../src/assets';
 
 let root: string;
 
@@ -253,6 +253,39 @@ describe('writeFirmware', () => {
 
   it('refuses a version with characters that do not belong in a path', async () => {
     const r = await writeFirmware(root, { ...good(), version: '../../etc/passwd' });
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('writeUi', () => {
+  // Minimal valid gzip member: magic, deflate, no flags, mtime 0, then an
+  // empty stored block. Enough for the magic check and the manifest hash.
+  const gz = Buffer.from([
+    0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+    0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  ]);
+
+  it('publishes the UI so the manifest advertises it', async () => {
+    const r = await writeUi(root, gz);
+    expect(r.ok).toBe(true);
+    const body = (await (await assetManifest(root)).json()) as {
+      ui: { sha256: string; size: number } | null;
+    };
+    expect(body.ui).toEqual({ sha256: sha(gz), size: gz.length });
+  });
+
+  it('refuses a plain .html, which would cache a page that cannot decompress', async () => {
+    // The whole failure this prevents: the server serves it, the device caches
+    // it, and the page is broken on a wall with no cable in it.
+    const r = await writeUi(root, Buffer.from('<!doctype html><p>not gzipped'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/not gzip/);
+    const body = (await (await assetManifest(root)).json()) as { ui: unknown };
+    expect(body.ui).toBeNull();   // nothing written
+  });
+
+  it('refuses an empty upload', async () => {
+    const r = await writeUi(root, Buffer.alloc(0));
     expect(r.ok).toBe(false);
   });
 });

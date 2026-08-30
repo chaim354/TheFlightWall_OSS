@@ -226,6 +226,43 @@ function decodeDerSignature(sig: string) {
   return bytes;
 }
 
+/**
+ * Write the gzipped web UI into the asset volume.
+ *
+ * The device already collects this over the air: `updateui` makes
+ * AssetUpdater::updateUi() fetch /assets/index.html.gz, verify it against the
+ * manifest's ui.sha256, and cache it in LittleFS. Only the UPLOAD still
+ * required shell access to the box, which is the gap this closes.
+ *
+ * GZIP MAGIC IS CHECKED because the failure it prevents is silent and remote:
+ * the build produces index.html.gz via tools/gzip_web_assets.py, but uploading
+ * the plain .html by mistake yields a file the server happily serves and the
+ * device happily caches -- and then a page that will not decompress in a
+ * browser, on a wall with no cable in it. Two bytes of validation here beat
+ * discovering it from the sofa.
+ *
+ * Unlike firmware there is no signature: the UI is markup the device serves to
+ * a browser, not code it executes, so the manifest hash is the whole integrity
+ * story and streamVerified() already checks it device-side.
+ */
+export async function writeUi(
+  root: string,
+  gz: Buffer,
+): Promise<{ ok: true; sha256: string; size: number } | { ok: false; error: string }> {
+  if (!gz || gz.length === 0) return { ok: false, error: 'empty file' };
+  if (gz.length > 2 * 1024 * 1024) return { ok: false, error: 'file too large' };
+  if (gz[0] !== 0x1f || gz[1] !== 0x8b) {
+    return { ok: false, error: 'not gzip -- upload index.html.gz, not index.html' };
+  }
+
+  const path = resolveAssetPath(root, 'index.html.gz');
+  if (!path) return { ok: false, error: 'bad asset root' };
+  await mkdir(root, { recursive: true });
+  await writeFile(path, gz);
+
+  return { ok: true, sha256: createHash('sha256').update(gz).digest('hex'), size: gz.length };
+}
+
 export async function writeFirmware(
   root: string,
   upload: FirmwareUpload,
