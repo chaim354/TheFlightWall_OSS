@@ -73,6 +73,11 @@ export const trackedPage = `<!doctype html>
   .pill.go { color:var(--accent); border-color:var(--accent); }
   .pill.warn { color:var(--warn); border-color:var(--warn); }
   .help { display:block; color:var(--muted); font-size:12px; margin-top:10px; }
+  /* Lists inside help text. The browser default indents with padding-left:40px,
+     which on a 12px muted paragraph reads as a stray column; 18px is enough to
+     hang the marker and no more. */
+  .help ul { margin:6px 0 0; padding-left:18px; }
+  .help li { margin:3px 0; }
   .err { color:var(--warn); font-size:13px; margin-top:10px; min-height:19px; }
   .entry { border-top:1px solid var(--line); padding:14px 0 4px; }
   .entry:first-child { border-top:0; padding-top:0; }
@@ -151,14 +156,37 @@ export const trackedPage = `<!doctype html>
     <small class="help">One journey, not a subscription: a flight number plus the single date it departs.
       The date is the one <b>on the boarding pass</b> — local to the departure airport, so a 20:55
       departure from JFK is the 24th even though it is already the 25th in UTC. Watching costs nothing
-      until that date begins; the flight is looked up then, and followed live once it is in the air.
-      Entries remove themselves a couple of hours after landing.</small>
+      until that date begins: the flight is looked up then, and again an hour before it leaves, to
+      catch a tail swap.</small>
     <small class="help"><b>From / To are optional, and worth filling in.</b> A flight number is not
       unique within a day — an airline reuses it for the return leg and for the next hop of a
       rotation. With the route blank the lookup has to guess which one you mean, and it guesses by
       the clock, so an evening departure added the night before resolves to that morning's flight
       instead. Either box on its own is enough to settle it. Give both legs their own route and you
       can watch a there-and-back on the same date.</small>
+    <!-- div, not small: this block contains a <ul>, which is flow content and
+         so not allowed inside <small>'s phrasing-only content model. .help
+         already sets display:block and the font size, so the two style
+         identically -- this is a validity fix, not a visual choice. -->
+    <div class="help"><b>When it reaches the wall.</b> At the flight's <b>scheduled departure</b>,
+      within one five-minute cycle — not at wheels-up. It is then pinned above the overhead traffic
+      until it lands. Three things follow from that, and they are worth knowing before you read the
+      card:
+      <ul>
+        <li>A <b>delayed</b> flight is pinned anyway, while it is still at the gate. Until ADS-B
+          picks the aircraft up, its position is a projection along the great-circle route — so the
+          wall can show it out over the ocean when it has not moved.</li>
+        <li>The <b>progress bar and the ETA both read the published timetable</b>, never the live
+          position. That is why they always agree with each other, and why a late departure makes
+          both of them run ahead of where the aeroplane really is.</li>
+        <li>If the lookup found no Mode&nbsp;S address for the aircraft — common on regional
+          flights — nothing is pinned at departure. Live ADS-B is swept for whatever is broadcasting
+          that number near where the schedule puts it, and the card appears once that finds
+          something.</li>
+      </ul>
+      <b>It goes away</b> as soon as ADS-B reports the aircraft on the ground, or 30 minutes past
+      the scheduled arrival if nothing ever does. The entry itself is removed about two hours after
+      that, so a landed flight stops costing anything without you touching it.</div>
   </div>
 
   <div class="card">
