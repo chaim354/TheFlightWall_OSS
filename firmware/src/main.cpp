@@ -207,10 +207,36 @@ static void applyWifiRegion(uint8_t nchan)
 
 /** Defined below; called once the STA lease is up. */
 static void useReliableDns();
+/** Defined below; starts the radio BEFORE the panel, for clean RF calibration. */
+static bool beginWifiSta();
+/** Defined below; waits for the association beginWifiSta() started. */
+static bool awaitWifiSta();
 /** Defined below; reports to the server and applies anything queued there. */
 static void controlCheckIn();
 
-static bool connectWifiSta()
+/**
+ * Bring the radio up and START associating. Returns false only when there is
+ * nothing configured to associate with.
+ *
+ * SPLIT FROM THE WAIT, AND CALLED BEFORE THE PANEL IS INITIALISED, because the
+ * ESP32 performs its RF CALIBRATION when the WiFi radio starts. Do that while
+ * the panel's I2S DMA is already switching and the calibration is measured
+ * against the panel's own noise -- and the resulting values are kept for the
+ * whole session, so a bad calibration is a bad radio until the next reboot.
+ *
+ * That fits what this project has been unable to explain: transmit degraded
+ * while RSSI stays healthy (receive does not depend on the calibration the way
+ * transmit does), a fault that persists until reboot, differs between boots,
+ * and differs between two boards that each calibrate independently. It also
+ * explains why the July build failed identically -- it has the same ordering,
+ * so no amount of bisecting firmware was ever going to find it.
+ *
+ * Upstream guidance for this exact library:
+ * github.com/mrcodetastic/ESP32-HUB75-MatrixPanel-DMA/discussions/656 --
+ * "Initialize WiFi before starting the DMA library to allow proper RF
+ * calibration."
+ */
+static bool beginWifiSta()
 {
     if (!g_settings.hasWifi())
         return false;
@@ -231,8 +257,20 @@ static bool connectWifiSta()
     // see while inbound LAN requests are unaffected. This is mains-powered on a wall;
     // the ~20-30mA it costs buys nothing here.
     WiFi.setSleep(false);
-    g_display.displayMessage(String("WiFi: ") + g_settings.wifiSsid);
+    // No displayMessage() here any more: the panel does not exist yet at this
+    // point in setup(), which is the entire purpose of the split.
     WiFi.begin(g_settings.wifiSsid.c_str(), g_settings.wifiPassword.c_str());
+    return true;
+}
+
+/**
+ * Wait for the association begun by beginWifiSta(). Safe to call with the panel
+ * already running -- association is not calibration.
+ */
+static bool awaitWifiSta()
+{
+    if (!g_settings.hasWifi())
+        return false;
     Serial.print("Connecting to WiFi");
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 150) // 150 * 200ms = 30s
@@ -910,6 +948,14 @@ void setup()
     g_console.begin();
     g_console.setLightSensor(&g_light); // `light` command reads it live over serial
 
+    // RADIO FIRST, PANEL SECOND. The ESP32 calibrates its RF front end when the
+    // WiFi radio starts, and those values stand for the whole session -- so
+    // calibrating with the panel's I2S DMA already switching bakes the panel's
+    // own noise into the radio until the next reboot. Starting association here
+    // costs nothing: the 30s wait still happens below, now overlapped with panel
+    // bring-up instead of following it.
+    const bool wifiStarting = beginWifiSta();
+
     g_display.initialize();
     g_appliedBrightness = g_settings.brightness;
     g_light.begin();
@@ -917,7 +963,11 @@ void setup()
     g_display.displaySplash();
     delay(1500); // hold the branded splash briefly before WiFi status takes over
 
-    bool connected = connectWifiSta();
+    // The panel exists now, so the status the old connectWifiSta() used to draw
+    // before associating happens here instead.
+    if (wifiStarting)
+        g_display.displayMessage(String("WiFi: ") + g_settings.wifiSsid);
+    bool connected = wifiStarting && awaitWifiSta();
     if (connected)
     {
         Serial.print("WiFi connected: ");
