@@ -23,6 +23,53 @@ const airborne = (over: Partial<TrackedEntry> = {}): TrackedEntry => ({
   ...over,
 });
 
+describe('trackedCards: progress', () => {
+  // A 7h block, so each hour is a clean 1/7.
+  const at = (ms: number) => trackedCards([airborne({ lastLat: 52.1, lastLon: -30.5, lastPosAtMs: ms })], ms, CENTER)[0]!;
+
+  it('is 0 at pushback and 100 at the scheduled arrival', () => {
+    expect(at(dep).prog).toBe(0);
+    expect(at(arr).prog).toBe(100);
+  });
+
+  it('is the elapsed fraction of the scheduled block, rounded', () => {
+    expect(at(dep + 3600_000).prog).toBe(14); // 1/7
+    expect(at(dep + 3.5 * 3600_000).prog).toBe(50);
+  });
+
+  it('clamps rather than going negative or past 100', () => {
+    // Both are reachable: an entry goes airborne at SCHEDULED departure, so a
+    // delayed flight sits before dep, and one held past its slot sits after
+    // arr until the poll reports it down.
+    expect(at(dep - 3600_000).prog).toBe(0);
+    expect(at(arr + 3600_000).prog).toBe(100);
+  });
+
+  it('agrees with eta_min at the far end -- both say "should be down"', () => {
+    const c = at(arr + 3600_000);
+    expect(c.prog).toBe(100);
+    expect(c.eta_min).toBe(0);
+  });
+
+  it('is null, not 0, when either scheduled time is missing', () => {
+    const now = dep + 3600_000;
+    const noArr = trackedCards(
+      [airborne({ lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now, schedArrEpoch: null })], now, CENTER);
+    expect(noArr[0]!.prog).toBeNull();
+
+    const noDep = trackedCards(
+      [airborne({ lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now, schedDepEpoch: null })], now, CENTER);
+    expect(noDep[0]!.prog).toBeNull();
+  });
+
+  it('is null for a nonsensical block where arrival is not after departure', () => {
+    const now = dep + 3600_000;
+    const backwards = trackedCards(
+      [airborne({ lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now, schedArrEpoch: dep / 1000 })], now, CENTER);
+    expect(backwards[0]!.prog).toBeNull();
+  });
+});
+
 describe('trackedCards', () => {
   it('emits a live card from a recent fix', () => {
     const now = dep + 3600_000;

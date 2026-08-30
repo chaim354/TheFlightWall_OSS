@@ -398,6 +398,12 @@ String WebConfigServer::buildFlightsJson() const
                 o["etaText"] = f.eta_text;
             if (!isnan(f.eta_minutes))
                 o["etaMin"] = (long)f.eta_minutes;
+            // Tracked cards only, for the same reason as the two above: it is
+            // the one field that says a pinned card is being fed real
+            // schedule times, and reading it here beats squinting at a 1px
+            // bar across the room to find out whether the wall got any.
+            if (renderable(f.progress_pct))
+                o["progressPct"] = (long)f.progress_pct;
         }
     }
     String out;

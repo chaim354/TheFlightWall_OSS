@@ -695,6 +695,9 @@ async function loadStatus(){
       // Server-sourced only (empty/omitted for OpenSky/adsb.lol and any server
       // flight with no destination) -- verbatim, same rule as the panel.
       if('etaText'in x)m.push('ETA '+esc(x.etaText));
+      // Tracked cards only. Shown next to the ETA because they are the same
+      // clock -- the panel makes that point by drawing both in green.
+      if('progressPct'in x)m.push(x.progressPct+'% flown');
       return `<div class="flight"><b>${esc(x.ident)||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${esc(x.airline)}</span><br>
         <span>${esc(x.origin)||'?'} → ${esc(x.destination)||'?'} · ${esc(x.aircraft)}</span>
         ${m.length?'<br><span>'+m.join(' · ')+'</span>':''}</div>`;

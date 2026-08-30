@@ -53,8 +53,55 @@ export interface TrackedCard {
   eta_min: number | null;
   eta_text: string | null;
   eta_src: 'revised' | 'scheduled' | 'physics' | null;
+  /**
+   * How far through the flight, 0-100, or null when it cannot be known.
+   *
+   * PINNED CARDS ONLY, and deliberately so. An area card is an aircraft that
+   * happened to pass overhead -- there is no departure time for it, only an
+   * arrival estimate, so there is no denominator and no honest fraction to
+   * draw. A tracked entry is the one case where both ends of the journey are
+   * known before it starts. The device draws it as a bar under the card and
+   * greens the ETA to match; see Hub75Display::drawTrackedChrome.
+   *
+   * SCHEDULED, like eta_min beside it, and it inherits that field's caveat in
+   * full: this is elapsed fraction of the PUBLISHED block time, so a flight
+   * that pushed back an hour late reads an hour ahead of where it really is.
+   * That is not a defect to paper over with the live position -- great-circle
+   * distance-remaining says a holding aircraft is "there" when it is still
+   * twenty minutes out, which is a worse lie told more confidently. The bar
+   * and the ETA agree with each other because they are the same clock, and a
+   * viewer who knows one number is scheduled knows both are.
+   *
+   * Integer: the bar is at most a few hundred pixels wide and the device
+   * rounds to a pixel anyway, so decimals would be bytes on the wire that no
+   * one can see.
+   */
+  prog: number | null;
   pin: true;
   pos_src: 'live' | 'estimated';
+}
+
+/**
+ * Elapsed fraction of the scheduled block, 0-100, or null.
+ *
+ * Null rather than 0 for a missing or nonsensical pair of times -- 0 is a real
+ * value meaning "just left", and a card that draws an empty bar for a flight
+ * halfway across the Atlantic is the plausible-looking-wrong-value failure
+ * this file's `pos_src` comment already refuses to commit. arr <= dep is
+ * nonsense, not a zero-length flight: it is a provider that gave the arrival
+ * on the wrong day, and dividing by it yields either infinity or a negative.
+ *
+ * Clamped at both ends. Past the scheduled arrival the honest reading is 100 --
+ * "should be down by now" -- which is exactly what eta_min's own Math.max(0,
+ * ...) says in minutes, and the two must not disagree.
+ */
+function progressPct(depEpoch: number | null, arrEpoch: number | null, nowMs: number): number | null {
+  if (depEpoch === null || arrEpoch === null) return null;
+  const depMs = depEpoch * 1000;
+  const arrMs = arrEpoch * 1000;
+  if (arrMs <= depMs) return null;
+  const frac = (nowMs - depMs) / (arrMs - depMs);
+  return Math.round(Math.min(1, Math.max(0, frac)) * 100);
 }
 
 /**
@@ -205,6 +252,7 @@ export function trackedCards(
       eta_min: etaMinRaw === null ? null : Math.round(etaMinRaw),
       eta_text: etaText,
       eta_src: etaSrc,
+      prog: progressPct(e.schedDepEpoch, e.schedArrEpoch, nowMs),
       pin: true,
       pos_src: src,
     });

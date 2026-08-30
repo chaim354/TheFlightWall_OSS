@@ -19,6 +19,7 @@ Inputs: FlightInfo list; g_settings (colors/brightness/layout/cycle/geometry).
 #include "config/HardwareConfiguration.h"
 #include "config/FunFacts.h"
 #include "utils/ServerJson.h" // renderable()
+#include "utils/ProgressBar.h" // progressFillPixels()
 #include "core/Settings.h"
 #include "utils/ClockFormat.h"
 
@@ -564,6 +565,34 @@ int16_t Hub75Display::trackedLabelX() const
     return x >= 0 ? x : (int16_t)-1;
 }
 
+/**
+ * The green a tracked card is marked with -- the filled part of the progress
+ * bar, and the ETA text above it.
+ *
+ * ONE definition for both, deliberately. The bar and the ETA are two readings
+ * of the same clock (see FlightInfo::progress_pct), and drawing them in two
+ * greens that were separately chosen is how they stop looking like one fact
+ * and start looking like two unrelated ones. If this changes, both change.
+ *
+ * Not full 0,255,0, on the theory that a saturated primary blooms on a HUB75
+ * panel and a 1px bar has no width to spare. NOT MEASURED -- picked on paper,
+ * never yet seen on a wall, and the honest thing to say about a colour choice
+ * nobody has looked at. If the bar reads muddy or the ETA reads dim against
+ * the white border, this pair of numbers is the knob.
+ */
+static inline uint16_t progressGreen() { return rgb565(0, 210, 90); }
+
+/**
+ * The UNFILLED part of the bar, which is drawn rather than left dark.
+ *
+ * A bar with no track is just a line whose length means nothing on its own:
+ * at a glance "short green line" and "long green line" are only comparable if
+ * you can see what they are a fraction OF. Meant to read as a groove rather
+ * than as a second value, which is what the low brightness is for -- and, like
+ * progressGreen above, chosen on paper rather than measured on a panel.
+ */
+static inline uint16_t progressTrack() { return rgb565(0, 48, 18); }
+
 // A 1px white border around the whole panel, plus TRACKED in the top-right.
 //
 // Drawn LAST, over the finished card, which is the opposite of the amber bar
@@ -579,7 +608,7 @@ int16_t Hub75Display::trackedLabelX() const
 // differently from an observed one. That was a deliberate call -- see
 // HANDOFF.md. `pos_src` is untouched on the wire and still visible in
 // /api/flights and on the server's watched-flights page.
-void Hub75Display::drawTrackedChrome()
+void Hub75Display::drawTrackedChrome(const FlightInfo &f)
 {
     const uint16_t white = rgb565(255, 255, 255);
     _canvas->drawRect(0, 0, _matrixWidth, _matrixHeight, white);
@@ -590,6 +619,68 @@ void Hub75Display::drawTrackedChrome()
     const int16_t x = trackedLabelX();
     if (x >= 0)
         drawTextLine(x, 1, String(TRACKED_LABEL), white);
+
+    drawProgressBar(f);
+}
+
+// The row the progress bar lives on: the last one inside the border.
+//
+// -1 on a panel under 16px high. Those run displayTextOnlyCard, whose text
+// already fills the full inner height and overlaps the border -- a bar there
+// would be drawn straight through a line of glyphs, and on a panel that short
+// a 1px fraction is not readable anyway. Every layout above that size has a
+// gap here: the Mini card's last metric row ends at y=59 of 64, and the
+// SideBySide card centres at most three 8px lines in 32.
+//
+// displayStackedCard is the one layout that does NOT have the gap for free --
+// its text is centred in whatever is left below a 32px logo and reaches y=62 --
+// so it subtracts this row from its own available height. See there.
+int16_t Hub75Display::trackedProgressRow() const
+{
+    if (_matrixHeight < 16)
+        return -1;
+    return (int16_t)(_matrixHeight - 2);
+}
+
+bool Hub75Display::hasProgressBar(const FlightInfo &f) const
+{
+    return f.pinned && renderable(f.progress_pct) && trackedProgressRow() >= 0 &&
+           _matrixWidth >= 8;
+}
+
+// A 1px horizontal bar: dim track for the whole journey, bright green for the
+// part already flown.
+void Hub75Display::drawProgressBar(const FlightInfo &f)
+{
+    if (!hasProgressBar(f))
+        return;
+
+    const int16_t y = trackedProgressRow();
+    const int16_t w = (int16_t)(_matrixWidth - 2);
+
+    _canvas->drawFastHLine(1, y, w, progressTrack());
+
+    // Clamping, rounding and the two never-quite-there rules all live in
+    // utils/ProgressBar.h, host-tested. They read as fussy for a 1px bar, but
+    // one of them (the upper clamp) is what keeps a malformed wire value from
+    // drawing past the end of the canvas row.
+    const int filled = progressFillPixels(f.progress_pct, w);
+    if (filled > 0)
+        _canvas->drawFastHLine(1, y, (int16_t)filled, progressGreen());
+}
+
+/**
+ * The colour this card's ETA text takes: the progress green when there is a
+ * bar under it, the ordinary text colour otherwise.
+ *
+ * Gated on the BAR, not merely on `pinned`. The green says "this reading and
+ * that bar are the same clock" -- with no bar there is nothing for it to
+ * match, and a lone green string on a card reads as a warning or a state,
+ * which is a meaning nobody intended.
+ */
+uint16_t Hub75Display::etaColorFor(const FlightInfo &f)
+{
+    return hasProgressBar(f) ? progressGreen() : textColor();
 }
 
 void Hub75Display::stopOutput()
@@ -630,7 +721,7 @@ void Hub75Display::displayFlightCard(const FlightInfo &f)
     // marker, including displayTextOnlyCard, which the old bar missed entirely
     // because it lived in drawLogoOrBadge and that layout never calls it.
     if (f.pinned)
-        drawTrackedChrome();
+        drawTrackedChrome(f);
 }
 
 // "ORD-LAX" style route, preferring IATA codes.
@@ -898,7 +989,34 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
         by += 12;
     }
     if (row2.length())
-        drawTextLine(1, by, row2, color);
+    {
+        // Only the ETA takes the progress green; whatever shares the row with
+        // it stays the ordinary colour. Split on the row that was actually
+        // composed rather than on the candidate list, because joinWithinColumns
+        // may have dropped the ETA for width and truncateToColumns may have cut
+        // it -- reconstructing "ETA:" + eta_text here would then colour a
+        // stretch of the row that does not say what we think it says.
+        //
+        // ETA is always the FIRST candidate (see buildRow2), so when it is on
+        // the row at all it starts at column 0, and the separator is a single
+        // space that no eta_text of the server's contains ("~1h10", "LANDING").
+        // The 6px fixed-width font makes the rest pure arithmetic.
+        const uint16_t etaColor = etaColorFor(f);
+        const int sep = (etaColor != color && row2.startsWith("ETA:")) ? row2.indexOf(' ') : -2;
+        if (sep == -2)
+        {
+            drawTextLine(1, by, row2, color);
+        }
+        else if (sep < 0)
+        {
+            drawTextLine(1, by, row2, etaColor); // the ETA is the whole row
+        }
+        else
+        {
+            drawTextLine(1, by, row2.substring(0, sep), etaColor);
+            drawTextLine((int16_t)(1 + sep * 6), by, row2.substring(sep), color);
+        }
+    }
 }
 
 void Hub75Display::displaySideBySideCard(const FlightInfo &f)
@@ -924,9 +1042,14 @@ void Hub75Display::displaySideBySideCard(const FlightInfo &f)
 
     const int16_t totalH = fitLines(lines, maxCols, _matrixHeight);
     int16_t y = (_matrixHeight - totalH) / 2;
+    const uint16_t etaColor = etaColorFor(f);
     for (const String &ln : lines)
     {
-        drawTextLine(tx, y, ln, color);
+        // buildFlightLines pushes eta_text as a line of its own and verbatim,
+        // so identity with the source string is an exact test -- no parsing,
+        // and no risk of colouring the aircraft type because it happened to
+        // look like a duration.
+        drawTextLine(tx, y, ln, ln == f.eta_text ? etaColor : color);
         y += 9;
     }
 }
@@ -950,14 +1073,22 @@ void Hub75Display::displayStackedCard(const FlightInfo &f)
     if (lines.empty())
         lines.push_back(f.ident.length() ? f.ident : String("?"));
 
-    const int availH = _matrixHeight - textTop;
+    // The one layout whose text reaches the bottom border: three 8px lines
+    // centred below a 32px logo end at y=62 on a 64x64 panel, which is exactly
+    // the row trackedProgressRow() wants. Give the bar its row back BEFORE
+    // fitting, so the text re-centres around it rather than being drawn
+    // through. Costs nothing when there is no bar, and nothing on the layouts
+    // that already had the gap.
+    const int barRows = hasProgressBar(f) ? 3 : 0;
+    const int availH = _matrixHeight - textTop - barRows;
     const int16_t totalH = fitLines(lines, maxCols, availH);
     int16_t y = textTop + (availH - totalH) / 2;
+    const uint16_t etaColor = etaColorFor(f);
     for (const String &ln : lines)
     {
         // Center each line horizontally.
         const int16_t x = (_matrixWidth - (int)ln.length() * 6) / 2;
-        drawTextLine(x < 0 ? 0 : x, y, ln, color);
+        drawTextLine(x < 0 ? 0 : x, y, ln, ln == f.eta_text ? etaColor : color);
         y += 9;
     }
 }

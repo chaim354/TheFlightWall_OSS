@@ -63,4 +63,19 @@ struct FlightInfo
     // inside 30nm. Rendered VERBATIM -- the rounding is the honesty policy, and
     // re-deriving it on device would let the two drift apart.
     String eta_text;
+
+    // How far through the journey, 0-100. NAN = unknown, and unknown draws no
+    // bar at all rather than an empty one.
+    //
+    // TRACKED CARDS ONLY, and NAN on every other flight by construction -- the
+    // server sends `prog` only on a pinned card, because only a tracked entry
+    // has a departure time to measure from (see src/tracked/serve.ts). An
+    // aircraft that merely passed overhead has an arrival estimate and no
+    // start, so there is no fraction to draw and no bar is drawn.
+    //
+    // Scheduled, not observed: it is elapsed fraction of the published block,
+    // the same clock eta_text is rounded from. The two are deliberately the
+    // same source so the bar and the words can never contradict each other,
+    // which is also why the panel renders them in the same colour.
+    double progress_pct = NAN;
 };

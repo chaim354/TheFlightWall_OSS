@@ -179,6 +179,10 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         info.eta_minutes = optNum(f, "eta_min");
         info.eta_text = optStr(f, "eta_text");
 
+        // Absent on every area card, so NAN there is the normal case, not a
+        // gap in the data -- see FlightInfo::progress_pct.
+        info.progress_pct = optNum(f, "prog");
+
         info.pinned = f["pin"] | false;
         // Absent means live: only the tracked path ever sets this, so an
         // ordinary area card must not be labelled an estimate by omission.

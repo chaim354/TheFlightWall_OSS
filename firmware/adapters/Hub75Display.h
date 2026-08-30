@@ -143,7 +143,22 @@ private:
     // the test is how the label ends up on a card that never reserved room.
     bool usesMiniCard() const { return _matrixHeight >= 48 && _matrixWidth >= 96; }
     int16_t trackedLabelX() const;
-    void drawTrackedChrome();
+    // The row a tracked card's progress bar occupies, or -1 when this panel
+    // has no room for one. Public to the class rather than local to
+    // drawTrackedChrome because displayStackedCard has to reserve the row
+    // BEFORE it lays out its text -- the same reason trackedLabelX exists.
+    int16_t trackedProgressRow() const;
+    // Whether THIS card will actually get a bar: a row to draw it on, and a
+    // progress value to draw. One predicate, so the layout that reserves the
+    // row and the chrome that fills it cannot disagree about whether it is
+    // there -- a reserved-but-unused row is a wasted pixel, and the reverse is
+    // a bar drawn through the bottom line of text.
+    bool hasProgressBar(const FlightInfo &f) const;
+    void drawProgressBar(const FlightInfo &f);
+    // The ETA's colour on this card: progress green when a bar is under it,
+    // the ordinary text colour otherwise.
+    uint16_t etaColorFor(const FlightInfo &f);
+    void drawTrackedChrome(const FlightInfo &f);
     void buildFlightLines(const FlightInfo &f, std::vector<String> &outLines, bool includeAirline);
     void displayFlightCard(const FlightInfo &f);     // picks a layout by panel shape
     void displayMiniCard(const FlightInfo &f);       // big panels (128x64): logo + info + metric rows
