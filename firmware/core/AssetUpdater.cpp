@@ -5,6 +5,8 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <mbedtls/sha256.h>
+#include <map>
+#include <set>
 
 namespace
 {
@@ -110,8 +112,54 @@ namespace
      * genuinely-absent operator on every carousel cycle, several times a
      * minute, forever.
      */
+    std::set<String> g_missingLogos;
 
-    
+    /**
+     * Transport failures per operator this boot, and the point at which we stop.
+     *
+     * WHY THIS EXISTS. The 404 cache below is right and stays: a 404 is an
+     * ANSWER. But transport failures were deliberately NOT remembered ("worth
+     * retrying"), which is correct on a healthy link and pathological on a bad
+     * one -- the failures there ARE dropped connections, so nothing was ever
+     * remembered and the same tiles were re-requested every single cycle for as
+     * long as the fault lasted. That added TLS handshakes, the most
+     * loss-sensitive thing this device does, exactly when the radio could least
+     * carry them, and it is why this whole path was removed on 2026-08-27.
+     *
+     * Three attempts keeps the retry that a transient blip deserves and drops
+     * the unbounded storm. Boot-scoped like g_missingLogos, so a genuine
+     * recovery is one restart away and no state persists to go stale.
+     */
+    std::map<String, uint8_t> g_logoFailures;
+    constexpr uint8_t kMaxLogoAttempts = 3;
+
+    /**
+     * Does this file actually look like a 32x32 logo tile?
+     *
+     * The hash proves the bytes arrived intact; it says nothing about what they
+     * ARE. Someone uploading a PNG to logos/JZA.rgb565 produces a perfectly
+     * intact file that tileFor() would then read a bogus width and height out
+     * of. Header first, then the exact byte count it implies -- the same layout
+     * tileFor() parses, checked before the file is allowed to become real.
+     */
+    bool looksLikeTile(const char *path)
+    {
+        File f = LittleFS.open(path, "r");
+        if (!f)
+            return false;
+        uint8_t hdr[4];
+        const bool readHdr = f.read(hdr, 4) == 4;
+        const size_t size = f.size();
+        f.close();
+        if (!readHdr)
+            return false;
+        const int w = hdr[0] | (hdr[1] << 8);
+        const int h = hdr[2] | (hdr[3] << 8);
+        if (w <= 0 || h <= 0 || w > 64 || h > 64)
+            return false;
+        return size == 4 + (size_t)w * (size_t)h * 2;
+    }
+
     /**
      * Stream a URL into `destPath`, and only publish it if the hash matches.
      *
@@ -281,8 +329,64 @@ namespace AssetUpdater
         return LittleFS.remove(kUiCachePath);
     }
 
-    
-    
+    size_t missingLogoCount()
+    {
+        return g_missingLogos.size();
+    }
+
+    LogoResult ensureLogo(const String &serverUrl, const String &icao)
+    {
+        if (icao.length() == 0 || serverUrl.length() == 0)
+            return LogoResult::Failed;
+
+        const String path = String("/logos/") + icao + ".rgb565";
+        if (LittleFS.exists(path))
+            return LogoResult::AlreadyPresent;
+        if (g_missingLogos.count(icao))
+            return LogoResult::NotOnServer;
+        // Gave up on this one already; see kMaxLogoAttempts.
+        const auto fail = g_logoFailures.find(icao);
+        if (fail != g_logoFailures.end() && fail->second >= kMaxLogoAttempts)
+            return LogoResult::NotOnServer;
+
+        String err;
+        const String url = serverUrl + "/assets/logos/" + icao + ".rgb565";
+        if (!streamVerified(url, path.c_str(), String(), err))
+        {
+            // A 404 is an ANSWER, not a failure: this operator has no tile, and
+            // asking again this boot would waste a request per carousel cycle.
+            // Anything else -- a dropped connection, a bad hash -- is worth
+            // retrying, so it is deliberately not remembered.
+            if (err == "HTTP 404")
+            {
+                g_missingLogos.insert(icao);
+                return LogoResult::NotOnServer;
+            }
+            // Not a 404, so the tile may well exist and the network is at
+            // fault -- retry, but a bounded number of times.
+            const uint8_t n = ++g_logoFailures[icao];
+            Serial.printf("[logo] %s: %s (attempt %u/%u)%s\n",
+                          icao.c_str(), err.c_str(),
+                          (unsigned)n, (unsigned)kMaxLogoAttempts,
+                          n >= kMaxLogoAttempts ? " -- giving up until reboot" : "");
+            return LogoResult::Failed;
+        }
+
+        if (!looksLikeTile(path.c_str()))
+        {
+            // Intact bytes that are not a tile. Removed rather than left for
+            // tileFor() to read a bogus width out of.
+            LittleFS.remove(path);
+            g_missingLogos.insert(icao); // do not re-fetch the same bad file
+            Serial.printf("[logo] %s: downloaded file is not a 32x32 tile\n", icao.c_str());
+            return LogoResult::Failed;
+        }
+
+        g_logoFailures.erase(icao);
+        Serial.printf("[logo] %s: downloaded\n", icao.c_str());
+        return LogoResult::Downloaded;
+    }
+
     FetchResult updateUi(const String &serverUrl)
     {
         FetchResult r;
