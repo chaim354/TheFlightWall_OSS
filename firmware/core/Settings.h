@@ -208,7 +208,29 @@ struct Settings
 
     // HUB75 signal-integrity tuning (try these if pixels flicker / shift by one):
     bool panelClkPhase = false;       // default off — fixes the off-by-one pixel shift on most panels
-    uint8_t panelI2sSpeedMhz = 8;     // 8 / 16 / 20 — lower = more stable at 3.3V
+    // 8 / 16 / 20. DEFAULTS TO 20 BECAUSE OF WHAT IT DOES TO WIFI, not to the
+    // picture. At 8MHz each DMA row transfer holds the memory bus long enough to
+    // starve the WiFi stack of timely service; packets are not lost so much as
+    // DELAYED. Measured on an ESP32-S3 DevKit, 128x64 at 6-bit, router control
+    // flat at ~3ms throughout, toggled four times to prove it tracks:
+    //
+    //     8MHz   0.0 / 3.3 / 3.3% loss   avg 219 / 281 / 351 ms
+    //    20MHz   0.0 / 0.0 / 0.0% loss   avg   8.9 / 7.8 / 7.1 ms
+    //     8MHz  10.0 / 4.0%      loss   avg 520 / 217 ms
+    //    20MHz   4.0 / 0.0%      loss   avg  28.7 / 7.2 ms
+    //
+    // ~35x on latency, and it also lets the library hold lsbMsbTransitionBit at
+    // 0, raising refresh from ~93Hz to ~131Hz -- so colour depth improves rather
+    // than being traded away. Reported upstream for this library too
+    // (mrcodetastic/ESP32-HUB75-MatrixPanel-DMA discussions/258).
+    //
+    // THE OLD ADVICE WAS NOT WRONG, IT WAS ABOUT A DIFFERENT THING: "lower = more
+    // stable at 3.3V" is signal integrity on the HUB75 lines, and faster edges
+    // are less forgiving of long or unshielded wiring. Upstream puts the limit at
+    // 10cm. If the panel ghosts, shifts or drops lines at 20, the wiring is the
+    // suspect first -- and dropping back to 8 costs WiFi, so shorten the leads
+    // before lowering this.
+    uint8_t panelI2sSpeedMhz = 20;
     uint8_t panelLatchBlanking = 1;   // raise to reduce ghosting (some panels dislike >1)
     String panelDriverChip = "shift"; // shift | fm6124 | fm6126a | icn2038s | mbi5124
 
