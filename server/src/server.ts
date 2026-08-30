@@ -14,7 +14,7 @@ import { runCalendarSync } from './tracked/sync';
 import { fetchIcs } from './tracked/calendar';
 import { matchByFlightNumber, searchCentre, SEARCH_RADIUS_NM } from './tracked/findHex';
 import { fetchAircraft } from './adsblol';
-import { assetManifest, serveAsset } from './assets';
+import { assetManifest, serveAsset, writeFirmware } from './assets';
 import { handleControl, resolveTier, fileControlStorage, type ControlStorage } from './control';
 
 /** Everything server.ts needs, read from process.env with a default for
@@ -277,6 +277,78 @@ async function handleRequest(
     // people have already been given, and 301 lets a browser stop asking.
     res.writeHead(301, { location: '/', 'cache-control': 'no-cache' });
     res.end();
+    return;
+  }
+
+  /**
+   * Upload a signed firmware image. ADMIN ONLY.
+   *
+   * Its own branch, ahead of the generic control handler, for one hard reason:
+   * that handler reads the body with .toString('utf8'), which mangles a binary
+   * payload beyond recovery. This one keeps the raw Buffer.
+   *
+   * WHY IT EXISTS. Publishing a build meant scp plus `docker cp` plus looking up
+   * a container name that changes on every deploy -- so a release required shell
+   * access to the box and could not be driven from anywhere else. The device has
+   * always fetched over HTTP; nothing accepted an upload over it.
+   *
+   * Metadata rides in the query string and one header rather than a multipart
+   * body: the image is the only large part, and multipart parsing here would be
+   * a dependency and an attack surface for no gain.
+   */
+  if (req.method === 'POST' && url.pathname === '/v1/control/firmware') {
+    if (!control) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    const tier = await resolveTier(control.storage, control.token, req.headers.authorization);
+    if (tier !== 'admin') {
+      // Same shape the other control refusals use: 401 when the credential is
+      // unknown, 403 when it is valid but not entitled -- which is the
+      // distinction that cost a real debugging session when it was missing.
+      const status = tier === 'none' ? 401 : 403;
+      res.writeHead(status, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        ...(status === 401 ? { 'www-authenticate': 'Bearer' } : {}),
+      });
+      res.end(JSON.stringify({
+        ok: false,
+        error: status === 401 ? 'unauthorised' : 'publishing firmware needs the admin password',
+      }));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let tooBig = false;
+    for await (const c of req) {
+      const buf = c as Buffer;
+      received += buf.length;
+      // Bail during the stream rather than after: an unbounded POST should not
+      // be buffered to completion just to be rejected.
+      if (received > 4 * 1024 * 1024) { tooBig = true; break; }
+      chunks.push(buf);
+    }
+    if (tooBig) {
+      res.writeHead(413, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: 'image too large' }));
+      return;
+    }
+
+    const sigHeader = req.headers['x-firmware-sig'];
+    const result = await writeFirmware(assetsRoot, {
+      bin: Buffer.concat(chunks),
+      sig: Array.isArray(sigHeader) ? (sigHeader[0] ?? '') : (sigHeader ?? ''),
+      version: url.searchParams.get('version') ?? '',
+      target: url.searchParams.get('target') ?? '',
+    });
+    res.writeHead(result.ok ? 200 : 400, {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+    });
+    res.end(JSON.stringify(result));
     return;
   }
 

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join, normalize, sep } from 'node:path';
 
 /**
@@ -170,6 +170,99 @@ async function firmwareEntry(root: string): Promise<FirmwareInfo | null> {
   if (!sig || !version || !target) return null;
 
   return { ...info, version, sig, target };
+}
+
+/** Build targets a firmware image may declare; see FirmwareUpdater::buildTarget(). */
+const FIRMWARE_TARGETS = ['esp32dev', 'esp32s3', 'matrixportal_s3'] as const;
+export type FirmwareTarget = (typeof FIRMWARE_TARGETS)[number];
+
+export interface FirmwareUpload {
+  bin: Buffer;
+  /** base64 DER ECDSA-P256 signature over the image's SHA-256. */
+  sig: string;
+  version: string;
+  target: string;
+}
+
+/**
+ * Write a firmware image and its three metadata files into the asset volume.
+ *
+ * WHY THIS EXISTS. Publishing used to mean scp plus `docker cp` plus looking up
+ * a container name that changes on every deploy -- so shipping a build required
+ * shell access to the box, and could not be driven from anywhere else. The
+ * device already fetches over HTTP; the only reason the upload did not was that
+ * nothing accepted one.
+ *
+ * ORDER IS LOAD-BEARING, and it is not the order the shell script used. That
+ * script wrote metadata first and the image last, so a device checking in
+ * mid-publish saw a null entry rather than a mismatched one -- correct only for
+ * a FRESH directory. Overwriting an existing publish that way advertises the
+ * NEW version against the OLD binary for the length of the upload, which is
+ * worse than either. So the image is REMOVED first: the manifest goes null
+ * immediately, stays null while the metadata lands, and becomes valid again
+ * only when a consistent set is in place.
+ *
+ * The signature is stored verbatim and never checked here. This server has
+ * never held the signing key and could not verify it if it wanted to -- that is
+ * the entire point of signing. A compromised server can serve any manifest it
+ * likes and still cannot make the wall run unsigned code.
+ */
+/**
+ * Decode a base64 DER signature, or null if it is not one.
+ *
+ * Deliberately not annotated `: Buffer` -- this project's tsconfig loads both
+ * @cloudflare/workers-types and node, and the workers `Buffer` interface wins
+ * as a TYPE while node's wins as a VALUE, so an explicit annotation makes
+ * `.toString(encoding)` fail to typecheck. The rest of this file relies on
+ * inference for the same reason.
+ */
+function decodeDerSignature(sig: string) {
+  if (sig.length === 0 || sig.length > 512) return null;
+  if (sig.length % 4 !== 0) return null;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(sig)) return null;
+  const bytes = Buffer.from(sig, 'base64');
+  // ECDSA-P256 DER is ~70-72 bytes; the bound is generous, not exact.
+  if (bytes.length === 0 || bytes.length > 256) return null;
+  return bytes;
+}
+
+export async function writeFirmware(
+  root: string,
+  upload: FirmwareUpload,
+): Promise<{ ok: true; sha256: string; size: number } | { ok: false; error: string }> {
+  const { bin, sig, version, target } = upload;
+
+  if (!bin || bin.length === 0) return { ok: false, error: 'empty image' };
+  // Generous against the largest OTA slot (3MB) while still bounding what one
+  // request can make this process buffer.
+  if (bin.length > 4 * 1024 * 1024) return { ok: false, error: 'image too large' };
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(version)) return { ok: false, error: 'bad version' };
+  if (!(FIRMWARE_TARGETS as readonly string[]).includes(target)) {
+    return { ok: false, error: `bad target (expected one of: ${FIRMWARE_TARGETS.join(', ')})` };
+  }
+  // Validated by SHAPE before decoding, because Buffer.from(..., 'base64') is
+  // lenient: it silently drops characters it does not recognise, so a mangled
+  // signature decodes to a shorter valid-looking one rather than failing. A
+  // detached signature that is quietly wrong is worse than one that is refused.
+  const sigBytes = decodeDerSignature(sig);
+  if (!sigBytes) return { ok: false, error: 'bad signature encoding' };
+
+  const dir = resolveAssetPath(root, 'firmware');
+  if (!dir) return { ok: false, error: 'bad asset root' };
+  await mkdir(dir, { recursive: true });
+
+  // Image first OUT, so the manifest is null for the whole window.
+  await rm(join(dir, 'firmware.bin'), { force: true });
+  await writeFile(join(dir, 'version.txt'), version);
+  await writeFile(join(dir, 'target.txt'), target);
+  await writeFile(join(dir, 'firmware.sig'), sigBytes);
+  await writeFile(join(dir, 'firmware.bin'), bin);
+
+  return {
+    ok: true,
+    sha256: createHash('sha256').update(bin).digest('hex'),
+    size: bin.length,
+  };
 }
 
 export async function assetManifest(root: string): Promise<Response> {

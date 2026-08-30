@@ -8,8 +8,7 @@ import {
   assetInfo,
   assetManifest,
   serveAsset,
-  clearAssetHashCache,
-} from '../src/assets';
+  clearAssetHashCache, writeFirmware } from '../src/assets';
 
 let root: string;
 
@@ -190,5 +189,70 @@ describe('serveAsset', () => {
   it('404s a missing file and a traversal attempt alike', async () => {
     expect((await serveAsset(root, 'nope.bin')).status).toBe(404);
     expect((await serveAsset(root, '../../etc/passwd')).status).toBe(404);
+  });
+});
+
+describe('writeFirmware', () => {
+  const good = () => ({
+    bin: Buffer.from('FIRMWARE-IMAGE'),
+    sig: Buffer.from([0x30, 0x45, 0x02, 0x21, 0xde, 0xad]).toString('base64'),
+    version: '1a7599b',
+    target: 'esp32s3',
+  });
+
+  it('lands a complete, self-consistent entry the manifest can serve', async () => {
+    const r = await writeFirmware(root, good());
+    expect(r.ok).toBe(true);
+    const body = (await (await assetManifest(root)).json()) as {
+      firmware: { version: string; target: string; size: number; sha256: string; sig: string } | null;
+    };
+    expect(body.firmware).toEqual({
+      version: '1a7599b',
+      target: 'esp32s3',
+      size: 14,
+      sha256: sha('FIRMWARE-IMAGE'),
+      sig: good().sig,
+    });
+  });
+
+  it('REPLACES a previous publish without ever advertising a mixed pair', async () => {
+    // The window this guards: metadata written before the image would leave the
+    // manifest naming the NEW version against the OLD binary, which a device
+    // checking in would download and install. Removing the image first makes
+    // the entry null for the whole window instead.
+    await writeFirmware(root, good());
+    const before = (await (await assetManifest(root)).json()) as { firmware: { sha256: string } };
+    const second = { ...good(), bin: Buffer.from('DIFFERENT-IMAGE'), version: 'deadbee' };
+    await writeFirmware(root, second);
+    const after = (await (await assetManifest(root)).json()) as {
+      firmware: { version: string; sha256: string };
+    };
+    expect(after.firmware.version).toBe('deadbee');
+    expect(after.firmware.sha256).toBe(sha('DIFFERENT-IMAGE'));
+    expect(after.firmware.sha256).not.toBe(before.firmware.sha256);
+  });
+
+  it('refuses a target no board could accept', async () => {
+    const r = await writeFirmware(root, { ...good(), target: 'esp32s4' });
+    expect(r.ok).toBe(false);
+    const body = (await (await assetManifest(root)).json()) as { firmware: unknown };
+    expect(body.firmware).toBeNull();   // nothing written
+  });
+
+  it('refuses a signature that is not really base64', async () => {
+    // Buffer.from is lenient and would silently decode this to something
+    // shorter, storing a signature that cannot verify rather than refusing.
+    const r = await writeFirmware(root, { ...good(), sig: 'not!valid!base64!' });
+    expect(r.ok).toBe(false);
+  });
+
+  it('refuses an empty image', async () => {
+    const r = await writeFirmware(root, { ...good(), bin: Buffer.alloc(0) });
+    expect(r.ok).toBe(false);
+  });
+
+  it('refuses a version with characters that do not belong in a path', async () => {
+    const r = await writeFirmware(root, { ...good(), version: '../../etc/passwd' });
+    expect(r.ok).toBe(false);
   });
 });
