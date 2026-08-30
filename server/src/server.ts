@@ -7,6 +7,11 @@ import { parseQuietHours, inQuietHours, shouldRefresh, type QuietWindow } from '
 import { handleTracked, MAX_ENTRIES } from './tracked/routes';
 import { trackedPage } from './tracked/page';
 import { fileTrackedStorage, type TrackedStorage } from './tracked/store';
+import {
+  createUnnamedLog,
+  fileAirlineOverrideStorage,
+  handleAirlines,
+} from './airlineOverrides';
 import { runTrackedTick } from './tracked/tick';
 import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
@@ -82,6 +87,8 @@ export interface ServerConfig {
   openSkyClientSecret?: string;
   /** Where tracked-flight entries are persisted; see src/tracked/store.ts. */
   trackedPath?: string;
+  /** Where the hand-entered airline names live. Same volume as the others. */
+  airlinesPath?: string;
   /**
    * Published calendar feed to sync tracked flights from; see
    * src/tracked/sync.ts. `webcal://` is accepted and rewritten.
@@ -135,6 +142,7 @@ const DEFAULT_PORT = 8787;
 const DEFAULT_BOARDS = 'KJFK,KLGA,KEWR,KBOS';
 const DEFAULT_SCHEDULE_PATH = './data/schedule.json';
 const DEFAULT_TRACKED_PATH = './data/tracked.json';
+const DEFAULT_AIRLINES_PATH = './data/airlines.json';
 const DEFAULT_ASSETS_PATH = './data/assets';
 const DEFAULT_CONTROL_PATH = './data/control.json';
 /**
@@ -464,6 +472,48 @@ async function handleRequest(
     return;
   }
 
+  if (url.pathname === '/v1/airlines' || url.pathname.startsWith('/v1/airlines/')) {
+    // Same gate as /v1/tracked, and for the same reasons: this is the page's
+    // own API, so it takes the page's password, and it stays open on a server
+    // with no CONTROL_TOKEN rather than locking out a deployment that has no
+    // way to let anyone back in.
+    //
+    // UI tier, not admin. Naming a carrier cannot break the wall, spend money
+    // or flash anything -- the three things the admin tier exists to guard --
+    // and putting it behind the second password would mean the person who can
+    // see the wrong name is not the person who can fix it.
+    if (control) {
+      const tier = await resolveTier(control.storage, control.token, req.headers.authorization);
+      if (tier !== 'ui' && tier !== 'admin') {
+        res.writeHead(tier === 'device' ? 403 : 401, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          ...(tier === 'device' ? {} : { 'www-authenticate': 'Bearer' }),
+        });
+        res.end(JSON.stringify({ ok: false, error: 'unauthorised' }));
+        return;
+      }
+    }
+    if (!env.AIRLINES || !env.UNNAMED) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const response = await handleAirlines(
+      req.method ?? 'GET',
+      url,
+      Buffer.concat(chunks).toString('utf8'),
+      env.AIRLINES,
+      env.UNNAMED,
+    );
+    const body = await response.text();
+    res.writeHead(response.status, { 'content-type': response.headers.get('content-type') ?? 'application/json' });
+    res.end(body);
+    return;
+  }
+
   res.writeHead(404, { 'content-type': 'text/plain' });
   res.end('not found');
 }
@@ -507,7 +557,23 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
   }
   // Only what handleFlights reads. It used to be handed the board list and a
   // paid-API secret it has no use for, on a per-request read-only path.
-  const env: Env = { SCHEDULE: storage, TRACKED: trackedStorage };
+  // Unconditional, unlike the tracked store: this needs no credential and no
+  // paid API, so there is no configuration under which it should be inert.
+  // An absent file simply reads as an empty table.
+  const airlineStorage = fileAirlineOverrideStorage(config.airlinesPath ?? DEFAULT_AIRLINES_PATH);
+  // In memory, and therefore one log shared by every board this server feeds
+  // -- which is what you want: the question "what is showing up unnamed" is
+  // about the airspace, not about which panel happened to ask.
+  const unnamedAirlines = createUnnamedLog();
+
+  // Only what handleFlights reads. It used to be handed the board list and a
+  // paid-API secret it has no use for, on a per-request read-only path.
+  const env: Env = {
+    SCHEDULE: storage,
+    TRACKED: trackedStorage,
+    AIRLINES: airlineStorage,
+    UNNAMED: unnamedAirlines,
+  };
   const boards = config.boards.split(',').map((s) => s.trim()).filter(Boolean);
 
   if (!config.aerodataboxKey) {

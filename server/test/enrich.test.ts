@@ -62,7 +62,7 @@ describe('enrich', () => {
     expect(f.ac).toBe('CRJ9');
   });
 
-  it('leaves the name null when the carrier is unknown, so the device can resolve it', () => {
+  it('leaves the name null only when no table anywhere knows the carrier', () => {
     // REGRESSION: SVA022, AAR221, NCA115 and BWA005 all rendered on the panel as
     // bare two-letter codes. This line used to emit `row.carrierIata` whenever
     // airlineName() had no entry, on the reasoning that a bare code is honest.
@@ -74,13 +74,20 @@ describe('enrich', () => {
     // either the device still falls back to the operator code -- so the honest
     // bare code survives, it just stops pre-empting a real name.
     //
+    // THAT REASONING STILL HOLDS but its scope has shrunk a long way. The
+    // server now carries the device's table too (airlines.device.ts, generated
+    // from the same header) plus a ~6,400-carrier one, so "the device can
+    // resolve it" is no longer the common case -- the server resolves it, and
+    // null now means genuinely nobody has a name. The test therefore needs a
+    // code that is absent from all three tables, which "SV" no longer is.
+    //
     // Reaching this line needs a row carrying an operating callsign: that is the
     // one path skipping carrier narrowing, which is why the ZZ/EDV5075 fixture
     // this replaces had to do the same. Not contrived -- AeroDataBox supplies
     // callsigns for ~44% of its rows (see schedule/panynj.ts), which is exactly
     // how these four reached it in production.
-    const rows = [{ ...sched[0]!, carrierIata: 'SV', number: '22', callsign: 'SVA022' }];
-    expect(enrich(ac({ callsign: 'SVA022' }), rows, {}, NOW_MS)!.al).toBeNull();
+    const rows = [{ ...sched[0]!, carrierIata: 'Q0', number: '22', callsign: 'QQQ022' }];
+    expect(enrich(ac({ callsign: 'QQQ022' }), rows, {}, NOW_MS)!.al).toBeNull();
   });
 
   it('computes distance and bearing when the feed did not supply them', () => {

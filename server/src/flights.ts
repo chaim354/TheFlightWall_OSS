@@ -5,6 +5,11 @@ import { callsignKey } from './join';
 import { loadSchedule, isStale, lookupRows, lookupByCallsign, type ScheduleStorage } from './schedule/store';
 import { KM_PER_NM } from './geo';
 import { trackedCards } from './tracked/serve';
+import {
+  resolveAirlineNames,
+  type AirlineOverrideStorage,
+  type UnnamedLog,
+} from './airlineOverrides';
 import type { TrackedStorage } from './tracked/store';
 import type { Flight, ScheduleRow } from './types';
 
@@ -18,6 +23,14 @@ export interface Env {
   SCHEDULE: ScheduleStorage;
   /** Optional: absent on the Worker, which has no tracked-flight store. */
   TRACKED?: TrackedStorage;
+  /**
+   * Hand-entered operator names, and the log of codes that still have none.
+   * Both optional and both absent on the Worker, which has no writable store
+   * to keep them in -- without them the response is exactly what it was, so
+   * this is an addition to the node server rather than a fork of behaviour.
+   */
+  AIRLINES?: AirlineOverrideStorage;
+  UNNAMED?: UnnamedLog;
 }
 
 /** Hard ceiling on `max`, so a caller cannot ask us to serialise the whole sky. */
@@ -125,6 +138,16 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
   // exactly the failure this feature exists to prevent.
   const pinned = env.TRACKED ? trackedCards(await env.TRACKED.read(), nowMs, { lat, lon }) : [];
   const merged = [...pinned, ...flights].slice(0, max);
+
+  // AFTER THE SLICE, deliberately: the unnamed log should record what the wall
+  // actually SHOWS, not everything that was in radius -- offering to name a
+  // carrier that never reached a card would be asking about something the
+  // person cannot have seen. Precedence between the override, the schedule's
+  // own answer and the bundled tables lives in resolveAirlineNames.
+  if (env.AIRLINES) {
+    const overrides = await env.AIRLINES.read().catch(() => ({}));
+    resolveAirlineNames(merged, overrides, nowMs, env.UNNAMED);
+  }
 
   return json({ ok: true, ts, stale, flights: merged });
 }

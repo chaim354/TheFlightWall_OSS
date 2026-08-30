@@ -1,6 +1,12 @@
 import { deadReckonAt } from './deadReckon';
 import { haversineKm, bearingDeg, KM_PER_NM } from '../geo';
 import { airlineName } from '../airlines';
+// One implementation, shared with the area-card path. This file used to carry
+// its own, which stripped the TRAILING run of digits to find the prefix -- and
+// so returned null for every carrier whose IATA code ends in a digit, Norse
+// Atlantic (Z0) and easyJet (U2) among them, leaving their pinned cards with
+// no airline name at all while the curated table had one. See carrierCode.ts.
+import { carrierIataOf } from '../carrierCode';
 import { formatEta } from '../eta';
 import type { TrackedEntry } from './types';
 
@@ -105,31 +111,6 @@ function progressPct(depEpoch: number | null, arrEpoch: number | null, nowMs: nu
 }
 
 /**
- * Carrier prefix of a normalised tracked flight number ("BA181" -> "BA"), to
- * key airlineName() the same way enrich.ts does from a schedule row's
- * carrierIata.
- *
- * A tracked entry has no separate carrier field the way a ScheduleRow does --
- * routes.ts's normaliseNumber already established that `number` IS "carrier
- * prefix + digits" before an entry is ever stored (2-3 alphanumerics with at
- * least one letter, then 1-4 digits) -- so the prefix is recovered here the
- * same way join.ts's callsignKey recovers a flight number from a live ADS-B
- * callsign: take the TRAILING digit run as the number and whatever is left as
- * the prefix, rather than matching the prefix greedily from the front.
- * `/^[A-Z0-9]{2,3}\d{1,4}$/` looks like the obvious regex, but on "BA181" its
- * greedy `{2,3}` happily consumes "BA1" and leaves only "81" for the digits --
- * regex has no notion that a carrier code stops being alphanumeric and starts
- * being numeric, only character classes -- which would send "BA1" into
- * airlineName() and silently render a known carrier as unknown.
- */
-function carrierPrefix(number: string): string | null {
-  const m = /(\d+)$/.exec(number);
-  if (!m || !m[1]) return null;
-  const prefix = number.slice(0, number.length - m[1].length);
-  return prefix.length >= 2 && prefix.length <= 3 ? prefix : null;
-}
-
-/**
  * Cards for the flights currently in the air, pinned.
  *
  * `pos_src` is the load-bearing field. A dead-reckoned position is a schedule
@@ -223,7 +204,7 @@ export function trackedCards(
     // sitting on one five-minute value across several refreshes.
     const etaText = formatEta(nmToDest, etaMinRaw, true);
 
-    const prefix = carrierPrefix(e.number);
+    const prefix = carrierIataOf(e.number);
 
     cards.push({
       // The ICAO callsign when we have one, so this card carries the same KIND

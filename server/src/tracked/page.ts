@@ -194,6 +194,33 @@ export const trackedPage = `<!doctype html>
     <div id="list"><small class="help">loading…</small></div>
   </div>
 
+  <div class="card" id="airlinesCard">
+    <h2>Airline names</h2>
+    <div id="unnamedWrap" hidden>
+      <div class="line">Showing on the wall with no name — click one to fill it in:</div>
+      <div id="unnamed" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px"></div>
+    </div>
+    <div class="row">
+      <div style="flex:0 0 110px">
+        <label for="alCode">Code</label>
+        <input id="alCode" placeholder="AIZ" maxlength="3" autocomplete="off" spellcheck="false" autocapitalize="characters" />
+      </div>
+      <div>
+        <label for="alName">Shows as</label>
+        <input id="alName" placeholder="Arkia" maxlength="24" autocomplete="off" />
+      </div>
+      <div style="flex:0 0 auto"><button id="alBtn">Save</button></div>
+    </div>
+    <div class="err" id="alErr"></div>
+    <div id="alList"></div>
+    <small class="help">Most carriers already resolve on their own — the server carries about 6,500 of
+      them. This is for the ones that do not, and for the ones whose full legal name is too long to
+      read at a glance: the card gives an airline 7 to 14 characters, so <b>Arkia Israel Inland
+      Airlines</b> is worth shortening to <b>Arkia</b>. A name you set here beats every built-in
+      table. The code is whichever one you can see — the 3-letter one from the callsign
+      (<code>AIZ</code>) or the 2-character one from a boarding pass (<code>IZ</code>).</small>
+  </div>
+
   <div id="ctl" hidden>
     <div class="card" id="defaultWarn" hidden style="border-color:var(--warn)">
       <h2 style="color:var(--warn)">Still using the default password</h2>
@@ -764,6 +791,104 @@ async function del(id, number){
   poll();
 }
 
+// --- airline names -------------------------------------------------------
+//
+// Its own poll rather than a branch inside load(): the tracked routes 404 on a
+// server with no OpenSky credentials and load() responds by stopping its timer
+// for good, which would take this down with it for a reason that has nothing
+// to do with airline names.
+var airlinesTimer = null;
+
+function renderAirlines(overrides, unnamed){
+  var codes = Object.keys(overrides || {}).sort();
+  $('alList').innerHTML = codes.length
+    ? codes.map(function(c){
+        return '<div class="line"><b>' + esc(c) + '</b> → ' + esc(overrides[c]) +
+               ' <button class="danger" data-alkill="' + esc(c) + '">Remove</button></div>';
+      }).join('')
+    : '<small class="help">Nothing overridden yet.</small>';
+
+  var kill = document.querySelectorAll('[data-alkill]');
+  for (var i = 0; i < kill.length; i++) {
+    (function(b){ b.onclick = function(){ delAirline(b.getAttribute('data-alkill')); }; })(kill[i]);
+  }
+
+  var list = unnamed || [];
+  $('unnamedWrap').hidden = list.length === 0;
+  $('unnamed').innerHTML = list.map(function(u){
+    // The sample callsign is the point of the chip: "AIZ" alone is what you
+    // are trying to identify, "AIZ994" is the thing you can actually look up.
+    return '<button class="ghost" data-alpick="' + esc(u.code) + '">' +
+           esc(u.code) + ' <span style="opacity:.6">' + esc(u.sample) + '</span></button>';
+  }).join('');
+
+  var pick = document.querySelectorAll('[data-alpick]');
+  for (var j = 0; j < pick.length; j++) {
+    (function(b){
+      b.onclick = function(){
+        $('alCode').value = b.getAttribute('data-alpick');
+        $('alName').focus();
+      };
+    })(pick[j]);
+  }
+}
+
+async function loadAirlines(){
+  try {
+    var res = await fetch('/v1/airlines', { headers: authed() });
+    if (!res.ok) { $('airlinesCard').hidden = res.status === 404; return; }
+    var j = await res.json();
+    if (j.ok) renderAirlines(j.overrides, j.unnamed);
+  } catch (err) { /* the freshness pill already reports reachability */ }
+  finally {
+    clearTimeout(airlinesTimer);
+    airlinesTimer = setTimeout(loadAirlines, 20000);
+  }
+}
+
+async function saveAirline(){
+  var code = $('alCode').value.trim();
+  var name = $('alName').value.trim();
+  $('alErr').textContent = '';
+  if (!code || !name) { $('alErr').textContent = 'Both a code and a name are needed.'; return; }
+  $('alBtn').disabled = true;
+  try {
+    var res = await fetch('/v1/airlines', {
+      method: 'POST',
+      headers: authed({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ code: code, name: name })
+    });
+    var j = await res.json();
+    // Printed verbatim, same rule as the watch form: rewording the server's
+    // reason here is how the page and the endpoint start disagreeing.
+    if (!j.ok) { $('alErr').textContent = j.error || 'Could not save that name.'; return; }
+    $('alCode').value = '';
+    $('alName').value = '';
+    $('alCode').focus();
+  } catch (err) {
+    $('alErr').textContent = 'Could not reach the server.';
+  } finally {
+    $('alBtn').disabled = false;
+    loadAirlines();
+  }
+}
+
+async function delAirline(code){
+  if (!confirm('Stop showing that name for ' + code + '?')) return;
+  try {
+    var res = await fetch('/v1/airlines/' + encodeURIComponent(code), { method: 'DELETE', headers: authed() });
+    var j = await res.json();
+    if (!j.ok) $('alErr').textContent = j.error || 'Could not remove that name.';
+  } catch (err) {
+    $('alErr').textContent = 'Could not reach the server.';
+  }
+  loadAirlines();
+}
+
+$('alBtn').onclick = saveAirline;
+$('alCode').addEventListener('keydown', function(ev){ if (ev.key === 'Enter') $('alName').focus(); });
+$('alName').addEventListener('keydown', function(ev){ if (ev.key === 'Enter') saveAirline(); });
+
 $('addBtn').onclick = add;
 $('refreshBtn').onclick = poll;
 $('num').addEventListener('keydown', function(ev){ if (ev.key === 'Enter') add(); });
@@ -1060,7 +1185,7 @@ async function pollCtl() {
   $('app').hidden = false;
   $('ctl').hidden = false;
   for (var h = 0; h < HEADER_BITS.length; h++) $(HEADER_BITS[h]).hidden = false;
-  if (!polling) { polling = true; poll(); }
+  if (!polling) { polling = true; poll(); loadAirlines(); }
   $('defaultWarn').hidden = !j.usingDefaultUiPassword;
   var hasSettings = !!(j.status && j.status.settings);
   $('ctlNote').textContent = hasSettings ? ''

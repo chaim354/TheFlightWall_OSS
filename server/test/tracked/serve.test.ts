@@ -217,14 +217,17 @@ describe('trackedCards', () => {
   });
 
   it('unknown carrier prefix -> al is null, not a crash or a guessed name', () => {
+    // "XX" used to be the unknown prefix here and is now a real carrier in the
+    // generated table, which is the point of that table -- so this needs a
+    // code no table claims. Q0 was checked against all three when written.
     const now = dep + 3600_000;
     const cards = trackedCards([airborne({
-      number: 'XX999',
+      number: 'Q0999',
       lastLat: 52.1, lastLon: -30.5, lastPosAtMs: now - 30_000,
     })], now, CENTER);
     expect(cards).toHaveLength(1);
     expect(cards[0]!.al).toBeNull();
-    expect(cards[0]!.flt).toBe('XX999'); // the rest of the card still renders
+    expect(cards[0]!.flt).toBe('Q0999'); // the rest of the card still renders
   });
 
   it('a dead-reckoned card still carries schedule-derived fields, with no OpenSky-derived ones', () => {
