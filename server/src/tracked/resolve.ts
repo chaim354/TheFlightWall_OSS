@@ -8,6 +8,19 @@ export type ResolveResult =
   | { ok: true; flight: ResolvedFlight }
   | { ok: false; retryable: boolean; reason: string };
 
+/**
+ * Which leg of a reused flight number the caller means, IATA, either half
+ * optional. See TrackedEntry.wantOrigIata for why this cannot be inferred.
+ *
+ * Values are expected already normalised to uppercase -- routes.ts's
+ * normaliseIata is the one place that decides what a valid code looks like,
+ * and re-deciding it here would be a second opinion to keep in step.
+ */
+export interface RouteWant {
+  origIata: string | null;
+  destIata: string | null;
+}
+
 const str = (v: unknown): string | null =>
   typeof v === 'string' && v.length > 0 ? v : null;
 
@@ -141,11 +154,16 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
  *   4. Require both a departure and an arrival airport IATA -- this drops a
  *      same-numbered flight on a different aircraft that has no arrival on
  *      file yet.
- *   5. Of what is left, take the leg that matters AT `nowMs`: the one in the
+ *   5. Require the route the caller asked for, if they asked for one. This
+ *      settles a reused flight number, which nothing below it can: step 6 is a
+ *      guess from the clock, and on a date with a morning LHR-JFK and an
+ *      evening JFK-LHR the guess is simply wrong for whichever leg the person
+ *      is not on. See TrackedEntry.wantOrigIata.
+ *   6. Of what is left, take the leg that matters AT `nowMs`: the one in the
  *      air (departed, not yet due to arrive), else the next to depart, else
  *      the last one of the day.
  *
- * Step 5 used to be "take the earliest scheduled departure", which is right
+ * Step 6 used to be "take the earliest scheduled departure", which is right
  * only until the earliest leg has flown. A flight number can operate several
  * legs on one date -- EK214 is a BOG->MIA->DXB rotation -- so after the first
  * lands, "earliest" returns a completed flight with nothing to track and no
@@ -158,16 +176,29 @@ function toResolvedFlight(row: Record<string, unknown>): ResolvedFlight {
  * differently, and the spec flags the missing-modeS case as an explicit risk
  * to keep visible.
  */
-export function parseByNumber(
-  payload: unknown,
-  date: string,
-  nowMs: number,
-): ResolvedFlight | null {
+interface Leg {
+  row: Record<string, unknown>;
+  depEpoch: number;
+  arrEpoch: number | null;
+  origIata: string;
+  destIata: string;
+}
+
+/**
+ * Steps 1-5: every leg of this number that departs on `date` and matches
+ * `want`, soonest first.
+ *
+ * Shared by parseByNumber and legRoutes so the two cannot disagree about what
+ * counts as a leg of that day -- legRoutes exists to explain a parseByNumber
+ * miss, and an explanation derived from a different filter would name routes
+ * that the selection never actually considered.
+ */
+function collectLegs(payload: unknown, date: string, want?: RouteWant): Leg[] {
   const rows = Array.isArray(payload) ? payload : [payload];
 
-  // Collected rather than reduced in one pass: step 5 needs to see all the
+  // Collected rather than reduced in one pass: step 6 needs to see all the
   // qualifying legs before it can say which one matters now.
-  const legs: { row: Record<string, unknown>; depEpoch: number; arrEpoch: number | null }[] = [];
+  const legs: Leg[] = [];
 
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue;
@@ -195,17 +226,57 @@ export function parseByNumber(
       localDateOf((dep.scheduledTime as { local?: unknown } | undefined)?.local) ??
       utcDateOf(depEpoch);
     if (depLocalDate !== date) continue;
-    if (!str(depAirport?.iata) || !str(arrAirport?.iata)) continue;
+
+    const origIata = str(depAirport?.iata);
+    const destIata = str(arrAirport?.iata);
+    if (!origIata || !destIata) continue;
+
+    // The requested route, each half independently. Uppercased here rather
+    // than trusted: `want` comes from routes.ts already normalised, but the
+    // airport codes come from the provider, and a case mismatch would silently
+    // reject the one leg the person actually wanted -- the exact failure this
+    // filter was added to prevent, wearing a different hat.
+    if (want?.origIata && origIata.toUpperCase() !== want.origIata) continue;
+    if (want?.destIata && destIata.toUpperCase() !== want.destIata) continue;
 
     legs.push({
       row,
       depEpoch,
       arrEpoch: epoch((arr.scheduledTime as { utc?: unknown } | undefined)?.utc),
+      origIata: origIata.toUpperCase(),
+      destIata: destIata.toUpperCase(),
     });
   }
 
-  if (legs.length === 0) return null;
   legs.sort((a, b) => a.depEpoch - b.depEpoch);
+  return legs;
+}
+
+/**
+ * Every route this number actually flies on `date`, as "LHR-JFK", in departure
+ * order and without repeats.
+ *
+ * Only ever used to explain a miss. When someone asks for a route that is not
+ * operating, "not operating 2026-08-30" is true but useless -- the flight is
+ * operating, just not the way they typed it, and the difference between a
+ * cancelled journey and a transposed pair of airport codes is the whole of
+ * what they need to know to fix it. Deliberately unfiltered by `want`: the
+ * point is to report what WAS there.
+ */
+export function legRoutes(payload: unknown, date: string): string[] {
+  const seen = new Set<string>();
+  for (const l of collectLegs(payload, date)) seen.add(`${l.origIata}-${l.destIata}`);
+  return [...seen];
+}
+
+export function parseByNumber(
+  payload: unknown,
+  date: string,
+  nowMs: number,
+  want?: RouteWant,
+): ResolvedFlight | null {
+  const legs = collectLegs(payload, date, want);
+  if (legs.length === 0) return null;
 
   // In the air now: departed, and not yet due to arrive. A leg with no arrival
   // time counts as still running rather than being skipped -- the alternative
@@ -238,6 +309,7 @@ export async function resolveFlight(
   date: string,
   apiKey: string,
   nowMs: number,
+  want?: RouteWant,
 ): Promise<ResolveResult> {
   const url = `${BASE}/flights/number/${encodeURIComponent(number)}/${encodeURIComponent(date)}`;
   let res: Response;
@@ -261,8 +333,28 @@ export async function resolveFlight(
     return { ok: false, retryable: false, reason: 'unparseable response' };
   }
 
-  const flight = parseByNumber(payload, date, nowMs);
+  const flight = parseByNumber(payload, date, nowMs, want);
   if (!flight) {
+    // A requested route that matched nothing is a DIFFERENT failure from a
+    // flight that is not operating, and saying "not operating" for it sends
+    // the person off to check their booking when the fix is on this page.
+    // Name what the number does fly that day so a transposed pair of codes is
+    // self-evident: "no JFK-LHR leg on 2026-08-30 (found LHR-JFK)".
+    //
+    // Both are still retryable:false. The route does not exist today and will
+    // not start existing on a retry, so spending AeroDataBox calls on it is
+    // exactly the quota drain the 404 branch above refuses.
+    if (want && (want.origIata || want.destIata)) {
+      const wanted = `${want.origIata ?? '*'}-${want.destIata ?? '*'}`;
+      const found = legRoutes(payload, date);
+      return {
+        ok: false,
+        retryable: false,
+        reason: found.length
+          ? `no ${wanted} leg on ${date} (found ${found.join(', ')})`
+          : `not operating ${date}`,
+      };
+    }
     return { ok: false, retryable: false, reason: `not operating ${date}` };
   }
 

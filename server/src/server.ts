@@ -734,9 +734,9 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
         void syncCalendar(trackedStorage, nowMs)
           .then(() =>
             runTrackedTick(trackedStorage, nowMs, {
-              resolve: async (n, d) => {
+              resolve: async (n, d, want) => {
                 resolvesUsedToday++;
-                return resolveFlight(n, d, config.aerodataboxKey, nowMs);
+                return resolveFlight(n, d, config.aerodataboxKey, nowMs, want);
               },
               position: (hex) => fetchPosition(hex, openSkyClientId, openSkyClientSecret),
               resolvesUsedToday,

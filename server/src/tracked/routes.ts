@@ -53,6 +53,29 @@ export function normaliseNumber(raw: string): string | null {
 }
 
 /**
+ * A three-letter IATA airport code, uppercased. "  jfk " -> "JFK".
+ *
+ * Blank (or absent) is null and means "no preference"; anything non-blank that
+ * is not three letters is ALSO null, and validateEntry treats that as an error
+ * rather than as no preference. Silently ignoring a typo would be the worst
+ * available outcome: "JFKK" would fall back to the clock heuristic and pick
+ * whichever leg it liked, so the person would get a confidently-tracked wrong
+ * aeroplane from a field they filled in specifically to prevent that.
+ *
+ * Letters only. IATA airport codes are always three letters -- unlike carrier
+ * codes, which really can carry a digit ("9W"), so normaliseNumber's laxer
+ * alphanumeric rule is not the right one to copy here.
+ */
+export function normaliseIata(raw: string | undefined | null): string | null {
+  const s = (raw ?? '').replace(/\s+/g, '').toUpperCase();
+  return /^[A-Z]{3}$/.test(s) ? s : null;
+}
+
+/** Was something actually typed here? Distinguishes "blank" from "invalid". */
+const isBlank = (raw: string | undefined | null): boolean =>
+  (raw ?? '').replace(/\s+/g, '').length === 0;
+
+/**
  * First and last acceptable day, as midnight-UTC instants.
  *
  * One definition, used by validateEntry below and by isDateInWindow beside it.
@@ -89,10 +112,26 @@ export function isDateInWindow(date: string, nowMs: number): boolean {
 export interface EntryInput {
   number: string;
   date: string;
+  /**
+   * Optional IATA route, to pick between legs that share this number on this
+   * date. Named `from`/`to` on the wire rather than origIata/destIata: this is
+   * what a person types into a form, and the entry's own origIata/destIata are
+   * a different thing entirely -- what the flight turned out to be, once
+   * resolved. Keeping the two names apart keeps a request from reading like an
+   * answer.
+   */
+  from?: string;
+  to?: string;
 }
 
 export type Validation =
-  | { ok: true; number: string; date: string }
+  | {
+      ok: true;
+      number: string;
+      date: string;
+      wantOrigIata: string | null;
+      wantDestIata: string | null;
+    }
   | { ok: false; reason: string };
 
 /**
@@ -123,7 +162,18 @@ export function validateEntry(input: EntryInput, nowMs: number, currentCount: nu
     return { ok: false, reason: `date is more than ${WINDOW_FUTURE_DAYS} days ahead` };
   }
 
-  return { ok: true, number, date: input.date };
+  // Blank means no preference; non-blank-but-unparseable is a mistake worth
+  // reporting, for the reason normaliseIata explains at length.
+  const wantOrigIata = normaliseIata(input.from);
+  if (wantOrigIata === null && !isBlank(input.from)) {
+    return { ok: false, reason: 'departure airport must be a 3-letter IATA code, e.g. "JFK"' };
+  }
+  const wantDestIata = normaliseIata(input.to);
+  if (wantDestIata === null && !isBlank(input.to)) {
+    return { ok: false, reason: 'arrival airport must be a 3-letter IATA code, e.g. "LHR"' };
+  }
+
+  return { ok: true, number, date: input.date, wantOrigIata, wantDestIata };
 }
 
 /**
@@ -137,11 +187,17 @@ export function newEntry(
   date: string,
   nowMs: number,
   source: TrackedSource = 'manual',
+  want: { wantOrigIata: string | null; wantDestIata: string | null } = {
+    wantOrigIata: null,
+    wantDestIata: null,
+  },
 ): TrackedEntry {
   return {
     id: randomUUID(),
     number,
     date,
+    wantOrigIata: want.wantOrigIata,
+    wantDestIata: want.wantDestIata,
     state: 'pending',
     reason: null,
     attempts: 0,
@@ -205,16 +261,39 @@ export async function handleTracked(
     // already counted in that fullness) with "store is full" before the
     // idempotency lookup ever runs, which breaks idempotency at precisely
     // the boundary where a retried POST is most likely to land.
+    //
+    // Keyed on (number, date, route), NOT (number, date). The route is part of
+    // what was asked for: BA181 LHR-JFK and BA181 JFK-LHR on the same date are
+    // two different aeroplanes, and collapsing them would make the second
+    // request silently return the first one's entry -- the reused-flight-number
+    // bug all over again, this time inside the endpoint meant to fix it. So
+    // both legs of a rotation can be watched at once, while re-POSTing either
+    // one is still free.
+    //
+    // The calendar sync is unaffected and deliberately still keys on
+    // (number, date) alone (see sync.ts): an ICS event carries no route, so if
+    // it used this key it would add a route-less duplicate alongside every
+    // hand-added routed entry, and the wall would pin the same flight twice.
+    // Its coarser key means an existing manual entry already suppresses the
+    // calendar's copy, which is the behaviour that was there before.
     const number = normaliseNumber(input.number ?? '');
     if (number) {
-      const existing = entries.find((e) => e.number === number && e.date === input.date);
+      const wantOrig = normaliseIata(input.from);
+      const wantDest = normaliseIata(input.to);
+      const existing = entries.find(
+        (e) =>
+          e.number === number &&
+          e.date === input.date &&
+          (e.wantOrigIata ?? null) === wantOrig &&
+          (e.wantDestIata ?? null) === wantDest,
+      );
       if (existing) return json({ ok: true, entry: existing });
     }
 
     const v = validateEntry(input, nowMs, entries.length);
     if (!v.ok) return json({ ok: false, error: v.reason }, 400);
 
-    const entry = newEntry(v.number, v.date, nowMs);
+    const entry = newEntry(v.number, v.date, nowMs, 'manual', v);
     await storage.write([...entries, entry]);
     return json({ ok: true, entry }, 201);
   }

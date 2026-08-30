@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { parseByNumber, resolveFlight } from '../../src/tracked/resolve';
+import { legRoutes, parseByNumber, resolveFlight } from '../../src/tracked/resolve';
 
 const payload = [
   {
@@ -212,6 +212,110 @@ describe('parseByNumber', () => {
   });
 });
 
+/**
+ * The same flight number, twice on one date, in opposite directions -- the
+ * ordinary shape of a short-haul return and of a rotation's next hop, and the
+ * case the clock heuristic cannot get right for both travellers.
+ */
+const twoLegs = [
+  {
+    number: 'BA 181',
+    callSign: 'BAW181',
+    status: 'Expected',
+    aircraft: { reg: 'G-MORN', modeS: 'AAAAAA', model: 'Boeing 777' },
+    departure: {
+      airport: { iata: 'LHR', location: { lat: 51.47, lon: -0.4543 } },
+      scheduledTime: { utc: '2026-09-14 09:00Z', local: '2026-09-14 10:00+01:00' },
+    },
+    arrival: {
+      airport: { iata: 'JFK', location: { lat: 40.6413, lon: -73.7781 } },
+      scheduledTime: { utc: '2026-09-14 16:00Z' },
+    },
+  },
+  {
+    number: 'BA 181',
+    callSign: 'BAW181',
+    status: 'Expected',
+    aircraft: { reg: 'G-EVEN', modeS: 'BBBBBB', model: 'Boeing 777' },
+    departure: {
+      airport: { iata: 'JFK', location: { lat: 40.6413, lon: -73.7781 } },
+      scheduledTime: { utc: '2026-09-14 22:00Z', local: '2026-09-14 18:00-04:00' },
+    },
+    arrival: {
+      airport: { iata: 'LHR', location: { lat: 51.47, lon: -0.4543 } },
+      scheduledTime: { utc: '2026-09-15 05:00Z' },
+    },
+  },
+];
+
+describe('parseByNumber leg selection by requested route', () => {
+  // The bug this exists for. Someone booked on the evening JFK departure adds
+  // it the night before; the resolve runs hours ahead of BOTH legs, so "next
+  // to depart" is the morning one and the wall tracks a stranger's aeroplane.
+  const beforeBoth = Date.parse('2026-09-14T02:00:00Z');
+
+  it('picks the morning leg by clock alone, which is wrong for half of travellers', () => {
+    const r = parseByNumber(twoLegs, '2026-09-14', beforeBoth);
+    expect(r!.reg).toBe('G-MORN');
+  });
+
+  it('picks the requested leg by origin, whatever the clock says', () => {
+    const r = parseByNumber(twoLegs, '2026-09-14', beforeBoth, { origIata: 'JFK', destIata: null });
+    expect(r!.reg).toBe('G-EVEN');
+    expect(r!.origIata).toBe('JFK');
+  });
+
+  it('picks the requested leg by destination alone', () => {
+    const r = parseByNumber(twoLegs, '2026-09-14', beforeBoth, { origIata: null, destIata: 'JFK' });
+    expect(r!.reg).toBe('G-MORN');
+  });
+
+  it('honours both halves together', () => {
+    const r = parseByNumber(twoLegs, '2026-09-14', beforeBoth, { origIata: 'JFK', destIata: 'LHR' });
+    expect(r!.reg).toBe('G-EVEN');
+  });
+
+  it('keeps the requested leg even once the other one is airborne', () => {
+    // Mid-morning: the LHR-JFK leg is in the air, so the unfiltered heuristic
+    // would take it. The filter has to beat "airborne now", not just "next to
+    // depart" -- this is the re-resolve an hour before departure, which used
+    // to be free to switch legs behind the user's back.
+    const midMorning = Date.parse('2026-09-14T12:00:00Z');
+    expect(parseByNumber(twoLegs, '2026-09-14', midMorning)!.reg).toBe('G-MORN');
+    expect(
+      parseByNumber(twoLegs, '2026-09-14', midMorning, { origIata: 'JFK', destIata: null })!.reg,
+    ).toBe('G-EVEN');
+  });
+
+  it('is null when no leg flies the requested route', () => {
+    expect(parseByNumber(twoLegs, '2026-09-14', beforeBoth, { origIata: 'ORD', destIata: null })).toBeNull();
+  });
+
+  it('matches provider codes case-insensitively', () => {
+    const lower = [{ ...twoLegs[1]!, departure: { ...twoLegs[1]!.departure, airport: { iata: 'jfk', location: { lat: 40.6413, lon: -73.7781 } } } }];
+    expect(parseByNumber(lower, '2026-09-14', beforeBoth, { origIata: 'JFK', destIata: null })).not.toBeNull();
+  });
+
+  it('a null route is exactly the old behaviour', () => {
+    const filtered = parseByNumber(twoLegs, '2026-09-14', beforeBoth, { origIata: null, destIata: null });
+    expect(filtered!.reg).toBe(parseByNumber(twoLegs, '2026-09-14', beforeBoth)!.reg);
+  });
+});
+
+describe('legRoutes', () => {
+  it('names every route the number flies that day, in departure order', () => {
+    expect(legRoutes(twoLegs, '2026-09-14')).toEqual(['LHR-JFK', 'JFK-LHR']);
+  });
+
+  it('is unfiltered by anything and empty off-date', () => {
+    expect(legRoutes(twoLegs, '2026-09-15')).toEqual([]);
+  });
+
+  it('does not repeat a route flown twice', () => {
+    expect(legRoutes([twoLegs[0]!, twoLegs[0]!], '2026-09-14')).toEqual(['LHR-JFK']);
+  });
+});
+
 describe('resolveFlight', () => {
   beforeEach(() => { vi.restoreAllMocks(); });
   afterEach(() => { vi.restoreAllMocks(); });
@@ -236,6 +340,41 @@ describe('resolveFlight', () => {
     // The distinction drives retry policy: a 404 must never be retried.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })));
     const r = await resolveFlight('BA1811', '2026-09-14', 'KEY', Date.parse('2026-09-14T12:00:00Z'));
+    expect(r).toEqual({ ok: false, retryable: false, reason: 'not operating 2026-09-14' });
+  });
+
+  it('passes the requested route through to the selection', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(twoLegs), { status: 200 })));
+    const r = await resolveFlight('BA181', '2026-09-14', 'KEY', Date.parse('2026-09-14T02:00:00Z'), {
+      origIata: 'JFK',
+      destIata: null,
+    });
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.flight.reg).toBe('G-EVEN');
+  });
+
+  it('says which routes DO fly when the requested one does not', async () => {
+    // "not operating" would be true and useless here: the flight is operating,
+    // the person just typed the codes the wrong way round, and that is a
+    // one-word fix they can only make if the answer names what was there.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(twoLegs), { status: 200 })));
+    const r = await resolveFlight('BA181', '2026-09-14', 'KEY', Date.parse('2026-09-14T02:00:00Z'), {
+      origIata: 'ORD',
+      destIata: null,
+    });
+    expect(r).toEqual({
+      ok: false,
+      retryable: false,
+      reason: 'no ORD-* leg on 2026-09-14 (found LHR-JFK, JFK-LHR)',
+    });
+  });
+
+  it('still says not-operating when a routed request finds no legs at all', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })));
+    const r = await resolveFlight('BA181', '2026-09-14', 'KEY', Date.parse('2026-09-14T02:00:00Z'), {
+      origIata: 'JFK',
+      destIata: 'LHR',
+    });
     expect(r).toEqual({ ok: false, retryable: false, reason: 'not operating 2026-09-14' });
   });
 

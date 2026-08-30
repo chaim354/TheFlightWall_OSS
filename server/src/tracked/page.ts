@@ -135,6 +135,14 @@ export const trackedPage = `<!doctype html>
         <label for="date">Departure date</label>
         <input id="date" type="date" />
       </div>
+      <div style="flex:0 0 90px">
+        <label for="from">From</label>
+        <input id="from" placeholder="JFK" maxlength="3" autocomplete="off" spellcheck="false" autocapitalize="characters" />
+      </div>
+      <div style="flex:0 0 90px">
+        <label for="to">To</label>
+        <input id="to" placeholder="LHR" maxlength="3" autocomplete="off" spellcheck="false" autocapitalize="characters" />
+      </div>
       <div style="flex:0 0 auto">
         <button id="addBtn">Watch</button>
       </div>
@@ -145,6 +153,12 @@ export const trackedPage = `<!doctype html>
       departure from JFK is the 24th even though it is already the 25th in UTC. Watching costs nothing
       until that date begins; the flight is looked up then, and followed live once it is in the air.
       Entries remove themselves a couple of hours after landing.</small>
+    <small class="help"><b>From / To are optional, and worth filling in.</b> A flight number is not
+      unique within a day — an airline reuses it for the return leg and for the next hop of a
+      rotation. With the route blank the lookup has to guess which one you mean, and it guesses by
+      the clock, so an evening departure added the night before resolves to that morning's flight
+      instead. Either box on its own is enough to settle it. Give both legs their own route and you
+      can watch a there-and-back on the same date.</small>
   </div>
 
   <div class="card">
@@ -477,6 +491,13 @@ function line(html, warn){ return '<div class="line' + (warn ? ' warn' : '') + '
 function routeLine(e){
   var bits = [];
   if (e.origIata || e.destIata) bits.push('<b>' + esc(e.origIata || '???') + ' → ' + esc(e.destIata || '???') + '</b>');
+  // Before the lookup runs there is no resolved route to show, and what the
+  // person typed is the only thing on the card that says WHICH leg this is --
+  // which matters most exactly here, because a transposed pair of codes is
+  // invisible until the resolve fails hours later. Shown only while unresolved:
+  // once origIata exists it is the same information, confirmed.
+  else if (e.wantOrigIata || e.wantDestIata)
+    bits.push('asked for <b>' + esc(e.wantOrigIata || '*') + ' → ' + esc(e.wantDestIata || '*') + '</b>');
   if (e.schedDepEpoch !== null && e.schedDepEpoch !== undefined)
     bits.push('dep <span title="' + esc(utcStamp(e.schedDepEpoch)) + '">' + hhmm(e.schedDepEpoch) + '</span>');
   if (e.schedArrEpoch !== null && e.schedArrEpoch !== undefined)
@@ -665,6 +686,12 @@ async function poll(){
 async function add(){
   var number = $('num').value.trim();
   var date = $('date').value;
+  // Sent as typed, blanks included. Validation is the server's -- routes.ts
+  // answers with a reason and this page prints it verbatim, for the same
+  // reason the error below is not reworded: two implementations of the rules
+  // is how a form starts accepting what the endpoint rejects.
+  var from = $('from').value.trim();
+  var to = $('to').value.trim();
   $('addErr').textContent = '';
   if (!number || !date) { $('addErr').textContent = 'Both a flight number and a date are needed.'; return; }
 
@@ -673,7 +700,7 @@ async function add(){
     var res = await fetch('/v1/tracked', {
       method: 'POST',
       headers: authed({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ number: number, date: date })
+      body: JSON.stringify({ number: number, date: date, from: from, to: to })
     });
     var j = await res.json();
     // routes.ts answers every rejection with a human reason -- the cap, the
@@ -681,6 +708,8 @@ async function add(){
     // is how the page and the server start disagreeing about the rules.
     if (!j.ok) { $('addErr').textContent = j.error || 'Could not add that flight.'; return; }
     $('num').value = '';
+    $('from').value = '';
+    $('to').value = '';
     $('num').focus();
   } catch (err) {
     $('addErr').textContent = 'Could not reach the server.';

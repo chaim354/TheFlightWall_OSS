@@ -6,7 +6,8 @@ import type { TrackedStorage } from '../../src/tracked/store';
 const DAY_START = Date.UTC(2026, 8, 14);
 
 const entry = (over: Partial<TrackedEntry> = {}): TrackedEntry => ({
-  id: 'e1', number: 'BA181', date: '2026-09-14', state: 'pending', reason: null,
+  id: 'e1', number: 'BA181', date: '2026-09-14', wantOrigIata: null, wantDestIata: null,
+  state: 'pending', reason: null,
   attempts: 0, stateAtMs: 0, reresolved: false, source: 'manual', icao24: null, callsign: null, reg: null,
   aircraftModel: null, aircraftType: null, origIata: null, destIata: null, orig: null, dest: null,
   schedDepEpoch: null, schedArrEpoch: null,
@@ -38,7 +39,10 @@ describe('runTrackedTick', () => {
     await runTrackedTick(store, DAY_START, {
       resolve: resolveFn, position: vi.fn(), resolvesUsedToday: 0,
     });
-    expect(resolveFn).toHaveBeenCalledWith('BA181', '2026-09-14');
+    expect(resolveFn).toHaveBeenCalledWith('BA181', '2026-09-14', {
+      origIata: null,
+      destIata: null,
+    });
     expect(store.current[0]!.state).toBe('resolved');
     expect(store.current[0]!.icao24).toBe('4008f3');
   });

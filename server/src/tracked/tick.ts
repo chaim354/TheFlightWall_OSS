@@ -2,7 +2,7 @@ import { decideTracked } from './lifecycle';
 import type { TrackedEntry } from './types';
 import type { TrackedStorage } from './store';
 import type { HexMatch } from './findHex';
-import type { ResolveResult } from './resolve';
+import type { ResolveResult, RouteWant } from './resolve';
 import type { PositionResult } from './opensky';
 
 /**
@@ -45,7 +45,14 @@ export const MAX_AIRBORNE_POLLS = 10;
 const MAX_ATTEMPTS = 3;
 
 export interface TrackedDeps {
-  resolve(number: string, date: string): Promise<ResolveResult>;
+  /**
+   * `want` names the leg, for a number that flies more than one that day. It
+   * is a THIRD parameter rather than a change to the first two so every
+   * existing implementation still satisfies this type -- TypeScript accepts a
+   * function that ignores trailing arguments -- and one that ignores it simply
+   * behaves as it did before routes could be requested.
+   */
+  resolve(number: string, date: string, want?: RouteWant): Promise<ResolveResult>;
   position(icao24: string): Promise<PositionResult>;
   resolvesUsedToday: number;
   /**
@@ -125,7 +132,10 @@ export async function runTrackedTick(
         continue;
       }
       resolvesUsed++;
-      const r = await deps.resolve(e.number, e.date);
+      const r = await deps.resolve(e.number, e.date, {
+        origIata: e.wantOrigIata ?? null,
+        destIata: e.wantDestIata ?? null,
+      });
       changed = true;
 
       if (r.ok) {

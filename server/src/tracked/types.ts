@@ -64,6 +64,31 @@ export interface TrackedEntry {
   number: string;
   /** ISO date, "YYYY-MM-DD". */
   date: string;
+  /**
+   * The route the person asked for, IATA, when they named one -- the answer to
+   * "which BA181?" on a date that has more than one.
+   *
+   * A flight number is not unique within a day. It is reused for the return
+   * leg (LHR-JFK in the morning, JFK-LHR in the evening) and for the next hop
+   * of a rotation (EK214 is BOG-MIA-DXB), and resolve.ts had no way to tell
+   * which one the person meant. It guessed by clock -- the leg in the air, else
+   * the next to depart -- which is right at departure time and wrong every
+   * other time: an entry added the night before resolves hours ahead of the
+   * first leg, so "next to depart" picks the MORNING flight for someone booked
+   * on the evening one, and the wall then tracks a stranger's aeroplane.
+   *
+   * Nothing in the payload can settle that; only the person holding the
+   * boarding pass knows. So this is what they type, and resolve.ts filters the
+   * day's legs by it BEFORE the clock heuristic runs.
+   *
+   * Null means "no preference" -- either half independently, so "from JFK" is
+   * expressible without naming the far end. That is the pre-existing behaviour
+   * exactly, and it is also what every entry stored before this field existed
+   * reads as, and what a calendar-sourced entry gets (an ICS event carries no
+   * route; see calendar.ts's CalendarFlight).
+   */
+  wantOrigIata: string | null;
+  wantDestIata: string | null;
   state: TrackedState;
   /** Human-readable why, set when state is `unresolved`. Null otherwise. */
   reason: string | null;

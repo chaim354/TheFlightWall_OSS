@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  normaliseIata,
   normaliseNumber,
   validateEntry,
   handleTracked,
@@ -76,6 +77,60 @@ function memStorage(initial: TrackedEntry[] = []): TrackedStorage {
   };
 }
 
+describe('normaliseIata', () => {
+  it('uppercases and strips whitespace', () => {
+    expect(normaliseIata('  jfk ')).toBe('JFK');
+    expect(normaliseIata('Lhr')).toBe('LHR');
+  });
+
+  it('is null for blank, absent, and anything that is not three letters', () => {
+    for (const v of ['', '   ', undefined, null, 'JF', 'JFKK', 'JF1', '123']) {
+      expect(normaliseIata(v)).toBeNull();
+    }
+  });
+});
+
+describe('validateEntry: requested route', () => {
+  it('defaults to no preference, which is the pre-existing behaviour', () => {
+    const v = validateEntry({ number: 'BA181', date: '2026-09-14' }, TODAY, 0);
+    if (!v.ok) throw new Error(v.reason);
+    expect(v.wantOrigIata).toBeNull();
+    expect(v.wantDestIata).toBeNull();
+  });
+
+  it('normalises a route that was given', () => {
+    const v = validateEntry({ number: 'BA181', date: '2026-09-14', from: 'jfk', to: ' lhr ' }, TODAY, 0);
+    if (!v.ok) throw new Error(v.reason);
+    expect(v.wantOrigIata).toBe('JFK');
+    expect(v.wantDestIata).toBe('LHR');
+  });
+
+  it('accepts one half without the other', () => {
+    const v = validateEntry({ number: 'BA181', date: '2026-09-14', from: 'JFK' }, TODAY, 0);
+    if (!v.ok) throw new Error(v.reason);
+    expect(v.wantOrigIata).toBe('JFK');
+    expect(v.wantDestIata).toBeNull();
+  });
+
+  it('REJECTS a malformed code rather than ignoring it', () => {
+    // The whole point of the field is to stop the clock heuristic guessing.
+    // Treating a typo as "no preference" would hand back a confidently-wrong
+    // aeroplane from the one input added to prevent exactly that.
+    const bad = validateEntry({ number: 'BA181', date: '2026-09-14', from: 'JFKK' }, TODAY, 0);
+    expect(bad.ok).toBe(false);
+    if (bad.ok) throw new Error('unreachable');
+    expect(bad.reason).toContain('3-letter IATA');
+
+    const badTo = validateEntry({ number: 'BA181', date: '2026-09-14', to: '1' }, TODAY, 0);
+    expect(badTo.ok).toBe(false);
+  });
+
+  it('treats an all-whitespace field as blank, not as a mistake', () => {
+    const v = validateEntry({ number: 'BA181', date: '2026-09-14', from: '  ' }, TODAY, 0);
+    expect(v.ok).toBe(true);
+  });
+});
+
 describe('handleTracked: POST idempotency', () => {
   // The endpoint is unauthenticated (see routes.ts), so MAX_ENTRIES is the
   // only thing bounding a stranger's spend. That guarantee is worthless if
@@ -128,5 +183,57 @@ describe('handleTracked: POST idempotency', () => {
     const resBody = (await res.json()) as { ok: boolean; entry: TrackedEntry };
     expect(resBody.ok).toBe(true);
     expect(resBody.entry.id).toBe(target.id);
+  });
+
+  it('treats the two legs of a rotation as different journeys', async () => {
+    // Same number, same date, opposite directions -- two aeroplanes. Keying
+    // idempotency on (number, date) alone would hand the second request the
+    // first one's entry, which is the reused-number bug reappearing inside
+    // the endpoint added to fix it.
+    const storage = memStorage();
+    const url = new URL('http://localhost/v1/tracked');
+
+    const out = await handleTracked('POST', url,
+      JSON.stringify({ number: 'BA181', date: '2026-09-14', from: 'LHR', to: 'JFK' }), storage, TODAY);
+    const back = await handleTracked('POST', url,
+      JSON.stringify({ number: 'BA181', date: '2026-09-14', from: 'JFK', to: 'LHR' }), storage, TODAY);
+
+    expect(out.status).toBe(201);
+    expect(back.status).toBe(201);
+    const stored = await storage.read();
+    expect(stored.length).toBe(2);
+    expect(stored.map((e) => e.wantOrigIata)).toEqual(['LHR', 'JFK']);
+  });
+
+  it('is still idempotent when the same route is posted twice', async () => {
+    const storage = memStorage();
+    const url = new URL('http://localhost/v1/tracked');
+    const body = JSON.stringify({ number: 'BA181', date: '2026-09-14', from: 'jfk' });
+
+    const first = await handleTracked('POST', url, body, storage, TODAY);
+    const second = await handleTracked('POST', url, body, storage, TODAY);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect((await storage.read()).length).toBe(1);
+  });
+
+  it('stores the requested route on the entry', async () => {
+    const storage = memStorage();
+    const res = await handleTracked('POST', new URL('http://localhost/v1/tracked'),
+      JSON.stringify({ number: 'ba 181', date: '2026-09-14', from: ' jfk', to: 'lhr' }), storage, TODAY);
+    const body = (await res.json()) as { entry: TrackedEntry };
+    expect(body.entry.wantOrigIata).toBe('JFK');
+    expect(body.entry.wantDestIata).toBe('LHR');
+  });
+
+  it('rejects a malformed route with the reason, and stores nothing', async () => {
+    const storage = memStorage();
+    const res = await handleTracked('POST', new URL('http://localhost/v1/tracked'),
+      JSON.stringify({ number: 'BA181', date: '2026-09-14', from: 'JFKK' }), storage, TODAY);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain('3-letter IATA');
+    expect((await storage.read()).length).toBe(0);
   });
 });

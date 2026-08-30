@@ -11,6 +11,8 @@ function entry(over: Partial<TrackedEntry> = {}): TrackedEntry {
     id: 'e1',
     number: 'BA181',
     date: '2026-09-14',
+    wantOrigIata: null,
+    wantDestIata: null,
     state: 'pending',
     reason: null,
     attempts: 0,
