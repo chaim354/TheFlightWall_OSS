@@ -635,6 +635,16 @@ async function loadStatus(){
       ('largestDma' in s ? `<span class="pill">dma ${Math.round(s.largestDma/1024)}k</span>` : '')+
       ('freeInternal' in s ? `<span class="pill">int ${Math.round(s.freeInternal/1024)}k</span>` : '')+
       ('freePsram' in s && s.freePsram>0 ? `<span class="pill">psram ${(s.freePsram/1048576).toFixed(1)}M</span>` : '')+
+      // WHERE THE FLIGHTS ACTUALLY CAME FROM, which the `mode` pill and the
+      // settings page cannot tell you: in server mode a failed cycle silently
+      // falls back to adsb.lol while positionSource still reads "server". A
+      // board spent hours alternating between the two with nothing on this page
+      // saying so. Highlighted only when it is NOT the configured source, so the
+      // normal case stays quiet and a fallback stands out.
+      ('activeSource' in s && s.activeSource && s.activeSource !== 'none'
+        ? `<span class="pill${s.sourceFallback ? ' off' : ''}">source: ${esc(s.activeSource)}`+
+          `${s.sourceFallback ? ' (fallback)' : ''}</span>`
+        : '')+
       // Only shown when true -- the FlightWall server itself is degraded
       // (schedule or position data served from cache after a provider
       // failure). Flights keep rendering normally either way.

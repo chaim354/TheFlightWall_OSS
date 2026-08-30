@@ -604,6 +604,8 @@ static void doFetchAndRender()
     // now on screen" are the same thing, matching the precedent set by
     // setLastFetchInfo just above.
     g_web.setServerStale(g_fetcher->lastFetchStale());
+    g_web.setActiveSource(g_fetcher->lastActiveSource());
+    g_web.setSourceFallback(g_fetcher->lastSourceWasFallback());
 
     g_lastFlights = std::move(flights);
 

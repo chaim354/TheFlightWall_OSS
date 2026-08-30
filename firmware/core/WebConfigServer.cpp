@@ -277,6 +277,12 @@ void WebConfigServer::handleGetStatus()
     // after a provider failure on the last cycle. Always false off the server
     // source. Flights render normally either way -- informational only.
     doc["serverStale"] = _serverStale;
+    // WHAT THE DEVICE IS ACTUALLY USING, which `positionSource` in the settings
+    // does not tell you: server mode falls back to adsb.lol per-cycle while the
+    // setting still reads "server". Published even when empty so the page can
+    // distinguish "no fetch yet" from old firmware that lacks the field.
+    doc["activeSource"] = _activeSource;
+    doc["sourceFallback"] = _sourceFallback;
     doc["freeHeap"] = (uint32_t)ESP.getFreeHeap();
     // freeHeap ALONE is misleading, and it misled a live diagnosis: the device was
     // failing every fetch with ~174KB free, which reads healthy. What a TLS

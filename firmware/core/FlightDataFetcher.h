@@ -37,6 +37,25 @@ public:
     // Surfaced in the web UI only — a stale schedule still renders normally.
     bool lastFetchStale() const { return _lastStale; }
 
+    /**
+     * The source that ACTUALLY produced the last flights -- not the configured
+     * one.
+     *
+     * Those diverge routinely and silently. In server mode a failed call falls
+     * back to adsb.lol for that cycle while `positionSource` still reads
+     * "server", so the settings document and the web UI both keep claiming a
+     * source the device is not using. On 2026-08-28 a board spent hours
+     * alternating between the two and the only way to see it was a USB cable
+     * and the serial log.
+     *
+     * A literal, never freed and never null: every value is a string constant.
+     */
+    const char *lastActiveSource() const { return _lastSource; }
+
+    /** True when the last fetch used a FALLBACK rather than the configured
+     *  source -- i.e. server mode degraded to adsb.lol for that cycle. */
+    bool lastSourceWasFallback() const { return _lastSourceFallback; }
+
 private:
     // Wall-clock a single fetch cycle may spend on NETWORK enrichment before it stops
     // opening new connections and renders what it already has.
@@ -73,6 +92,10 @@ private:
     // by a successful, stale-flagged server response — so switching away from
     // FlightWallServer can't leave a previous cycle's stale flag stuck on.
     bool _lastStale = false;
+    // "none" until a fetch succeeds, so the UI can say "unknown" rather than
+    // assert a source the device has not actually used yet.
+    const char *_lastSource = "none";
+    bool _lastSourceFallback = false;
 
     // Unsigned subtraction, deliberately: it stays correct across the ~49.7-day millis()
     // wrap, where a naive `millis() >= deadline` would not.
@@ -128,6 +151,8 @@ private:
     BaseFlightFetcher *activeFetcher();
     // Position source per g_settings.positionSource (mirrors activeFetcher()).
     BaseStateVectorFetcher *activeStateFetcher();
+    /** Which of the state fetchers a pointer is, by identity. See the .cpp. */
+    const char *sourceNameOf(const BaseStateVectorFetcher *src) const;
     // Cache key is derived internally from (callsign, icao24) via enrichmentCacheKey()
     // — the single canonical policy shared by both tracking modes; callers pass their
     // identity fields and do not compute a key themselves.

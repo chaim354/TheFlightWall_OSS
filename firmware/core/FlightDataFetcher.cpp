@@ -276,6 +276,8 @@ size_t FlightDataFetcher::fetchServerMode(std::vector<StateVector> &outStates,
                 Serial.println("FlightDataFetcher: server recovered; backoff cleared");
             _serverConsecutiveFailures = 0;
             _serverBackoffSkipLogged = false;
+            _lastSource = "server";
+            _lastSourceFallback = false;
             ok = true;
             return outFlights.size();
         }
@@ -316,6 +318,9 @@ size_t FlightDataFetcher::fetchServerMode(std::vector<StateVector> &outStates,
     // path). Cheap insurance against that invariant changing later without
     // this call site being revisited.
     outFlights.clear();
+    // Set BEFORE the call: fetchAreaModeWith records the source name but cannot
+    // know whether reaching it was the plan or a degradation.
+    _lastSourceFallback = true;
     return fetchAreaModeWith(_adsbLolState ? _adsbLolState : _openSkyState,
                              outStates, outFlights, ok);
 }
@@ -324,7 +329,25 @@ size_t FlightDataFetcher::fetchAreaMode(std::vector<StateVector> &outStates,
                                         std::vector<FlightInfo> &outFlights,
                                         bool &ok)
 {
+    _lastSourceFallback = false;
     return fetchAreaModeWith(activeStateFetcher(), outStates, outFlights, ok);
+}
+
+/**
+ * Name the state fetcher a pointer refers to, for lastActiveSource().
+ *
+ * Compares against the members rather than asking the object, because
+ * BaseStateVectorFetcher has no name() and giving it one would touch every
+ * implementation for a diagnostic string. The pointers are set once in the
+ * constructor and never rebound, so identity is a reliable answer.
+ */
+const char *FlightDataFetcher::sourceNameOf(const BaseStateVectorFetcher *src) const
+{
+    if (src == nullptr)        return "none";
+    if (src == _adsbLolState)  return "adsb.lol";
+    if (src == _fr24State)     return "fr24";
+    if (src == _openSkyState)  return "opensky";
+    return "unknown";
 }
 
 size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
@@ -347,6 +370,11 @@ size_t FlightDataFetcher::fetchAreaModeWith(BaseStateVectorFetcher *src,
     // The state fetch succeeded. Everything below only ever filters the result, so
     // ending with 0 flights from here is a legitimate "nothing overhead", not a failure.
     ok = true;
+    // Recorded HERE, past the failure return above, so the label always names a
+    // source that actually answered. Covers both callers: fetchAreaMode with the
+    // configured fetcher, and fetchServerMode's fallback with adsb.lol -- which
+    // is the case worth seeing, because the settings still say "server".
+    _lastSource = sourceNameOf(src);
 
     // Pre-filter state vectors by on-ground and altitude band before enrichment.
     std::vector<StateVector> candidates;

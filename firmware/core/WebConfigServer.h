@@ -57,6 +57,10 @@ public:
     // provider failure. Flights still render normally either way -- this is
     // surfaced only so the web UI can show it, not to change any behavior.
     void setServerStale(bool stale) { _serverStale = stale; }
+    /** The source that actually produced the last flights; see
+     *  FlightDataFetcher::lastActiveSource() for why it is not `positionSource`. */
+    void setActiveSource(const String &src) { _activeSource = src; }
+    void setSourceFallback(bool f) { _sourceFallback = f; }
 
     // Latest ambient light reading, surfaced in /api/status for calibration.
     // The RESOLVED panel state, after every override has been folded in.
@@ -111,6 +115,8 @@ private:
     const std::vector<FlightInfo> *_flights = nullptr;
     String _lastNote;
     bool _serverStale = false;
+    String _activeSource;
+    bool _sourceFallback = false;
     int _lightLevel = -1;
     bool _lightDark = false;
     String _lastOtaError;
