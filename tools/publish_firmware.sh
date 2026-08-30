@@ -109,7 +109,10 @@ if [ "$DO_UI" = 1 ]; then
   [ -f "$UI_FILE" ] || { echo "missing $UI_FILE -- build the firmware first, it gzips the page" >&2; exit 2; }
   # Guard here as well as server-side: catching it locally costs one byte
   # comparison and saves a round trip with the admin credential attached.
-  head -c 2 "$UI_FILE" | od -An -tx1 | grep -q "1f 8b" \
+  # Compare the two magic bytes directly. Matching od's FORMATTED output was a
+  # bug: `od -An -tx1` separates bytes with two spaces, so grepping "1f 8b"
+  # rejected every genuine gzip -- including the real one.
+  [ "$(head -c 2 "$UI_FILE" | od -An -tx1 | tr -d ' \n')" = "1f8b" ] \
     || { echo "$UI_FILE is not gzip -- upload index.html.gz, not index.html" >&2; exit 2; }
   echo "uploading web UI ($(wc -c < "$UI_FILE" | tr -d ' ') bytes) to $SERVER"
   RESP="$(api POST /v1/control/ui \
