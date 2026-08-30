@@ -575,10 +575,10 @@ int16_t Hub75Display::trackedLabelX() const
  * and start looking like two unrelated ones. If this changes, both change.
  *
  * Not full 0,255,0, on the theory that a saturated primary blooms on a HUB75
- * panel and a 1px bar has no width to spare. NOT MEASURED -- picked on paper,
- * never yet seen on a wall, and the honest thing to say about a colour choice
- * nobody has looked at. If the bar reads muddy or the ETA reads dim against
- * the white border, this pair of numbers is the knob.
+ * panel and a bar this thin has no width to spare. Seen on the wall now and
+ * not objected to -- unlike the track beside it, which had to change, and the
+ * height, which did too. If it ever does read muddy, or dim against the white
+ * border, this is the knob.
  */
 static inline uint16_t progressGreen() { return rgb565(0, 210, 90); }
 
@@ -587,11 +587,30 @@ static inline uint16_t progressGreen() { return rgb565(0, 210, 90); }
  *
  * A bar with no track is just a line whose length means nothing on its own:
  * at a glance "short green line" and "long green line" are only comparable if
- * you can see what they are a fraction OF. Meant to read as a groove rather
- * than as a second value, which is what the low brightness is for -- and, like
- * progressGreen above, chosen on paper rather than measured on a panel.
+ * you can see what they are a fraction OF.
+ *
+ * GREY, NOT A DIM GREEN, and that distinction was learned on the wall. It was
+ * rgb565(0, 48, 18) -- the fill colour turned right down -- on the theory that
+ * a bar should be one hue at two brightnesses. On an LED panel it is not read
+ * that way at all: a faintly-lit GREEN pixel looks like a green pixel that is
+ * failing, so the unflown part of the journey read as a fault rather than as
+ * an empty track, and the first person to see it asked why the pixels to the
+ * right of the line were dim green. Grey has no such reading -- an unlit
+ * channel is just unlit -- so it recedes into the panel and the green is
+ * unambiguously the value.
  */
-static inline uint16_t progressTrack() { return rgb565(0, 48, 18); }
+static inline uint16_t progressTrack() { return rgb565(42, 42, 42); }
+
+/**
+ * Bar height in pixels.
+ *
+ * TWO, not one. A single row is the thinnest thing the panel can draw and it
+ * reads as a hairline -- ambiguous with the border a few pixels below it, and
+ * hard to judge the length of from across a room, which is the only distance
+ * this display is ever read from. Two rows is still a bar rather than a block,
+ * and it costs a row the layouts already had spare (see trackedProgressRow).
+ */
+static const int16_t kProgressBarH = 2;
 
 // A 1px white border around the whole panel, plus TRACKED in the top-right.
 //
@@ -623,23 +642,25 @@ void Hub75Display::drawTrackedChrome(const FlightInfo &f)
     drawProgressBar(f);
 }
 
-// The row the progress bar lives on: the last one inside the border.
+// The TOP row of the progress bar, which then occupies kProgressBarH rows
+// ending just above the border.
 //
 // -1 on a panel under 16px high. Those run displayTextOnlyCard, whose text
 // already fills the full inner height and overlaps the border -- a bar there
 // would be drawn straight through a line of glyphs, and on a panel that short
-// a 1px fraction is not readable anyway. Every layout above that size has a
-// gap here: the Mini card's last metric row ends at y=59 of 64, and the
-// SideBySide card centres at most three 8px lines in 32.
+// a two-pixel fraction is not readable anyway. Every layout above that size
+// has the gap: the Mini card's last metric row ends at y=59 of 64 (leaving
+// 60-62 inside the border), and the SideBySide card centres at most three 8px
+// lines in 32, ending at y=28.
 //
 // displayStackedCard is the one layout that does NOT have the gap for free --
 // its text is centred in whatever is left below a 32px logo and reaches y=62 --
-// so it subtracts this row from its own available height. See there.
+// so it subtracts these rows from its own available height. See there.
 int16_t Hub75Display::trackedProgressRow() const
 {
     if (_matrixHeight < 16)
         return -1;
-    return (int16_t)(_matrixHeight - 2);
+    return (int16_t)(_matrixHeight - 1 - kProgressBarH);
 }
 
 bool Hub75Display::hasProgressBar(const FlightInfo &f) const
@@ -648,8 +669,9 @@ bool Hub75Display::hasProgressBar(const FlightInfo &f) const
            _matrixWidth >= 8;
 }
 
-// A 1px horizontal bar: dim track for the whole journey, bright green for the
-// part already flown.
+// A 2px horizontal bar: grey track for the whole journey, green for the part
+// already flown. fillRect rather than two drawFastHLine calls -- same pixels,
+// and the height stops being something two call sites have to agree about.
 void Hub75Display::drawProgressBar(const FlightInfo &f)
 {
     if (!hasProgressBar(f))
@@ -658,15 +680,15 @@ void Hub75Display::drawProgressBar(const FlightInfo &f)
     const int16_t y = trackedProgressRow();
     const int16_t w = (int16_t)(_matrixWidth - 2);
 
-    _canvas->drawFastHLine(1, y, w, progressTrack());
+    _canvas->fillRect(1, y, w, kProgressBarH, progressTrack());
 
     // Clamping, rounding and the two never-quite-there rules all live in
-    // utils/ProgressBar.h, host-tested. They read as fussy for a 1px bar, but
-    // one of them (the upper clamp) is what keeps a malformed wire value from
-    // drawing past the end of the canvas row.
+    // utils/ProgressBar.h, host-tested. They read as fussy for a bar this
+    // size, but one of them (the upper clamp) is what keeps a malformed wire
+    // value from drawing past the end of the canvas.
     const int filled = progressFillPixels(f.progress_pct, w);
     if (filled > 0)
-        _canvas->drawFastHLine(1, y, (int16_t)filled, progressGreen());
+        _canvas->fillRect(1, y, (int16_t)filled, kProgressBarH, progressGreen());
 }
 
 /**
@@ -1079,7 +1101,7 @@ void Hub75Display::displayStackedCard(const FlightInfo &f)
     // fitting, so the text re-centres around it rather than being drawn
     // through. Costs nothing when there is no bar, and nothing on the layouts
     // that already had the gap.
-    const int barRows = hasProgressBar(f) ? 3 : 0;
+    const int barRows = hasProgressBar(f) ? kProgressBarH + 1 : 0;
     const int availH = _matrixHeight - textTop - barRows;
     const int16_t totalH = fitLines(lines, maxCols, availH);
     int16_t y = textTop + (availH - totalH) / 2;
