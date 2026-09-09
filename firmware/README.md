@@ -3,7 +3,7 @@
 This is a high-level overview of the firmware that powers TheFlightWall on ESP32.
 
 ### What it does
-- **Configures itself over the web** — a built-in `WebServer` + single-page UI (served from LittleFS) replaces the mobile app. WiFi, API keys, location, filters, layout, and schedule are all runtime settings persisted on the device.
+- **Configures itself over the web** — a built-in `WebServer` + single-page UI (served from LittleFS) replaces the mobile app. WiFi, API keys, location, filters (including an airline allow-list and an airline ignore list), layout, and schedule are all runtime settings persisted on the device. A FlightWall server's page carries the same controls minus WiFi, applied through the check-in (`core/ControlClient`), and the device page in turn drives the server's watched flights and airline names from the browser.
 - **Two tracking modes**:
   - *Area* — a selectable position source (OpenSky `states/all`, Flightradar24, or keyless adsb.lol) filtered by location/radius; live metrics come from the ADS-B state vector. A self-hosted **FlightWall server** is the fourth option and works differently: it returns a display-ready flight list directly — metrics, route, airline name and ETA already resolved, no `StateVector` involved — in one call, and falls back to adsb.lol (state-vector metrics, no route/ETA) if unreachable. See `docs/data-sources.md`.
   - *Flights* — a user list of idents/callsigns/tails looked up directly via AeroAPI; metrics from `last_position`.

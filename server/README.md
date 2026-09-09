@@ -86,6 +86,25 @@ button to remove one. It is one self-contained HTML string bundled into
 other files. On a server with no OpenSky credentials the page still loads and
 says which two environment variables are missing, rather than 404ing.
 
+**The page and the device's own LAN page carry the same controls.** Every
+setting the LAN page edits is on this page too, except WiFi and the control
+token (queued through the check-in; see `src/control.ts`), and the LAN page in
+turn carries this page's watched flights and airline names in a "FlightWall
+server" card that calls this server straight from the browser with this page's
+password. That is why `/v1/tracked*` and `/v1/airlines*` answer CORS
+preflights with a `*` origin: the credential is a bearer header the page sets
+on purpose, never a cookie, so another site gets no ambient login to borrow.
+The control routes stay same-origin only.
+
+Two small additions serve the airline ignore list on both pages:
+`GET /v1/airlines/search?q=netjets` (open, no password -- three bundled tables
+of public carrier names, no state) returns `{code, name}` hits so a person
+can type a name and get the `EJA` the device wants; and `GET /v1/flights`
+accepts `deny_airlines=` and `allow_airlines=` (comma-separated ICAO or IATA
+codes), applied before the nearest-first cut so an ignored operator costs no
+slot. The device sends its two lists on every fetch and still applies them
+itself on what comes back.
+
 Underneath, `POST /v1/tracked` with `{"number":"BA181","date":"2026-09-14"}`
 adds one journey. `GET /v1/tracked` lists them; `DELETE /v1/tracked/{id}`
 removes one. The flight is resolved to its aircraft via AeroDataBox, then
