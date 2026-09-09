@@ -186,6 +186,8 @@ private:
 
     void applyLocalIdentity(const String &callsign, FlightInfo &info);
     bool passesAirlineAllowList(const FlightInfo &info);
+    // The ignore list, checked against the same three operator fields.
+    bool isAirlineDenied(const FlightInfo &info);
 
     // Single source of truth for is_cargo/is_private plus the hideCargo and
     // airline-allow-list filters — the POSITIVE-signal design documented at its

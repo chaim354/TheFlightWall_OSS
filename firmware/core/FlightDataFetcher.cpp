@@ -155,6 +155,14 @@ bool FlightDataFetcher::passesAirlineAllowList(const FlightInfo &info)
                                    info.operator_code);
 }
 
+bool FlightDataFetcher::isAirlineDenied(const FlightInfo &info)
+{
+    return Filters::airlineDenied(g_settings.filters.airlineDenyList,
+                                  info.operator_icao,
+                                  info.operator_iata,
+                                  info.operator_code);
+}
+
 // Single source of truth for is_cargo/is_private plus the hideCargo and airline
 // allow-list filters. Shared verbatim by Area mode's consider() (per-candidate,
 // via `callsign` = s.callsign) and by applyLocalClassification (the FlightWall
@@ -190,6 +198,13 @@ bool FlightDataFetcher::classifyAndFilter(FlightInfo &info, const String &callsi
         return false;
 
     if (!passesAirlineAllowList(info))
+        return false;
+
+    // The ignore list. A PINNED flight is exempt for the same reason it is
+    // exempt from the general-aviation rule above: somebody asked for that
+    // exact flight by name, and "hide NetJets" was said about the traffic
+    // overhead, not about the one they are following.
+    if (!info.pinned && isAirlineDenied(info))
         return false;
 
     return true;
@@ -564,6 +579,8 @@ size_t FlightDataFetcher::fetchFlightsMode(std::vector<FlightInfo> &outFlights, 
         info.is_private = (info.operator_icao.length() == 0) && isTailNumber(ident.c_str());
 
         if (!passesAirlineAllowList(info))
+            continue;
+        if (isAirlineDenied(info))
             continue;
 
         // Altitude-band filter (on_ground is rarely reported here; honor it best-effort).

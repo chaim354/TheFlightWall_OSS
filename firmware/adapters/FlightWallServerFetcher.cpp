@@ -3,6 +3,7 @@
 #include "core/Settings.h"
 #include "utils/JsonOptional.h"
 #include "utils/PinSort.h"
+#include "utils/CodeList.h"
 
 // Distance arrives in the unit we requested. We request imperial, so dst is in
 // NAUTICAL MILES, while FlightInfo::distance_km is kilometres by name and is
@@ -20,6 +21,24 @@ static String optStr(JsonObject o, const char *key)
 {
     const char *v = o[key] | "";
     return String(v);
+}
+
+// Append `&<key>=A,B,C` for the entries of `list` that are plain operator codes.
+// See utils/CodeList.h for why the others are left out. The server normalises
+// again on arrival; this only keeps the URL well-formed.
+static void appendCodeList(String &url, const char *key, const std::vector<String> &list)
+{
+    String joined;
+    for (const String &c : list)
+    {
+        if (!isPlainOperatorCode(c.c_str()))
+            continue;
+        if (joined.length())
+            joined += ',';
+        joined += c;
+    }
+    if (joined.length())
+        url += String("&") + key + "=" + joined;
 }
 
 #if defined(BOARD_HAS_PSRAM)
@@ -77,6 +96,14 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         url += "&min_alt_ft=" + String(g_settings.filters.minAltitudeFt);
     if (g_settings.filters.maxAltitudeFt > 0)
         url += "&max_alt_ft=" + String(g_settings.filters.maxAltitudeFt);
+    // The airline lists too, and for the same reason as the altitude band: the
+    // server picks the nearest `max` flights, and a filter applied only after
+    // that cut leaves empty slots where the next-nearest airliner should be.
+    // applyLocalClassification still runs on what comes back -- that is the
+    // check that holds if the server ignores these, and the one that covers
+    // the adsb.lol fallback.
+    appendCodeList(url, "deny_airlines", g_settings.filters.airlineDenyList);
+    appendCodeList(url, "allow_airlines", g_settings.filters.airlineAllowList);
 
     HTTPClient http;
     // Phase timings. `HTTP -1` on its own does not say WHICH failure it was:
