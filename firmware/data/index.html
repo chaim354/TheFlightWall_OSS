@@ -172,6 +172,55 @@
     <span class="check"><input type="checkbox" id="hideCargo"><label>Hide cargo / freight flights</label></span>
     <label>Airline allow-list (comma separated ICAO/IATA, blank = all)</label>
     <input id="airlineAllowList" type="text" placeholder="UAL, DAL, AAL" />
+    <label>Airlines to ignore (comma separated ICAO/IATA)</label>
+    <input id="airlineDenyList" type="text" placeholder="EJA, NJE" />
+    <div id="alFindBox" class="hide">
+      <label>Find a code by name <span style="color:var(--muted)">(looked up on your FlightWall server)</span></label>
+      <input id="alFind" type="text" placeholder="netjets" autocomplete="off" />
+      <div id="alFindOut" class="bar" style="margin-top:6px"></div>
+    </div>
+    <small class="help">Hidden on every position source, and left out of the server's nearest-first cut so they cost no slots. Codes, not names: the 3-letter prefix of the callsign (NetJets flies as <b>EJA</b>123) or the 2-letter IATA code. Each flight in the Status list has an <b>ignore</b> button. A flight you are watching from the server is shown regardless.</small>
+  </div>
+
+  <!-- Watched flights and airline names live on the server, not the device.
+       This card calls it straight from the browser with the server page's own
+       password; the ESP32 proxies nothing. Hidden until a server URL is set. -->
+  <div id="serverCard" class="card hide">
+    <h2>FlightWall server</h2>
+    <div id="srvLock">
+      <small class="help" id="srvLockMsg"></small>
+      <label>Server page password</label>
+      <input id="srvPw" type="password" autocomplete="current-password" placeholder="flightwall123 unless it was changed" />
+      <div class="bar" style="margin-top:8px"><button type="button" onclick="srvUnlock()">Unlock</button></div>
+      <small class="help">The same password as the server's own page. Kept for this tab only.</small>
+    </div>
+    <div id="srvBody" class="hide">
+      <div class="bar" style="justify-content:space-between"><span class="pill" id="srvUrlPill"></span><button class="ghost" type="button" onclick="srvLockNow()">Lock</button></div>
+      <div class="sec">Watched flights</div>
+      <div id="trackedForm">
+        <div class="row">
+          <div><label>Flight number</label><input id="twNum" type="text" placeholder="BA181" autocapitalize="characters" autocomplete="off" /></div>
+          <div><label>Departure date</label><input id="twDate" type="date" /></div>
+          <div><label>From (optional)</label><input id="twFrom" type="text" placeholder="JFK" maxlength="3" autocapitalize="characters" /></div>
+          <div><label>To (optional)</label><input id="twTo" type="text" placeholder="LHR" maxlength="3" autocapitalize="characters" /></div>
+        </div>
+        <div class="bar" style="margin-top:8px"><button type="button" onclick="watchFlight()">Watch</button></div>
+      </div>
+      <div id="trackedBox"></div>
+      <small class="help">Followed worldwide and pinned to the top of the wall while it is in the air. The date is the one on the boarding pass, local to the departure airport. From/To settle which leg when an airline reuses the number the same day. The server's own page explains the rest.</small>
+      <div id="alNamesBox">
+        <div class="sec">Airline names</div>
+        <div id="unnamedWrap" class="hide"><small class="help">Showing on the wall with no name — click one to fill it in:</small><div id="unnamed" class="bar" style="margin:6px 0"></div></div>
+        <div class="row">
+          <div><label>Code</label><input id="alCode" type="text" placeholder="AIZ" maxlength="3" autocapitalize="characters" autocomplete="off" /></div>
+          <div><label>Shows as</label><input id="alName" type="text" placeholder="Arkia" maxlength="24" autocomplete="off" /></div>
+        </div>
+        <div class="bar" style="margin-top:8px"><button type="button" onclick="saveAirlineName()">Save name</button></div>
+        <div id="alList"></div>
+        <small class="help">A name set here beats every built-in table, on every board this server feeds. The card gives an airline 7 to 14 characters, so long names are worth shortening.</small>
+      </div>
+      <small class="help" id="srvErr" style="color:var(--warn)"></small>
+    </div>
   </div>
 
   <div class="card">
@@ -272,8 +321,9 @@
     <div class="row">
       <div><label>Max flights</label><input id="maxFlights" type="number" min="1" max="20" /></div>
       <div><label>Fetch interval (s)</label><input id="fetchIntervalSeconds" type="number" min="5" /></div>
+      <div><label>Enrichment cache (s)</label><input id="enrichmentCacheSeconds" type="number" min="0" /></div>
     </div>
-    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit. Seconds per flight now lives under Display.</small>
+    <small class="help">Max flights also sizes the logo tile cache. Fetch interval below ~20s risks hitting OpenSky's rate limit. Enrichment cache is how long a looked-up route is remembered per flight leg before it is asked for again. Seconds per flight now lives under Display.</small>
 
     <div class="sec">Light sensor (auto-off in the dark)</div>
     <span class="check" style="margin-top:0"><input type="checkbox" id="lightSensorEnabled"><label>Enable ambient light sensor</label></span>
@@ -345,7 +395,10 @@ const $ = id => document.getElementById(id);
 // misconfigured or MITM'd FlightWall server's response are not) and the
 // serverUrl field is the one setting that lets this device fetch from a
 // host the user chooses rather than a fixed, built-in one.
-function esc(s){ const d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
+// The quote pass matters now that escaped values land in ATTRIBUTES too
+// (data-ignore, data-untrack, data-alkill): textContent -> innerHTML leaves
+// both quote characters alone, and a bare quote closes the attribute early.
+function esc(s){ const d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 // A stored secret shows as an empty box that says it is set. Blank on save
 // means "leave it alone" -- the device treats an empty secret as unchanged.
 function secretField(id,isSet){
@@ -417,6 +470,9 @@ async function loadSettings(){
   $('serverUrl').value = s.api.serverUrl || '';
   $('enrichmentSource').value = s.api.enrichmentSource || 'adsbdb';
   $('enrichmentFallbackToAeroApi').checked = s.api.enrichmentFallbackToAeroApi !== false;
+  $('enrichmentCacheSeconds').value = s.api.enrichmentCacheSeconds;
+  // The server cards below talk to whatever this points at.
+  toggleServerCards(s.api.serverUrl);
 
   $('mode').value = s.tracking.mode;
   $('centerLat').value = s.tracking.centerLat;
@@ -441,6 +497,7 @@ async function loadSettings(){
   $('showGeneralAviation').checked = !!s.filters.showGeneralAviation;
   $('hideCargo').checked = !!s.filters.hideCargo;
   $('airlineAllowList').value = (s.filters.airlineAllowList || []).join(', ');
+  $('airlineDenyList').value = (s.filters.airlineDenyList || []).join(', ');
 
   $('schedEnabled').checked = !!s.schedule.enabled;
   $('dayBrightness').value = s.schedule.dayBrightness;
@@ -487,7 +544,7 @@ function collect(){
   const lines = v => v.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);
   return {
     network:{ wifiSsid:$('wifiSsid').value, ...secret('wifiPassword') },
-    api:{ openSkyClientId:$('openSkyClientId').value, ...secret('openSkyClientSecret'), ...secret('aeroApiKey'), ...secret('controlToken'), positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked },
+    api:{ openSkyClientId:$('openSkyClientId').value, ...secret('openSkyClientSecret'), ...secret('aeroApiKey'), ...secret('controlToken'), positionSource:$('positionSource').value, serverUrl:$('serverUrl').value, enrichmentSource:$('enrichmentSource').value, enrichmentFallbackToAeroApi:$('enrichmentFallbackToAeroApi').checked, enrichmentCacheSeconds:+$('enrichmentCacheSeconds').value },
     tracking:{
       mode:$('mode').value,
       centerLat:parseFloat($('centerLat').value), centerLon:parseFloat($('centerLon').value),
@@ -505,7 +562,8 @@ function collect(){
       minAltitudeFt:+$('minAltitudeFt').value, maxAltitudeFt:+$('maxAltitudeFt').value,
       excludeOnGround:$('excludeOnGround').checked,
       showGeneralAviation:$('showGeneralAviation').checked, hideCargo:$('hideCargo').checked,
-      airlineAllowList:lines($('airlineAllowList').value)
+      airlineAllowList:lines($('airlineAllowList').value),
+      airlineDenyList:lines($('airlineDenyList').value)
     },
     schedule:{
       enabled:$('schedEnabled').checked, dayBrightness:+$('dayBrightness').value, nightBrightness:+$('nightBrightness').value,
@@ -698,12 +756,203 @@ async function loadStatus(){
       // Tracked cards only. Shown next to the ETA because they are the same
       // clock -- the panel makes that point by drawing both in green.
       if('progressPct'in x)m.push(x.progressPct+'% flown');
-      return `<div class="flight"><b>${esc(x.ident)||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${esc(x.airline)}</span><br>
+      // "ignore EJA" beside the flight that is on the wall right now, which
+      // beats asking the person to work the code out from the name. Only
+      // when the firmware reported one (older builds do not).
+      const ig = x.operatorIcao ? `<button class="ghost" type="button" style="float:right;padding:2px 8px;font-size:12px" data-ignore="${esc(x.operatorIcao)}">ignore ${esc(x.operatorIcao)}</button>` : '';
+      return `<div class="flight">${ig}<b>${esc(x.ident)||'?'}</b> ${x.helicopter?'🚁':''}${x.cargo?'📦':''}${x.private?'🛩️':''} <span>${esc(x.airline)}</span><br>
         <span>${esc(x.origin)||'?'} → ${esc(x.destination)||'?'} · ${esc(x.aircraft)}</span>
         ${m.length?'<br><span>'+m.join(' · ')+'</span>':''}</div>`;
     }).join('') || '<small class="help">No flights currently displayed.</small>';
   }catch(e){}
 }
+
+// ---- Airlines to ignore: the name finder ------------------------------------
+// A person sees a NetJets Citation on the wall and knows the word "NetJets";
+// the device wants "EJA". The FlightWall server carries ~6,500 carrier names,
+// so the lookup runs there (open, no password) and only appears when a server
+// URL is configured.
+let findTimer=null;
+function findAirlines(){
+  const q=$('alFind').value.trim();
+  clearTimeout(findTimer);
+  if(q.length<2){ $('alFindOut').innerHTML=''; return; }
+  findTimer=setTimeout(async()=>{
+    try{
+      const j = await (await fetch(srvUrl+'/v1/airlines/search?q='+encodeURIComponent(q))).json();
+      const hits=(j&&j.results)||[];
+      $('alFindOut').innerHTML = hits.length
+        ? hits.map(h=>`<button class="ghost" type="button" data-ignore="${esc(h.code)}">${esc(h.code)} <span style="color:var(--muted)">${esc(h.name)}</span></button>`).join('')
+        : '<small class="help">No carrier by that name.</small>';
+    }catch(e){ $('alFindOut').innerHTML='<small class="help">Could not reach the server.</small>'; }
+  },250);
+}
+// Append without duplicating. Nothing is stored until Save, same as every
+// other field on this page, and the toast says so.
+function addIgnored(code){
+  const el=$('airlineDenyList');
+  const have=el.value.split(/[\n,]/).map(s=>s.trim().toUpperCase()).filter(Boolean);
+  if(have.indexOf(code)===-1) have.push(code);
+  el.value=have.join(', ');
+  toast(`${code} added to ignored — Save to apply`);
+}
+$('alFind').addEventListener('input', findAirlines);
+
+// ---- FlightWall server: watched flights and airline names -------------------
+// Those two live on the server, not the device. These cards call it straight
+// from the browser (an HTTP page may fetch HTTPS; the mixed-content rule
+// blocks only the other direction) with the server page's own password, kept
+// for this tab only. The ESP32 proxies nothing.
+const SRV_KEY='flightwall.serverSecret';
+let srvUrl='', srvSecret=sessionStorage.getItem(SRV_KEY)||'', srvTimer=null;
+function srvFetch(path, opts){
+  const o=Object.assign({}, opts||{});
+  o.headers=Object.assign({}, o.headers||{});
+  // Only when there is one: an empty bearer is refused as unknown rather than
+  // read as "no password", and on a server with no CONTROL_TOKEN the routes
+  // are open and need nothing.
+  if(srvSecret) o.headers.authorization='Bearer '+srvSecret;
+  return fetch(srvUrl+path, o);
+}
+function toggleServerCards(url){
+  srvUrl=(url||'').trim().replace(/\/+$/,'');
+  $('serverCard').classList.toggle('hide', !srvUrl);
+  $('alFindBox').classList.toggle('hide', !srvUrl);
+  $('srvUrlPill').textContent=srvUrl;
+  clearTimeout(srvTimer);
+  if(srvUrl) pollServer();
+}
+function srvShowLock(msg){
+  $('srvLock').classList.remove('hide'); $('srvBody').classList.add('hide');
+  $('srvLockMsg').textContent=msg||'';
+}
+function srvUnlock(){
+  srvSecret=$('srvPw').value; $('srvPw').value='';
+  if(!srvSecret) return;
+  sessionStorage.setItem(SRV_KEY, srvSecret);
+  pollServer();
+}
+function srvLockNow(){
+  srvSecret=''; sessionStorage.removeItem(SRV_KEY);
+  srvShowLock('');
+}
+// Rescheduled after each answer, like pollStatus below, so a slow server
+// cannot stack polls.
+async function pollServer(){
+  clearTimeout(srvTimer);
+  if(!srvUrl) return;
+  try{
+    const r = await srvFetch('/v1/tracked');
+    if(r.status===401||r.status===403){
+      const had=!!srvSecret;
+      srvSecret=''; sessionStorage.removeItem(SRV_KEY);
+      srvShowLock(had ? 'That password is not accepted.' : 'Enter the server page password to see and change these.');
+      return;
+    }
+    $('srvLock').classList.add('hide'); $('srvBody').classList.remove('hide');
+    $('srvErr').textContent='';
+    if(r.status===404){
+      // No OpenSky credentials on the server: the feature is off, not broken.
+      $('trackedForm').classList.add('hide');
+      $('trackedBox').innerHTML='<small class="help">Watched flights are switched off on this server (no OpenSky credentials).</small>';
+    }else{
+      const j = await r.json();
+      if(!j.ok) throw new Error(j.error||'request failed');
+      $('trackedForm').classList.remove('hide');
+      renderTracked(j.entries||[]);
+    }
+    await loadAirlineNames();
+  }catch(e){
+    $('srvErr').textContent='Could not reach the server at '+srvUrl;
+  }finally{
+    srvTimer=setTimeout(pollServer, 20000);
+  }
+}
+const STATE_TXT={airborne:'airborne',resolved:'resolved',pending:'waiting',landed:'landed',unresolved:'not found',expired:'expiring'};
+function renderTracked(entries){
+  $('trackedBox').innerHTML = entries.length ? entries.map(e=>{
+    const route = (e.origIata||e.destIata) ? `${esc(e.origIata||'???')} → ${esc(e.destIata||'???')}`
+      : ((e.wantOrigIata||e.wantDestIata) ? `asked for ${esc(e.wantOrigIata||'*')} → ${esc(e.wantDestIata||'*')}` : '');
+    const ac = [e.reg, e.aircraftModel].filter(Boolean).map(esc).join(' · ');
+    const why = (e.state==='unresolved' && e.reason) ? `<br><span>${esc(e.reason)}</span>` : '';
+    return `<div class="flight"><button class="ghost" type="button" style="float:right;padding:2px 8px;font-size:12px" data-untrack="${esc(e.id)}" data-num="${esc(e.number)}">Remove</button>
+      <b>${esc(e.number)}</b> <span class="pill">${esc(STATE_TXT[e.state]||e.state||'?')}</span> <span class="pill">${esc(e.date)}</span>${e.source==='calendar'?' <span class="pill">calendar</span>':''}
+      ${(route||ac)?`<br><span>${[route,ac].filter(Boolean).join(' · ')}</span>`:''}${why}</div>`;
+  }).join('') : '<small class="help">Nothing is being watched.</small>';
+}
+async function watchFlight(){
+  const number=$('twNum').value.trim(), date=$('twDate').value, from=$('twFrom').value.trim(), to=$('twTo').value.trim();
+  $('srvErr').textContent='';
+  if(!number||!date){ $('srvErr').textContent='Both a flight number and a date are needed.'; return; }
+  try{
+    // Validation is the server's; its reason is shown verbatim, so this page
+    // and the endpoint cannot disagree about the rules.
+    const r = await srvFetch('/v1/tracked',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number,date,from,to})});
+    const j = await r.json();
+    if(!j.ok){ $('srvErr').textContent=j.error||'Could not add that flight.'; return; }
+    $('twNum').value=''; $('twFrom').value=''; $('twTo').value='';
+  }catch(e){ $('srvErr').textContent='Could not reach the server.'; }
+  pollServer();
+}
+async function untrack(id, number){
+  if(!confirm(`Stop watching ${number}?`)) return;
+  try{
+    const j = await (await srvFetch('/v1/tracked/'+encodeURIComponent(id),{method:'DELETE'})).json();
+    if(!j.ok) $('srvErr').textContent=j.error||'Could not remove that flight.';
+  }catch(e){ $('srvErr').textContent='Could not reach the server.'; }
+  pollServer();
+}
+async function loadAirlineNames(){
+  const r = await srvFetch('/v1/airlines');
+  if(r.status===404){ $('alNamesBox').classList.add('hide'); return; }
+  if(!r.ok) return;
+  const j = await r.json();
+  if(!j.ok) return;
+  $('alNamesBox').classList.remove('hide');
+  const codes=Object.keys(j.overrides||{}).sort();
+  $('alList').innerHTML = codes.length
+    ? codes.map(c=>`<div class="flight"><button class="ghost" type="button" style="float:right;padding:2px 8px;font-size:12px" data-alkill="${esc(c)}">Remove</button><b>${esc(c)}</b> <span>→ ${esc(j.overrides[c])}</span></div>`).join('')
+    : '<small class="help">Nothing overridden yet.</small>';
+  const un=j.unnamed||[];
+  $('unnamedWrap').classList.toggle('hide', !un.length);
+  $('unnamed').innerHTML = un.map(u=>`<button class="ghost" type="button" data-alpick="${esc(u.code)}">${esc(u.code)} <span style="color:var(--muted)">${esc(u.sample)}</span></button>`).join('');
+}
+async function saveAirlineName(){
+  const code=$('alCode').value.trim(), name=$('alName').value.trim();
+  $('srvErr').textContent='';
+  if(!code||!name){ $('srvErr').textContent='Both a code and a name are needed.'; return; }
+  try{
+    const j = await (await srvFetch('/v1/airlines',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,name})})).json();
+    if(!j.ok){ $('srvErr').textContent=j.error||'Could not save that name.'; return; }
+    $('alCode').value=''; $('alName').value='';
+  }catch(e){ $('srvErr').textContent='Could not reach the server.'; }
+  loadAirlineNames().catch(()=>{});
+}
+async function delAirlineName(code){
+  if(!confirm(`Stop showing that name for ${code}?`)) return;
+  try{
+    const j = await (await srvFetch('/v1/airlines/'+encodeURIComponent(code),{method:'DELETE'})).json();
+    if(!j.ok) $('srvErr').textContent=j.error||'Could not remove that name.';
+  }catch(e){ $('srvErr').textContent='Could not reach the server.'; }
+  loadAirlineNames().catch(()=>{});
+}
+{ const d=new Date(); $('twDate').value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+$('srvPw').addEventListener('keydown', ev=>{ if(ev.key==='Enter') srvUnlock(); });
+$('twNum').addEventListener('keydown', ev=>{ if(ev.key==='Enter') watchFlight(); });
+$('alName').addEventListener('keydown', ev=>{ if(ev.key==='Enter') saveAirlineName(); });
+// One delegated handler for every button that is rendered rather than
+// written: the live list's "ignore", the finder's hits, Remove on a watched
+// flight or a name, and the unnamed-code chips. closest(), because the
+// finder's hits carry a <span> and a click on the name inside one would
+// otherwise land on nothing.
+document.addEventListener('click', ev=>{
+  const el = ev.target && ev.target.closest ? ev.target.closest('[data-ignore],[data-untrack],[data-alkill],[data-alpick]') : null;
+  if(!el) return;
+  if(el.hasAttribute('data-ignore')) addIgnored(el.getAttribute('data-ignore'));
+  else if(el.hasAttribute('data-untrack')) untrack(el.getAttribute('data-untrack'), el.getAttribute('data-num'));
+  else if(el.hasAttribute('data-alkill')) delAirlineName(el.getAttribute('data-alkill'));
+  else if(el.hasAttribute('data-alpick')){ $('alCode').value=el.getAttribute('data-alpick'); $('alName').focus(); }
+});
 
 // setInterval fired on wall-clock regardless of whether the last tick had
 // finished, so against a device that blocks for seconds several polls could be

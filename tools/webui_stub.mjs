@@ -35,6 +35,10 @@
 //   ?unlisted=1        report a value no dropdown lists for ALL FOUR fields the
 //                      firmware stores verbatim -- timezone, noFlightsMode,
 //                      panelDriverChip, panelI2sSpeedMhz
+//   ?server=URL        the FlightWall server URL /api/settings reports. Point
+//                      it at a local `npm start` (e.g. http://localhost:8787)
+//                      to drive the page's server cards -- watched flights,
+//                      airline names, the code finder -- cross-origin for real
 //
 // GET /__probe   what the harness saw: POST bodies, request counts, and the
 //                peak number of concurrent /api/status requests
@@ -101,7 +105,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PAGE = process.env.WEBUI_PAGE ?? path.join(HERE, '..', 'firmware', 'data', 'index.html');
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 8099);
 
-const knobs = { settingsDelay: 0, settingsFail: 0, statusDelay: 0, statusFail: 0, ssid: 'HomeWiFi', heap: 1, tz: '', unlisted: 0 };
+const knobs = { settingsDelay: 0, settingsFail: 0, statusDelay: 0, statusFail: 0, ssid: 'HomeWiFi', heap: 1, tz: '', unlisted: 0, server: '' };
 const probe = { posts: [], settingsGets: 0, statusGets: 0, flightGets: 0, statusInFlight: 0, statusPeak: 0 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -123,13 +127,14 @@ const SETTINGS = {
     controlTokenSet: false,
     positionSource: 'server', serverUrl: 'https://flightwall.example',
     enrichmentSource: 'adsbdb', enrichmentFallbackToAeroApi: false,
+    enrichmentCacheSeconds: 600,
   },
   tracking: {
     centerLat: 40.6413, centerLon: -73.7781, radiusKm: 10, mode: 'flights',
     autoLocateOnBoot: false, trackedFlights: [],
   },
   filters: {
-    airlineAllowList: [], excludeOnGround: true, hideCargo: false,
+    airlineAllowList: [], airlineDenyList: [], excludeOnGround: true, hideCargo: false,
     showGeneralAviation: false, minAltitudeFt: 0, maxAltitudeFt: 60000,
   },
   display: {
@@ -198,7 +203,7 @@ createServer(async (req, res) => {
   for (const k of Object.keys(knobs)) {
     if (url.searchParams.has(k)) {
       const v = url.searchParams.get(k);
-      knobs[k] = (k === 'ssid' || k === 'tz') ? v : Number(v);
+      knobs[k] = (k === 'ssid' || k === 'tz' || k === 'server') ? v : Number(v);
     }
   }
 
@@ -239,6 +244,7 @@ createServer(async (req, res) => {
       };
     }
     if (knobs.tz) out = { ...out, schedule: { ...out.schedule, timezone: knobs.tz } };
+    if (knobs.server) out = { ...out, api: { ...out.api, serverUrl: knobs.server } };
     return json(res, out);
   }
 
@@ -268,6 +274,8 @@ createServer(async (req, res) => {
         ident: 'DAL1234', airline: 'Delta', origin: 'JFK', destination: 'LAX',
         aircraft: 'B738', distanceKm: 4.2, altitudeFt: 18000, speedKt: 400,
         headingDeg: 263, verticalRateFpm: -640,
+        // What the "ignore DAL" button beside a live flight reads.
+        operatorIcao: 'DAL',
       },
       // Exercises the escaping on the flight list too -- these fields come off
       // the wire from a server the user configures.
