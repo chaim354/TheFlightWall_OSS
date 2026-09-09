@@ -43,6 +43,21 @@ void test_airline_allow()
     TEST_ASSERT_FALSE(Filters::airlineAllowed(allow, "UAL", "UA", "United"));
 }
 
+void test_airline_deny()
+{
+    std::vector<String> empty;
+    TEST_ASSERT_FALSE(Filters::airlineDenied(empty, "EJA", "1I", "NetJets"));
+
+    std::vector<String> deny;
+    deny.push_back("eja"); // lower-case on purpose -> case-insensitive match
+    deny.push_back("NJE");
+    TEST_ASSERT_TRUE(Filters::airlineDenied(deny, "EJA", "", ""));
+    TEST_ASSERT_TRUE(Filters::airlineDenied(deny, "", "NJE", ""));
+    TEST_ASSERT_FALSE(Filters::airlineDenied(deny, "DAL", "DL", "Delta"));
+    // A flight with no operator code at all never matches a listed one.
+    TEST_ASSERT_FALSE(Filters::airlineDenied(deny, "", "", ""));
+}
+
 // ---- Settings -------------------------------------------------------------
 
 void test_settings_parse()
@@ -52,7 +67,8 @@ void test_settings_parse()
         "{\"tracking\":{\"mode\":\"flights\",\"centerLat\":40.5,\"radiusKm\":25,"
         "\"trackedFlights\":[\" ual123 \",\"baw286\"]},"
         "\"display\":{\"brightness\":99,\"maxFlights\":3},"
-        "\"filters\":{\"minAltitudeFt\":1000,\"maxAltitudeFt\":40000,\"airlineAllowList\":[\"dal\"]},"
+        "\"filters\":{\"minAltitudeFt\":1000,\"maxAltitudeFt\":40000,\"airlineAllowList\":[\"dal\"],"
+        "\"airlineDenyList\":[\" eja \",\"\",\"NJE\"]},"
         "\"layout\":{\"showAltitude\":true}}";
 
     TEST_ASSERT_TRUE(g_settings.fromJson(String(json)));
@@ -71,6 +87,11 @@ void test_settings_parse()
     // Allow-list normalized to upper-case.
     TEST_ASSERT_EQUAL_INT(1, (int)g_settings.filters.airlineAllowList.size());
     TEST_ASSERT_TRUE(g_settings.filters.airlineAllowList[0] == "DAL");
+
+    // Ignore list: same trim/uppercase/drop-blanks rule as the allow-list.
+    TEST_ASSERT_EQUAL_INT(2, (int)g_settings.filters.airlineDenyList.size());
+    TEST_ASSERT_TRUE(g_settings.filters.airlineDenyList[0] == "EJA");
+    TEST_ASSERT_TRUE(g_settings.filters.airlineDenyList[1] == "NJE");
 }
 
 void test_settings_partial_update_preserves_other_fields()
@@ -97,6 +118,8 @@ void test_settings_roundtrip()
     g_settings.layout.showSpeed = true;
     g_settings.schedule.enabled = true;
     g_settings.schedule.nightStartHour = 23;
+    g_settings.filters.airlineDenyList.clear();
+    g_settings.filters.airlineDenyList.push_back("EJA");
 
     String out = g_settings.toJson();
 
@@ -111,6 +134,8 @@ void test_settings_roundtrip()
     TEST_ASSERT_TRUE(tmp.layout.showSpeed);
     TEST_ASSERT_TRUE(tmp.schedule.enabled);
     TEST_ASSERT_EQUAL(23, tmp.schedule.nightStartHour);
+    TEST_ASSERT_EQUAL_INT(1, (int)tmp.filters.airlineDenyList.size());
+    TEST_ASSERT_TRUE(tmp.filters.airlineDenyList[0] == "EJA");
 }
 
 // Every recognised positionSource string must survive fromJson -> toJson unchanged.
@@ -337,6 +362,7 @@ void setup()
     UNITY_BEGIN();
     RUN_TEST(test_altitude_band);
     RUN_TEST(test_airline_allow);
+    RUN_TEST(test_airline_deny);
     RUN_TEST(test_settings_parse);
     RUN_TEST(test_settings_partial_update_preserves_other_fields);
     RUN_TEST(test_settings_roundtrip);

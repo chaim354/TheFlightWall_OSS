@@ -104,6 +104,13 @@ struct AircraftFilters
     bool hideCargo = false;           // Hide known cargo/freight operators
     // If non-empty, only show flights whose operator (ICAO/IATA) is in this list.
     std::vector<String> airlineAllowList;
+    // If non-empty, HIDE flights whose operator (ICAO/IATA) is in this list.
+    // The allow-list says "only these"; this says "everything except these",
+    // which is the question a business-jet operator overhead actually raises
+    // (NetJets flies airline-format callsigns, EJA123, so the general-aviation
+    // rule never touches it). A pinned, server-watched flight is exempt -- see
+    // FlightDataFetcher::classifyAndFilter.
+    std::vector<String> airlineDenyList;
 };
 
 struct BrightnessSchedule

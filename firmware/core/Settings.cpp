@@ -75,6 +75,22 @@ Settings g_settings;
 
 static const char *kSettingsPath = "/settings.json";
 
+// Trim, uppercase, drop blanks -- ONE rule for every code list the UI posts
+// (tracked flights, the airline allow-list, the airline ignore list), so the
+// three cannot drift into accepting different shapes.
+static void readCodeList(JsonVariant arr, std::vector<String> &out)
+{
+    out.clear();
+    for (JsonVariant v : arr.as<JsonArray>())
+    {
+        String s = v.as<String>();
+        s.trim();
+        s.toUpperCase();
+        if (s.length())
+            out.push_back(s);
+    }
+}
+
 void Settings::seedDefaults()
 {
     // Reset to the in-class initialisers -- Settings.h is the single source of
@@ -264,6 +280,9 @@ String Settings::serialize(bool redactSecrets) const
     JsonArray allow = filt.createNestedArray("airlineAllowList");
     for (const auto &a : filters.airlineAllowList)
         allow.add(a);
+    JsonArray deny = filt.createNestedArray("airlineDenyList");
+    for (const auto &a : filters.airlineDenyList)
+        deny.add(a);
 
     JsonObject sch = doc.createNestedObject("schedule");
     sch["enabled"] = schedule.enabled;
@@ -386,17 +405,7 @@ bool Settings::fromJson(const String &in)
         if (track.containsKey("autoLocateOnBoot"))
             autoLocateOnBoot = track["autoLocateOnBoot"].as<bool>();
         if (track.containsKey("trackedFlights"))
-        {
-            trackedFlights.clear();
-            for (JsonVariant v : track["trackedFlights"].as<JsonArray>())
-            {
-                String id = v.as<String>();
-                id.trim();
-                id.toUpperCase();
-                if (id.length())
-                    trackedFlights.push_back(id);
-            }
-        }
+            readCodeList(track["trackedFlights"], trackedFlights);
     }
 
     if (doc.containsKey("display"))
@@ -448,17 +457,9 @@ bool Settings::fromJson(const String &in)
         if (filt.containsKey("hideCargo"))
             filters.hideCargo = filt["hideCargo"].as<bool>();
         if (filt.containsKey("airlineAllowList"))
-        {
-            filters.airlineAllowList.clear();
-            for (JsonVariant v : filt["airlineAllowList"].as<JsonArray>())
-            {
-                String a = v.as<String>();
-                a.trim();
-                a.toUpperCase();
-                if (a.length())
-                    filters.airlineAllowList.push_back(a);
-            }
-        }
+            readCodeList(filt["airlineAllowList"], filters.airlineAllowList);
+        if (filt.containsKey("airlineDenyList"))
+            readCodeList(filt["airlineDenyList"], filters.airlineDenyList);
     }
 
     if (doc.containsKey("schedule"))

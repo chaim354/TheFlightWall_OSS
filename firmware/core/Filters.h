@@ -38,4 +38,25 @@ namespace Filters
         }
         return false;
     }
+
+    // Empty deny-list means "hide nothing". Otherwise any of the operator codes
+    // matching (case-insensitive) hides the flight. Compares the same three
+    // fields the allow-list does, so a code that can let a flight in can also
+    // keep it out.
+    inline bool airlineDenied(const std::vector<String> &denyList,
+                              const String &operatorIcao,
+                              const String &operatorIata,
+                              const String &operatorCode)
+    {
+        for (const String &c : denyList)
+        {
+            if (c.length() == 0)
+                continue; // never let a blank entry match a blank field
+            if (c.equalsIgnoreCase(operatorIcao) ||
+                c.equalsIgnoreCase(operatorIata) ||
+                c.equalsIgnoreCase(operatorCode))
+                return true;
+        }
+        return false;
+    }
 }
