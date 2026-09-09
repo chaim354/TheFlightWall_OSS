@@ -118,6 +118,76 @@ describe('handleFlights: happy path', () => {
   });
 });
 
+describe('handleFlights: airline allow and deny lists', () => {
+  it('deny_airlines drops matching operators BEFORE the nearest-N cut', async () => {
+    vi.mocked(fetchAircraft).mockResolvedValue([
+      ac({ hex: 'a1', callsign: 'EJA123', distanceNm: 2 }),
+      ac({ hex: 'a2', callsign: 'DAL456', distanceNm: 5 }),
+      ac({ hex: 'a3', callsign: 'NJE789', distanceNm: 8 }),
+      ac({ hex: 'a4', callsign: 'UAL111', distanceNm: 12 }),
+    ]);
+    const res = await handleFlights(
+      mkUrl({ lat: LAT, lon: LON, max: '2', deny_airlines: 'eja, NJE' }),
+      mkEnv(new FakeKV()),
+      Date.now(),
+    );
+    const body = (await res.json()) as { flights: { cs: string }[] };
+    // Two slots, and both go to operators that were NOT ignored: the filter
+    // runs before the cut, so an ignored jet costs no slot.
+    expect(body.flights.map((f) => f.cs)).toEqual(['DAL456', 'UAL111']);
+  });
+
+  it('allow_airlines keeps only the listed operators', async () => {
+    vi.mocked(fetchAircraft).mockResolvedValue([
+      ac({ hex: 'a1', callsign: 'EJA123', distanceNm: 2 }),
+      ac({ hex: 'a2', callsign: 'DAL456', distanceNm: 5 }),
+      ac({ hex: 'a3', callsign: 'UAL111', distanceNm: 12 }),
+    ]);
+    const res = await handleFlights(
+      mkUrl({ lat: LAT, lon: LON, allow_airlines: 'DAL' }),
+      mkEnv(new FakeKV()),
+      Date.now(),
+    );
+    const body = (await res.json()) as { flights: { cs: string }[] };
+    expect(body.flights.map((f) => f.cs)).toEqual(['DAL456']);
+  });
+
+  it('matches the marketing IATA code a schedule row supplies, not only the callsign prefix', async () => {
+    vi.mocked(fetchAircraft).mockResolvedValue([ac({ hex: 'a1', callsign: 'EDV5075', distanceNm: 10 })]);
+    const kv = new FakeKV();
+    const now = Date.now();
+    await seedSchedule(kv, [{
+      callsign: null, carrierIata: 'DL', number: '5075',
+      origIata: 'CVG', destIata: 'LGA',
+      origLat: CVG.lat, origLon: CVG.lon, destLat: LGA.lat, destLon: LGA.lon,
+      schedArrEpoch: null, revArrEpoch: null,
+    }], now);
+    // Endeavor operates it, Delta sells it; "ignore Delta" should cover both.
+    const res = await handleFlights(mkUrl({ lat: LAT, lon: LON, deny_airlines: 'DL' }), mkEnv(kv), now);
+    const body = (await res.json()) as { flights: unknown[] };
+    expect(body.flights).toEqual([]);
+  });
+
+  it('ignores junk entries rather than rejecting the request', async () => {
+    vi.mocked(fetchAircraft).mockResolvedValue([ac({ hex: 'a1', callsign: 'EJA123', distanceNm: 2 })]);
+    const res = await handleFlights(
+      mkUrl({ lat: LAT, lon: LON, deny_airlines: ',, 99 ,&&,eja' }),
+      mkEnv(new FakeKV()),
+      Date.now(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { flights: unknown[] };
+    expect(body.flights).toEqual([]);
+  });
+
+  it('changes nothing when neither list is sent', async () => {
+    vi.mocked(fetchAircraft).mockResolvedValue([ac({ hex: 'a1', callsign: 'EJA123', distanceNm: 2 })]);
+    const res = await handleFlights(mkUrl({ lat: LAT, lon: LON }), mkEnv(new FakeKV()), Date.now());
+    const body = (await res.json()) as { flights: { cs: string }[] };
+    expect(body.flights.map((f) => f.cs)).toEqual(['EJA123']);
+  });
+});
+
 describe('handleFlights: exclude_ground and altitude band filter', () => {
   it('exclude_ground=1 removes on-ground aircraft', async () => {
     vi.mocked(fetchAircraft).mockResolvedValue([

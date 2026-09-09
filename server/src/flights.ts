@@ -10,6 +10,7 @@ import {
   type AirlineOverrideStorage,
   type UnnamedLog,
 } from './airlineOverrides';
+import { carrierIataOf, normaliseCarrierCode, operatorIcaoOf } from './carrierCode';
 import type { TrackedStorage } from './tracked/store';
 import type { Flight, ScheduleRow } from './types';
 
@@ -64,6 +65,38 @@ const json = (body: unknown, status = 200): Response =>
  */
 const parseNum = (raw: string | null): number => (raw === null || raw.trim() === '' ? NaN : Number(raw));
 
+/**
+ * A comma-separated list of operator codes from the query string, as a set.
+ *
+ * Normalised through the same rule the airline-names page uses, so "eja",
+ * " EJA " and "EJA" are one entry and "99" or "&&" are nothing at all --
+ * dropped silently rather than failing the request, because the device sends
+ * whatever the person typed, and a typo in a filter must cost a filter, never
+ * the whole wall.
+ */
+function codeSet(raw: string | null): Set<string> {
+  const out = new Set<string>();
+  for (const part of (raw ?? '').split(',')) {
+    const code = normaliseCarrierCode(part);
+    if (code) out.add(code);
+  }
+  return out;
+}
+
+/**
+ * Does this card's operator appear in `codes`, in either vocabulary?
+ *
+ * The ICAO prefix of the callsign is what the device derives and displays;
+ * the marketing IATA code comes from the schedule row, when one matched. Both
+ * are checked so that "ignore Delta" (DL) also covers an Endeavor-operated
+ * EDV5075 that the schedule says is sold as Delta.
+ */
+function operatorIn(codes: Set<string>, f: Flight): boolean {
+  const icao = operatorIcaoOf(f.cs);
+  const iata = carrierIataOf(f.flt);
+  return (icao !== null && codes.has(icao)) || (iata !== null && codes.has(iata));
+}
+
 export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<Response> {
   const q = url.searchParams;
   const lat = parseNum(q.get('lat'));
@@ -76,6 +109,8 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
   const excludeGround = q.get('exclude_ground') === '1';
   const minAlt = parseNum(q.get('min_alt_ft'));
   const maxAlt = parseNum(q.get('max_alt_ft'));
+  const deny = codeSet(q.get('deny_airlines'));
+  const allow = codeSet(q.get('allow_airlines'));
   const ts = Math.floor(nowMs / 1000);
 
   // A KV read failure degrades to "no routes", not to a failed request.
@@ -117,7 +152,15 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
     }
 
     const f = enrich(a, rows, { center: { lat, lon } }, nowMs);
-    if (f) pairs.push({ a, f });
+    if (!f) continue;
+    // The device's airline lists, applied BEFORE the nearest-N cut below, for
+    // the same reason the altitude band is: the device cannot un-pick a flight
+    // this server chose, so a list applied only on the device would leave
+    // empty slots where the next-nearest airliner should be. Pinned cards are
+    // merged after the cut and are exempt, matching the device's own rule.
+    if (deny.size > 0 && operatorIn(deny, f)) continue;
+    if (allow.size > 0 && !operatorIn(allow, f)) continue;
+    pairs.push({ a, f });
   }
 
   pairs.sort((x, y) => x.f.dst - y.f.dst);
