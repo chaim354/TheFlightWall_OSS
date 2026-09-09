@@ -841,12 +841,17 @@ function srvLockNow(){
 async function pollServer(){
   clearTimeout(srvTimer);
   if(!srvUrl) return;
+  let again=true;
   try{
     const r = await srvFetch('/v1/tracked');
     if(r.status===401||r.status===403){
       const had=!!srvSecret;
       srvSecret=''; sessionStorage.removeItem(SRV_KEY);
       srvShowLock(had ? 'That password is not accepted.' : 'Enter the server page password to see and change these.');
+      // No re-poll while locked: it would only draw a 401 every 20s and,
+      // worse, replace "not accepted" with the generic prompt before the
+      // person has read it. Unlock calls straight back in.
+      again=false;
       return;
     }
     $('srvLock').classList.add('hide'); $('srvBody').classList.remove('hide');
@@ -865,7 +870,7 @@ async function pollServer(){
   }catch(e){
     $('srvErr').textContent='Could not reach the server at '+srvUrl;
   }finally{
-    srvTimer=setTimeout(pollServer, 20000);
+    if(again) srvTimer=setTimeout(pollServer, 20000);
   }
 }
 const STATE_TXT={airborne:'airborne',resolved:'resolved',pending:'waiting',landed:'landed',unresolved:'not found',expired:'expiring'};
