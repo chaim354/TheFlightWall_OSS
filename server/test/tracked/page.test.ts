@@ -83,10 +83,42 @@ describe('the merged watched-flights and control page', () => {
     }
   });
 
+  it('offers the device-only fields the LAN page always had', () => {
+    // The whole point of the unification: which URL you open no longer
+    // decides what you are allowed to change.
+    for (const id of ['f_tracking_trackedFlights', 'f_filters_airlineAllowList', 'f_filters_airlineDenyList', 'f_api_serverUrl']) {
+      expect(trackedPage, `${id} missing`).toContain(`id="${id}"`);
+    }
+  });
+
+  it('collects list fields as arrays, so the device gets what it stores', () => {
+    // Settings::fromJson reads these three as JSON arrays; a joined string
+    // would be one entry containing commas, which matches nothing.
+    for (const id of ['f_tracking_trackedFlights', 'f_filters_airlineAllowList', 'f_filters_airlineDenyList']) {
+      expect(trackedPage, `${id} is not a list field`).toMatch(new RegExp(`id="${id}"[^>]*data-list`));
+    }
+    expect(trackedPage).toContain("hasAttribute('data-list')");
+    expect(trackedPage).toContain('Array.isArray(v)');
+  });
+
+  it('warns about the server URL, because a wrong one ends remote control', () => {
+    const card = cards(trackedPage).find((c) => c.includes('id="f_api_serverUrl"'));
+    expect(card).toBeDefined();
+    expect(card!.startsWith(' data-tier="admin"'), 'server URL is not admin-gated').toBe(true);
+    expect(card).toMatch(/ends remote control/i);
+  });
+
+  it('looks a carrier code up by name, and adds it to the ignore list', () => {
+    expect(trackedPage).toContain('/v1/airlines/search?q=');
+    expect(trackedPage).toContain('data-ignore=');
+    // The lookup box is NOT a settings field: a Save must never post it.
+    expect(trackedPage).not.toMatch(/id="f_[a-zA-Z]+_alFind"/);
+  });
+
   it('gates every action button behind the admin tier', () => {
     const adminCards = cards(trackedPage).filter((c) => c.startsWith(' data-tier="admin"'));
     const actions = [...trackedPage.matchAll(/data-action="([a-z]+)"/g)].map((m) => m[1]!);
-    expect(actions.sort()).toEqual(['restart', 'updatefw', 'updateui']);
+    expect(actions.sort()).toEqual(['clearui', 'restart', 'updatefw', 'updateui']);
     for (const a of actions) {
       expect(adminCards.some((c) => c.includes(`data-action="${a}"`)), `${a} is not admin-gated`).toBe(true);
     }

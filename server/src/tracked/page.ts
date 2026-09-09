@@ -52,8 +52,9 @@ export const trackedPage = `<!doctype html>
   .card > h2 { font-size:12px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-weight:600; }
   label { display:block; font-size:12px; color:var(--muted); margin:0 0 4px; }
   input, button { font:inherit; }
-  input, select { width:100%; padding:9px 10px; background:#0e1420; border:1px solid var(--line); border-radius:8px; color:var(--fg); font:inherit; }
-  input:focus, select:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  input, select, textarea { width:100%; padding:9px 10px; background:#0e1420; border:1px solid var(--line); border-radius:8px; color:var(--fg); font:inherit; }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  textarea { min-height:64px; resize:vertical; font-family:ui-monospace,Menlo,monospace; }
   input[type=color] { padding:4px; height:38px; }
   /* Checkboxes opt OUT of the full-width input rule above, which otherwise
      stretches the box across the card and drops its label onto the next line
@@ -304,9 +305,14 @@ export const trackedPage = `<!doctype html>
       </div>
       <div class="row">
         <div><label>Mode</label>
-          <select id="f_tracking_mode"><option value="area">Area around the centre</option><option value="flights">Watched flights only</option></select></div>
+          <select id="f_tracking_mode"><option value="area">Area around the centre</option><option value="flights">Listed flights only (the list below)</option></select></div>
       </div>
       <span class="check"><input type="checkbox" id="f_tracking_autoLocateOnBoot" /> Re-locate the centre on boot</span>
+      <label for="f_tracking_trackedFlights">Flights to list (Flights mode) — flight number, callsign or tail, one per line</label>
+      <textarea id="f_tracking_trackedFlights" data-list placeholder="UAL123, N172SP" spellcheck="false" autocapitalize="characters"></textarea>
+      <small class="help">This is the device's own list, looked up by the enrichment source on every fetch. It is
+        not the same thing as the <b>watched flights</b> at the top of this page, which the server follows
+        worldwide and pins to the wall in either mode.</small>
       <div class="row">
         <div><label>Min altitude (ft)</label><input id="f_filters_minAltitudeFt" type="number" /></div>
         <div><label>Max altitude (ft)</label><input id="f_filters_maxAltitudeFt" type="number" /></div>
@@ -314,6 +320,18 @@ export const trackedPage = `<!doctype html>
       <span class="check"><input type="checkbox" id="f_filters_excludeOnGround" /> Hide aircraft on the ground</span>
       <span class="check"><input type="checkbox" id="f_filters_showGeneralAviation" /> Show general aviation / private</span>
       <span class="check"><input type="checkbox" id="f_filters_hideCargo" /> Hide cargo / freight</span>
+      <label for="f_filters_airlineAllowList">Only these airlines (blank = all)</label>
+      <input id="f_filters_airlineAllowList" data-list placeholder="UAL, DAL, AAL" autocomplete="off" spellcheck="false" autocapitalize="characters" />
+      <label for="f_filters_airlineDenyList">Airlines to ignore</label>
+      <input id="f_filters_airlineDenyList" data-list placeholder="EJA, NJE" autocomplete="off" spellcheck="false" autocapitalize="characters" />
+      <label for="alFind">Find a code by name</label>
+      <input id="alFind" placeholder="netjets" autocomplete="off" />
+      <div id="alFindOut" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px"></div>
+      <small class="help">Codes, not names: the 3-letter one from the callsign (<code>EJA</code> — NetJets flies as
+        EJA123) or the 2-letter one from a boarding pass. Type a name above to look one up and click the
+        result to add it. Ignored operators are dropped on every position source, and the server leaves them
+        out of the nearest-first cut too, so they cost no slots. A watched flight is always shown, ignored
+        or not.</small>
       <div class="row" style="margin-top:10px"><div style="flex:0 0 auto"><button data-send="tracking,filters">Save</button></div></div>
     </div>
 
@@ -331,6 +349,10 @@ export const trackedPage = `<!doctype html>
           </select></div>
         <div><label>Fetch interval (s)</label><input id="f_display_fetchIntervalSeconds" type="number" min="5" /></div>
       </div>
+      <label>FlightWall server URL</label>
+      <input id="f_api_serverUrl" placeholder="https://flightwall.example" autocomplete="off" spellcheck="false" />
+      <small class="help" style="color:var(--warn)">The wall reaches THIS page through that URL.
+        A wrong value ends remote control until someone corrects it on the LAN page.</small>
       <label>FlightAware AeroAPI key</label>
       <input id="f_api_aeroApiKey" type="password" placeholder="leave blank to keep the stored one" />
       <div class="row">
@@ -377,6 +399,11 @@ export const trackedPage = `<!doctype html>
 
     <div class="card" data-tier="admin">
       <h2>HUB75 panel <span class="pill" data-lock>admin</span></h2>
+      <div class="row" style="margin-bottom:8px">
+        <div style="flex:0 0 auto"><button class="ghost" type="button" data-panel="64,32,1">64×32</button></div>
+        <div style="flex:0 0 auto"><button class="ghost" type="button" data-panel="64,64,1">64×64</button></div>
+        <div style="flex:0 0 auto"><button class="ghost" type="button" data-panel="64,64,2">128×64 (Mini)</button></div>
+      </div>
       <div class="row">
         <div><label>Panel width</label><input id="f_hardware_panelResX" type="number" /></div>
         <div><label>Panel height</label><input id="f_hardware_panelResY" type="number" /></div>
@@ -402,6 +429,7 @@ export const trackedPage = `<!doctype html>
       <h2>Flash &amp; restart <span class="pill" data-lock>admin</span></h2>
       <div class="row">
         <div style="flex:0 0 auto"><button class="ghost" data-action="updateui">Update web UI</button></div>
+        <div style="flex:0 0 auto"><button class="ghost" data-action="clearui">Use built-in web UI</button></div>
         <div style="flex:0 0 auto"><button class="ghost" data-action="updatefw">Update firmware</button></div>
         <div style="flex:0 0 auto"><button class="danger" data-action="restart">Restart the wall</button></div>
       </div>
@@ -432,8 +460,8 @@ export const trackedPage = `<!doctype html>
   </div>
 
   <small class="help" id="adminHint" style="text-align:center" hidden>Some settings — flashing, updates,
-    restarts, the panel and the light sensor — need the admin password. Press <b>Lock</b> and sign in
-    with it to see them.</small>
+    restarts, the panel, the light sensor wiring, the data sources and the server URL — need the admin
+    password. Press <b>Lock</b> and sign in with it to see them.</small>
 
 </div><!-- #app -->
 
@@ -950,6 +978,9 @@ function populate(settings) {
     var v = section[path[1]];
     if (v === undefined || v === null) continue;
 
+    // The three list fields arrive as arrays and are edited as text.
+    if (Array.isArray(v)) v = v.join(el.tagName === 'TEXTAREA' ? '\\n' : ', ');
+
     if (el.tagName === 'SELECT') {
       // Assigning a value a <select> has no option for silently leaves it on
       // the first option -- and the next Save would then write THAT, replacing
@@ -1007,6 +1038,12 @@ function collect(card, sections) {
     var v;
     if (el.type === 'checkbox') v = el.checked;
     else if (el.type === 'number') { if (el.value === '') continue; v = Number(el.value); if (isNaN(v)) continue; }
+    else if (el.hasAttribute('data-list')) {
+      // Comma- or newline-separated text back into the array the device
+      // stores. Settings::fromJson reads these as JSON arrays; a joined string
+      // would be one entry containing commas, which matches nothing.
+      v = el.value.split(/[\\n,]/).map(function(s){ return s.trim(); }).filter(Boolean);
+    }
     else { v = el.value; if (el.type === 'password' && v === '') continue; }
 
     set[path[0]] = set[path[0]] || {};
@@ -1045,6 +1082,7 @@ async function send(card, sectionList) {
 async function doAction(action) {
   var what = action === 'restart' ? 'Restart the wall?'
     : action === 'updatefw' ? 'Tell the wall to fetch and flash new firmware?'
+    : action === 'clearui' ? 'Tell the wall to drop the downloaded web UI and serve the one built into its firmware?'
     : 'Tell the wall to fetch a new web UI?';
   if (!confirm(what + ' It runs at the next check-in.')) return;
   var r = await ctlPost('/command', { action: action });
@@ -1127,6 +1165,15 @@ function renderStatus(st, ageMs) {
     ['Showing', (st.flightCount === undefined ? '?' : st.flightCount) + ' flights'],
     ['Brightness', st.panelOff ? 'panel off' : (st.brightness === undefined ? '?' : String(st.brightness))],
     ['Uptime', st.uptimeS === undefined ? '?' : fmtAge(st.uptimeS * 1000)],
+    // The same fields the LAN page's status pills show, so "I changed the UI
+    // and nothing happened" and "the wall says server but is on adsb.lol"
+    // are answerable from here too. Older firmware reports none of them and
+    // gets a "?" rather than an invented value.
+    ['Web UI', st.uiSource === 'server' ? 'downloaded ' + String(st.uiSha || '').slice(0, 8)
+      : (st.uiSource ? 'built-in' : '?')],
+    ['Source', st.activeSource ? st.activeSource + (st.sourceFallback ? ' (fallback)' : '')
+      : (st.activeSource === '' ? 'no fetch yet' : '?')],
+    ['Server offers', offeredFw === null ? '?' : (offeredFw || 'no firmware uploaded')],
   ];
   var html = '<div class="row">';
   for (var i = 0; i < bits.length; i++) {
@@ -1135,9 +1182,31 @@ function renderStatus(st, ageMs) {
   html += '</div>';
   if (stale) html += '<div class="line warn" style="margin-top:8px"><b>That is old.</b> Anything queued below will sit unclaimed until the wall comes back.</div>';
   if (st.note) html += '<div class="line" style="margin-top:8px">' + esc(st.note) + '</div>';
+  // The LAN page's "Check for update", answered here without asking: both
+  // halves are already known -- what the wall runs, and what the server
+  // holds. Strings differ or they do not; git revisions have no order, so
+  // "newer" is not a claim this page can make.
+  if (offeredFw && st.fwVersion && offeredFw !== st.fwVersion)
+    html += '<div class="line" style="margin-top:8px">The server offers firmware <b>' + esc(offeredFw) +
+      '</b>; the wall runs <b>' + esc(st.fwVersion) + '</b>. <b>Update firmware</b> below installs it at the next check-in.</div>';
+  if (st.uiSource === 'server' && offeredUiSha && st.uiSha && offeredUiSha !== st.uiSha)
+    html += '<div class="line" style="margin-top:8px">The web UI on the server differs from the one the wall downloaded. <b>Update web UI</b> below fetches it.</div>';
   $('wallStatus').innerHTML = html;
+}
 
+// What the server's asset manifest holds, for the status card above. null
+// until the first answer, then the version string ('' when nothing is
+// uploaded) and the UI's hash.
+var offeredFw = null;
+var offeredUiSha = '';
 
+async function loadManifest() {
+  try {
+    var res = await fetch('/v1/assets/manifest');
+    var j = await res.json();
+    offeredFw = j && j.firmware ? String(j.firmware.version || '') : '';
+    offeredUiSha = j && j.ui ? String(j.ui.sha256 || '') : '';
+  } catch (e) { /* the card keeps saying "?" until it answers */ }
 }
 
 function fmtAge(ms) {
@@ -1191,6 +1260,7 @@ async function pollCtl() {
   $('ctlNote').textContent = hasSettings ? ''
     : 'The wall has not reported its settings yet, so its controls are hidden — sending a form full of blanks would overwrite real values with guesses.';
   applyTier(!!j.adminAvailable, hasSettings);
+  await loadManifest();
   renderStatus(j.status, j.statusAgeMs);
   if (j.status && j.status.settings) populate(j.status.settings);
   renderPending(j.pending);
@@ -1240,12 +1310,65 @@ document.addEventListener('input', function(ev){
   var el = ev.target;
   if (el && el.id && el.id.indexOf('f_') === 0) touched[el.id] = 1;
 });
+// --- airline code lookup, for the ignore list ------------------------------
+//
+// A person sees a NetJets Citation overhead and knows the word "NetJets"; the
+// device wants "EJA". The server carries ~6,500 carrier names, so ask it, and
+// render each hit as a button that adds the code.
+var findTimer = null;
+function findAirlines(){
+  var q = $('alFind').value.trim();
+  clearTimeout(findTimer);
+  if (q.length < 2) { $('alFindOut').innerHTML = ''; return; }
+  findTimer = setTimeout(async function(){
+    try {
+      var res = await fetch('/v1/airlines/search?q=' + encodeURIComponent(q));
+      var j = await res.json();
+      var hits = (j && j.results) || [];
+      $('alFindOut').innerHTML = hits.length
+        ? hits.map(function(h){
+            return '<button class="ghost" type="button" data-ignore="' + esc(h.code) + '">' +
+                   esc(h.code) + ' <span style="opacity:.6">' + esc(h.name) + '</span></button>';
+          }).join('')
+        : '<small class="help">No carrier by that name.</small>';
+    } catch (e) {
+      $('alFindOut').innerHTML = '<small class="help">Could not reach the server.</small>';
+    }
+  }, 250);
+}
+
+// Append a code to the ignore list without duplicating it, and mark the field
+// touched so the next poll does not repopulate it from the wall's last report
+// before the person has pressed Save.
+function addIgnored(code){
+  var el = $('f_filters_airlineDenyList');
+  var have = el.value.split(/[\\n,]/).map(function(s){ return s.trim().toUpperCase(); }).filter(Boolean);
+  if (have.indexOf(code) === -1) have.push(code);
+  el.value = have.join(', ');
+  touched[el.id] = 1;
+}
+
+// The LAN page's panel presets. Marks the three fields touched for the same
+// reason addIgnored does.
+function setPanel(spec){
+  var p = spec.split(',');
+  var ids = ['f_hardware_panelResX', 'f_hardware_panelResY', 'f_hardware_panelChain'];
+  for (var i = 0; i < ids.length; i++) { $(ids[i]).value = p[i]; touched[ids[i]] = 1; }
+}
+$('alFind').addEventListener('input', findAirlines);
+
 document.addEventListener('click', function(ev){
   var el = ev.target;
-  if (!el || !el.getAttribute) return;
-  if (el.getAttribute('data-send')) send(el.closest('.card'), el.getAttribute('data-send'));
-  else if (el.getAttribute('data-action')) doAction(el.getAttribute('data-action'));
-  else if (el.getAttribute('data-pw')) setPassword(el.getAttribute('data-pw'));
+  if (!el || !el.closest) return;
+  // closest(), not the target itself: the lookup buttons carry a <span>, and
+  // a click on the name inside one would otherwise land on nothing.
+  var b = el.closest('[data-send],[data-action],[data-pw],[data-ignore],[data-panel]');
+  if (!b) return;
+  if (b.getAttribute('data-send')) send(b.closest('.card'), b.getAttribute('data-send'));
+  else if (b.getAttribute('data-action')) doAction(b.getAttribute('data-action'));
+  else if (b.getAttribute('data-pw')) setPassword(b.getAttribute('data-pw'));
+  else if (b.getAttribute('data-ignore')) addIgnored(b.getAttribute('data-ignore'));
+  else if (b.getAttribute('data-panel')) setPanel(b.getAttribute('data-panel'));
 });
 
 if (secret) pollCtl();
