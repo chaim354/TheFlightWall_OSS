@@ -23,8 +23,10 @@ import { dirname } from 'node:path';
  */
 
 /** Actions the device knows how to perform. Anything else is refused here
- * rather than sent for the device to puzzle over. */
-const ACTIONS = ['restart', 'updateui', 'updatefw'] as const;
+ * rather than sent for the device to puzzle over. `clearui` drops the
+ * downloaded web UI so the built-in page is served again -- the LAN page's
+ * "Use built-in" button, reachable from here. */
+const ACTIONS = ['restart', 'updateui', 'updatefw', 'clearui'] as const;
 export type ControlAction = (typeof ACTIONS)[number];
 
 export interface Command {

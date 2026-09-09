@@ -141,8 +141,9 @@ const ADMIN_KEYS: Record<string, Set<string>> = {
 };
 
 /** Actions that require the admin tier: everything that flashes, updates, or
- * takes the wall down. */
-const ADMIN_ACTIONS = new Set(['restart', 'updateui', 'updatefw']);
+ * takes the wall down -- and clearui, which changes which page the wall
+ * serves, the same class of thing as updateui. */
+const ADMIN_ACTIONS = new Set(['restart', 'updateui', 'updatefw', 'clearui']);
 
 export function actionNeedsAdmin(action: string): boolean {
   return ADMIN_ACTIONS.has(action);

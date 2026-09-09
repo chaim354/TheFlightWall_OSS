@@ -12,6 +12,7 @@ import {
   fileAirlineOverrideStorage,
   handleAirlines,
 } from './airlineOverrides';
+import { searchAirlines } from './airlines';
 import { runTrackedTick } from './tracked/tick';
 import { resolveFlight } from './tracked/resolve';
 import { fetchPosition } from './tracked/opensky';
@@ -240,6 +241,28 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   };
 }
 
+/**
+ * Routes a browser on ANOTHER origin may call.
+ *
+ * The device's own LAN page carries the watched-flights and airline-name cards
+ * and drives them against this server straight from the browser -- a page at
+ * http://flightwall.local may fetch an https:// resource; the mixed-content
+ * rule blocks only the other direction. "*" is safe here because the
+ * credential is a bearer header the page sets on purpose, never a cookie: a
+ * hostile site gets no ambient login to borrow, and can only call these with a
+ * password it already holds. The control routes are deliberately NOT listed;
+ * the LAN page applies settings directly and never queues commands.
+ */
+const BROWSER_ROUTES = ['/v1/tracked', '/v1/airlines'];
+const isBrowserRoute = (p: string): boolean =>
+  BROWSER_ROUTES.some((r) => p === r || p.startsWith(r + '/'));
+const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+  'access-control-allow-headers': 'authorization, content-type',
+  'access-control-max-age': '600',
+};
+
 async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -248,6 +271,29 @@ async function handleRequest(
   control: { storage: ControlStorage; token: string } | null,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+
+  if (isBrowserRoute(url.pathname)) {
+    // setHeader rather than a per-branch spread, so every writeHead below --
+    // 200, 401 and 404 alike -- carries them; Node merges the two. A refusal
+    // the browser cannot read is indistinguishable from a dead server, and
+    // "wrong password" versus "server down" is the whole message.
+    for (const [k, v] of Object.entries(CORS_HEADERS)) res.setHeader(k, v);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+  }
+
+  if (url.pathname === '/v1/airlines/search' && (req.method === 'GET' || req.method === 'HEAD')) {
+    // Open, unlike the rest of /v1/airlines: three bundled tables of public
+    // carrier names, no state, nothing about anyone. Gating it would mean the
+    // LAN page cannot turn "netjets" into "EJA" without the server password,
+    // for a lookup that reveals nothing.
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ ok: true, results: searchAirlines(url.searchParams.get('q') ?? '') }));
+    return;
+  }
 
   if (url.pathname === '/up') {
     // Liveness only, deliberately: it must stay 200 even when the schedule

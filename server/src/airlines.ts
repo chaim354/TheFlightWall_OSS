@@ -71,3 +71,40 @@ export function airlineName(code: string): string | null {
   const c = code.trim().toUpperCase();
   return NAMES[c] ?? DEVICE_CARRIER_NAMES[c] ?? CARRIER_NAMES[c] ?? null;
 }
+
+export interface AirlineHit {
+  code: string;
+  name: string;
+}
+
+/**
+ * Carriers whose name contains `q`, or whose code is exactly `q`.
+ *
+ * FOR THE IGNORE LIST. A person looking at a NetJets Citation overhead knows
+ * the word "NetJets" and nothing else; the device wants "EJA". Walked in the
+ * same precedence airlineName() reads, so each code appears once and is
+ * labelled with the name the wall would actually show for it rather than
+ * with whichever table happened to match -- "NetJets", not "Netjets
+ * Aviation".
+ *
+ * Two characters minimum: a single letter matches most of six thousand names
+ * and answers nothing useful. Bounded, because the page renders every hit as
+ * a button.
+ */
+export function searchAirlines(q: string, limit = 12): AirlineHit[] {
+  const needle = q.trim().toLowerCase();
+  if (needle.length < 2) return [];
+  const upper = needle.toUpperCase();
+  const seen = new Set<string>();
+  const hits: AirlineHit[] = [];
+  for (const table of [NAMES, DEVICE_CARRIER_NAMES, CARRIER_NAMES]) {
+    for (const [code, name] of Object.entries(table)) {
+      if (seen.has(code)) continue;
+      if (code !== upper && !name.toLowerCase().includes(needle)) continue;
+      seen.add(code);
+      hits.push({ code, name: airlineName(code) ?? name });
+      if (hits.length >= limit) return hits;
+    }
+  }
+  return hits;
+}

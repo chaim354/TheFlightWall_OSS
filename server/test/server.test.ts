@@ -248,6 +248,60 @@ describe('startServer', () => {
     })).status).toBe(401);
   });
 
+  it('lets a browser on another origin use the tracked and airline routes, and nothing else', async () => {
+    // The device's own LAN page carries the watched-flights and airline-name
+    // cards and calls this server straight from the browser, so those two
+    // route families answer preflights and mark every response -- refusals
+    // included, or the page could not tell "wrong password" from "server
+    // down". The control routes stay same-origin only.
+    running = await startServer({
+      port: 0,
+      aerodataboxKey: '',
+      boards: 'KJFK',
+      schedulePath: join(dir, 'schedule.json'),
+      openSkyClientId: 'id',
+      openSkyClientSecret: 'secret',
+      trackedPath: join(dir, 'tracked.json'),
+      airlinesPath: join(dir, 'airlines.json'),
+      controlToken: 'sekrit',
+      controlPath: join(dir, 'control.json'),
+      panynjIntervalMs: 0,
+      panynjPageDelayMs: 0,
+      refreshIntervalMs: 24 * 60 * 60 * 1000,
+      quietHours: null,
+      quietHoursTimeZone: 'America/New_York',
+      boardFetchDelayMs: 0,
+    });
+    const base = `http://127.0.0.1:${running.port}`;
+
+    const pre = await fetch(`${base}/v1/tracked`, { method: 'OPTIONS' });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-origin')).toBe('*');
+    expect(pre.headers.get('access-control-allow-headers')).toContain('authorization');
+    expect(pre.headers.get('access-control-allow-methods')).toContain('DELETE');
+
+    const refused = await fetch(`${base}/v1/tracked`);
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get('access-control-allow-origin')).toBe('*');
+
+    const ok = await fetch(`${base}/v1/airlines`, { headers: { authorization: 'Bearer flightwall123' } });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('access-control-allow-origin')).toBe('*');
+
+    // The name search is open: three tables of public carrier names, no state.
+    const search = await fetch(`${base}/v1/airlines/search?q=netjets`);
+    expect(search.status).toBe(200);
+    expect(search.headers.get('access-control-allow-origin')).toBe('*');
+    const body = (await search.json()) as { ok: boolean; results: { code: string; name: string }[] };
+    expect(body.ok).toBe(true);
+    expect(body.results.map((r) => r.code)).toContain('EJA');
+
+    const control = await fetch(`${base}/v1/control`, { headers: { authorization: 'Bearer flightwall123' } });
+    expect(control.status).toBe(200);
+    expect(control.headers.get('access-control-allow-origin')).toBeNull();
+    expect((await fetch(`${base}/v1/control`, { method: 'OPTIONS' })).status).not.toBe(204);
+  });
+
   it('404s the control routes when CONTROL_TOKEN is unset, and serves them when it is', async () => {
     running = await startServer({
       port: 0,

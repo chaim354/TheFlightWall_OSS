@@ -1,5 +1,38 @@
 import { describe, it, expect } from 'vitest';
-import { airlineName } from '../src/airlines';
+import { airlineName, searchAirlines } from '../src/airlines';
+
+describe('searchAirlines', () => {
+  // The case this exists for: a person sees a NetJets Citation overhead, knows
+  // the word "NetJets" and nothing else, and the ignore list wants "EJA".
+  it('finds a carrier by any part of its name, case-insensitively', () => {
+    const codes = searchAirlines('NetJets').map((h) => h.code);
+    expect(codes).toContain('EJA');
+    expect(codes).toContain('NJE');
+    expect(searchAirlines('netjets').map((h) => h.code)).toEqual(codes);
+  });
+
+  it('labels a hit with the name the wall would show, not the longest one on file', () => {
+    // The generated table says "Netjets Aviation"; the wall says "NetJets".
+    const eja = searchAirlines('netjets').find((h) => h.code === 'EJA');
+    expect(eja?.name).toBe('NetJets');
+  });
+
+  it('finds an exact code too, and returns each code once', () => {
+    const hits = searchAirlines('dal');
+    expect(hits.map((h) => h.code)).toContain('DAL');
+    expect(new Set(hits.map((h) => h.code)).size).toBe(hits.length);
+  });
+
+  it('answers nothing for a query too short to mean anything', () => {
+    expect(searchAirlines('')).toEqual([]);
+    expect(searchAirlines(' ')).toEqual([]);
+    expect(searchAirlines('a')).toEqual([]);
+  });
+
+  it('caps the result list', () => {
+    expect(searchAirlines('air', 5)).toHaveLength(5);
+  });
+});
 
 describe('airlineName', () => {
   it('resolves a marketing carrier to its display name', () => {

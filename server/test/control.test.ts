@@ -111,7 +111,9 @@ describe('adminFieldsIn', () => {
   });
 
   it('gates every action that flashes, updates or takes the wall down', () => {
-    for (const a of ['restart', 'updateui', 'updatefw']) expect(actionNeedsAdmin(a)).toBe(true);
+    // clearui too: it changes which page the wall serves, which is the same
+    // class of thing as updateui.
+    for (const a of ['restart', 'updateui', 'updatefw', 'clearui']) expect(actionNeedsAdmin(a)).toBe(true);
   });
 });
 
@@ -195,6 +197,17 @@ describe('the admin tier', () => {
       JSON.stringify({ action: 'updatefw' }), 'admin-password-1');
     expect(res.status).toBe(201);
     expect(state.queue[0]!.action).toBe('updatefw');
+  });
+
+  it('queues clearui for admin and refuses it to the ui tier', async () => {
+    // The LAN page's "Use built-in" button, from afar.
+    expect((await call('POST', '/v1/control/command', JSON.stringify({ action: 'clearui' }))).status).toBe(403);
+    expect((await call('POST', '/v1/control/password',
+      JSON.stringify({ which: 'admin', newPassword: 'admin-password-1' }))).status).toBe(200);
+    const res = await call('POST', '/v1/control/command',
+      JSON.stringify({ action: 'clearui' }), 'admin-password-1');
+    expect(res.status).toBe(201);
+    expect(state.queue.map((c) => c.action)).toEqual(['clearui']);
   });
 });
 
