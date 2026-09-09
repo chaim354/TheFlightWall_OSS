@@ -85,6 +85,15 @@ public:
         _lightDark = dark;
     }
 
+    // Read back for the remote check-in, which reports the same values
+    // /api/status serves so the remote page and the LAN page describe the
+    // wall identically rather than approximately.
+    int lightLevel() const { return _lightLevel; }
+    bool lightDark() const { return _lightDark; }
+    const String &activeSource() const { return _activeSource; }
+    bool sourceFallback() const { return _sourceFallback; }
+    bool serverStale() const { return _serverStale; }
+
     // Why the last over-the-air update did not happen. Empty when none has
     // been attempted since boot, or when one succeeded (success reboots, so it
     // is never observed).

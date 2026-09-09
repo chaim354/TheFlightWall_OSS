@@ -356,6 +356,12 @@ String WebConfigServer::buildFlightsJson() const
                            : (f.operator_iata.length() ? f.operator_iata
                               : (f.operator_icao.length() ? f.operator_icao : f.operator_code));
             o["aircraft"] = f.aircraft_code;
+            // The code the ignore list wants, separately from the display
+            // name above, so the page can offer "ignore EJA" beside a flight
+            // that is on the wall right now rather than asking the person to
+            // work the code out from the name.
+            if (f.operator_icao.length())
+                o["operatorIcao"] = f.operator_icao;
             // Reading code_icao alone blanked this list for any source that supplies only
             // IATA — which is every flight under Flightradar24, whose feed carries IATA
             // origin/destination inline and no ICAO at all. The UI renders these as

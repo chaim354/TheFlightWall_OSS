@@ -33,6 +33,7 @@ namespace ControlClient
         bool settingsChanged = false;
         bool restart = false;
         bool updateUi = false;
+        bool clearUi = false;     // drop the downloaded web UI; serve the built-in page
         bool updateFirmware = false;
         String error;
     };

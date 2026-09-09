@@ -747,6 +747,16 @@ static void controlCheckIn()
     // wall-mounted board with no cable in it.
     doc["otaError"] = g_web.lastOtaError();
     doc["resetReason"] = resetReasonText();
+    // Which page is being served and which source actually answered -- the
+    // two questions ("I changed the UI and nothing happened", "it says server
+    // but shows no routes") that the remote page could not answer before.
+    doc["uiSource"] = AssetUpdater::servingCachedUi() ? "server" : "builtin";
+    doc["uiSha"] = AssetUpdater::cachedUiSha();
+    doc["activeSource"] = g_web.activeSource();
+    doc["sourceFallback"] = g_web.sourceFallback();
+    doc["serverStale"] = g_web.serverStale();
+    doc["lightLevel"] = g_web.lightLevel();
+    doc["lightDark"] = g_web.lightDark();
 
     // The device's own settings, redacted exactly as /api/settings redacts them.
     //
@@ -777,6 +787,18 @@ static void controlCheckIn()
     if (o.settingsChanged)
         g_controlSettingsChanged = true;
 
+    // Clear before update: a batch that says "back to built-in, then fetch
+    // again" is a re-download, which is the only reading of that pair that
+    // does anything.
+    if (o.clearUi)
+    {
+        // The LAN page's "Use built-in" button, from afar: the escape hatch
+        // for a downloaded page that is valid, current, and bad.
+        const bool had = AssetUpdater::servingCachedUi();
+        AssetUpdater::clearCachedUi();
+        Serial.printf("[control] ui cache %s\n",
+                      had ? "cleared; serving the built-in page" : "was already the built-in page");
+    }
     // Updates before restart, and restart last: a batch containing both should
     // do the work and THEN reboot, not reboot away from it.
     if (o.updateUi)

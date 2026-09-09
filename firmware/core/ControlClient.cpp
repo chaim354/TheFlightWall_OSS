@@ -144,6 +144,8 @@ namespace ControlClient
                     o.restart = true;
                 else if (action == "updateui")
                     o.updateUi = true;
+                else if (action == "clearui")
+                    o.clearUi = true;
                 else if (action == "updatefw")
                     o.updateFirmware = true;
                 else
