@@ -14,6 +14,7 @@
     "gen:airports": "node tools/gen-airports.js",
     "gen:airlines": "node tools/gen-airlines.js",
     "gen:device-airlines": "node tools/gen-device-airlines.js",
+    "gen:places": "node tools/gen-places.js",
     "build": "esbuild src/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.js",
     "start": "node dist/server.js"
   },
