@@ -170,9 +170,13 @@ export const trackedPage = `<!doctype html>
          already sets display:block and the font size, so the two style
          identically -- this is a validity fix, not a visual choice. -->
     <div class="help"><b>When it reaches the wall.</b> At the flight's <b>scheduled departure</b>,
-      within one five-minute cycle — not at wheels-up. It is then pinned above the overhead traffic
-      until it lands. Three things follow from that, and they are worth knowing before you read the
-      card:
+      within about a minute — not at wheels-up. Add one that is already in the air and it is looked
+      up the moment you press Add, so it is on the wall at the wall's next fetch, normally inside
+      half a minute. It is then pinned above the overhead traffic until it lands, and holds the
+      wall for fifteen seconds each time round: the card with <b>miles flown</b>, then
+      <b>departed / arriving</b>, then the <b>town it is flying over</b> (left out over open water).
+      Three things follow from pinning at the scheduled time, and they are worth knowing before
+      you read the card:
       <ul>
         <li>A <b>delayed</b> flight is pinned anyway, while it is still at the gate. Until ADS-B
           picks the aircraft up, its position is a projection along the great-circle route — so the
