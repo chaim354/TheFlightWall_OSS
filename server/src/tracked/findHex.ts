@@ -28,9 +28,10 @@ import { deadReckonAt } from './deadReckon';
  * Search radius around the estimated position.
  *
  * The estimate comes from the SCHEDULE, so it is wrong by however late the
- * flight actually is, and the tick is 300s so it can be five minutes stale on
- * top of that. At ~450kt five minutes is ~37nm, and a modest departure delay
- * costs more again -- 120nm absorbs both without widening to the point where
+ * flight actually is. The tick that runs the sweep is 60s, so staleness on top
+ * of that is ~8nm at ~450kt; it was ~37nm when the tick was 300s, and the
+ * radius was sized then. A modest departure delay costs far more than either
+ * -- 120nm absorbs it without widening to the point where
  * unrelated same-numbered traffic starts appearing. Ambiguity is refused
  * rather than guessed at (see matchByFlightNumber), so a wider net would trade
  * finds for refusals, not for wrong answers.

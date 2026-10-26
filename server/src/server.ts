@@ -269,6 +269,13 @@ async function handleRequest(
   env: Env,
   assetsRoot: string,
   control: { storage: ControlStorage; token: string } | null,
+  /**
+   * Run a tracked pass now. Called when a POST adds an entry, so the new
+   * flight is resolved (and, if it is already in the air, swept and polled)
+   * within seconds rather than at the next tick. Optional so a caller with no
+   * tick to kick -- a test, say -- need not invent one.
+   */
+  kickTracked?: () => void,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
@@ -512,6 +519,9 @@ async function handleRequest(
       env.TRACKED,
       Date.now(),
     );
+    // 201 only: a 200 is an idempotent re-POST of an entry already being
+    // worked on, and an error stored nothing.
+    if (req.method === 'POST' && response.status === 201) kickTracked?.();
     const body = await response.text();
     res.writeHead(response.status, { 'content-type': response.headers.get('content-type') ?? 'application/json' });
     res.end(body);
@@ -739,31 +749,31 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
     ? setInterval(() => void runPanynj(), config.panynjIntervalMs)
     : undefined;
 
-  // 300s. MEASURED: a single-icao24 query costs FOUR credits against an
-  // authenticated allowance of 4000/day, so the real budget is 1000 queries a
-  // day. At 300s an eight-hour flight costs 96 of them, so roughly TEN can be
-  // tracked concurrently (960) -- comfortably more than the 20-entry cap would
-  // ever have airborne at once. The earlier 60s and 120s values supported two
-  // and four respectively; 300s is what makes the entry cap, rather than the
-  // OpenSky budget, the binding constraint, which is the right way round.
+  // 60s, and it no longer paces the OpenSky spend -- POLL_INTERVAL_MS in
+  // tick.ts does, per entry, at the same 300s this tick used to be. MEASURED: a
+  // single-icao24 query costs FOUR credits against an authenticated allowance
+  // of 4000/day, so the real budget is 1000 queries a day; at one poll per
+  // entry per 300s an eight-hour flight costs 96 of them, so roughly TEN can be
+  // tracked concurrently (960). That arithmetic is unchanged.
   //
-  // The cost is position freshness: at ~500kt an aircraft moves ~40nm between
-  // polls. That is immaterial here because the panel renders a CARD -- ident,
-  // route, ETA -- not a moving map, and the schedule fields that drive the card
-  // do not change between polls at all. Revisit only if this ever feeds
-  // something positional.
+  // What the fast tick buys is everything that ISN'T a poll. This interval also
+  // paced resolution and every state change, so a flight added while in the air
+  // waited up to five minutes to be looked up and up to five more to be
+  // declared airborne -- on top of the wall's own fetch interval -- and a
+  // flight added in advance reached the wall up to five minutes after its
+  // scheduled departure. Now: a POST kicks a pass immediately (see
+  // kickTracked), the pass chains resolve -> sweep -> first poll (see
+  // runTrackedTick), and a departure is noticed within a minute.
   //
-  // Note this interval also paces RESOLUTION, so a newly added entry waits up
-  // to 5 minutes before its aircraft is looked up. Acceptable: entries are
-  // added hours ahead of departure, not seconds.
+  // A tick with nothing to do costs one local file read and no network.
   // See docs/superpowers/audits/2026-08-24-tracked-flights-measurements.md.
-  const TRACKED_TICK_MS = 300_000;
+  const TRACKED_TICK_MS = 60_000;
   let resolvesUsedToday = 0;
   let resolveDay = new Date().getUTCDate();
 
   /**
    * Calendar sync cadence. Hourly, and NOT an env var: the tick above already
-   * quantises this to multiples of 300s, so a knob here would mostly be a way
+   * quantises this to multiples of 60s, so a knob here would mostly be a way
    * to set a value that silently rounds to something else. A published feed
    * changes when a person books a flight, which is not an hourly event.
    */
@@ -830,11 +840,25 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
    * FZ965; in both cases decideTracked was already returning the right action
    * and nothing had run it. It also means a redeploy picks the calendar up at
    * once rather than an hour later.
+   *
+   * ONE AT A TIME. A request while a pass is running is remembered and run
+   * once the current one finishes, never alongside it: two concurrent passes
+   * would both spend the same poll, and both write the store. Coalesced rather
+   * than queued -- however many requests arrive during a pass, one more pass
+   * covers all of them, because each pass reads the whole store afresh. This
+   * matters now that a POST kicks a pass (kickTracked) on top of the 60s timer.
    */
+  let trackedRunning = false;
+  let trackedRerun = false;
   const trackedPass = (): void => {
     // Also what narrows trackedStorage for the closure below; the inline
     // version this replaced got that from the ternary it lived in.
     if (!trackedStorage) return;
+    if (trackedRunning) {
+      trackedRerun = true;
+      return;
+    }
+    trackedRunning = true;
         const today = new Date().getUTCDate();
         if (today !== resolveDay) {
           resolveDay = today;
@@ -842,7 +866,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
         }
         const nowMs = Date.now();
         // Sync BEFORE the tick, so a flight the calendar just added is
-        // resolved in this same pass rather than waiting out another 300s.
+        // resolved in this same pass rather than waiting out another tick.
         void syncCalendar(trackedStorage, nowMs)
           .then(() =>
             runTrackedTick(trackedStorage, nowMs, {
@@ -872,7 +896,14 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
               },
             }),
           )
-          .catch((e) => console.error('tracked tick failed:', e instanceof Error ? e.message : String(e)));
+          .catch((e) => console.error('tracked tick failed:', e instanceof Error ? e.message : String(e)))
+          .finally(() => {
+            trackedRunning = false;
+            if (trackedRerun) {
+              trackedRerun = false;
+              trackedPass();
+            }
+          });
   };
 
   trackedPass(); // once at boot, like refreshTick; no-ops without storage
@@ -880,7 +911,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
-      handleRequest(req, res, env, config.assetsPath ?? DEFAULT_ASSETS_PATH, control).catch((err) => {
+      handleRequest(req, res, env, config.assetsPath ?? DEFAULT_ASSETS_PATH, control, trackedPass).catch((err) => {
         console.error('request handler error:', err instanceof Error ? err.message : String(err));
         if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
         res.end('internal error');

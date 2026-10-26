@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runTrackedTick, DAILY_RESOLVE_CEILING, MAX_AIRBORNE_POLLS } from '../../src/tracked/tick';
+import {
+  runTrackedTick,
+  reconcile,
+  DAILY_RESOLVE_CEILING,
+  MAX_AIRBORNE_POLLS,
+  POLL_INTERVAL_MS,
+} from '../../src/tracked/tick';
 import type { TrackedEntry } from '../../src/tracked/types';
 import type { TrackedStorage } from '../../src/tracked/store';
 
@@ -263,14 +269,27 @@ describe('performing the ADS-B hex sweep', () => {
     const findHex = vi.fn().mockResolvedValue({
       hex: 'a23138', callsign: 'ENY3964', registration: 'N240NN', typeIcao: 'E75L',
     });
+    const position = vi.fn().mockResolvedValue({
+      ok: true,
+      position: {
+        lat: 41.5, lon: -80.1, onGround: false,
+        altitudeFt: 31000, groundspeedKt: 440, headingDeg: 270, verticalRateFpm: 0,
+      },
+    });
     await runTrackedTick(store, dep + 5 * 60_000, {
-      resolve: vi.fn(), position: vi.fn(), resolvesUsedToday: 0, findHex,
+      resolve: vi.fn(), position, resolvesUsedToday: 0, findHex,
     });
     const e = store.current[0]!;
     expect(e.icao24).toBe('a23138');
     expect(e.callsign).toBe('ENY3964');
     expect(e.reg).toBe('N240NN');
     expect(e.aircraftType).toBe('E75L');
+    // And polled in the same pass, rather than a tick later: the hex is the
+    // only thing that was standing between this flight and a card.
+    expect(e.state).toBe('airborne');
+    expect(position).toHaveBeenCalledWith('a23138');
+    expect(e.lastLat).toBe(41.5);
+    expect(e.lastPollAtMs).toBe(dep + 5 * 60_000);
   });
 
   it('leaves the entry alone when nothing is broadcasting that number', async () => {
@@ -299,5 +318,146 @@ describe('performing the ADS-B hex sweep', () => {
       findHex: vi.fn().mockRejectedValue(new Error('adsb.lol down')),
     });
     expect(store.current).toHaveLength(2);
+  });
+});
+
+describe('a flight added while it is already in the air', () => {
+  // The latency this file was changed for: pending -> resolved -> airborne ->
+  // polled used to take one 300s tick per arrow.
+  const dep = DAY_START + 18 * 3600_000;
+  const now = dep + 40 * 60_000;
+  const inTheAir = {
+    ...resolved,
+    schedDepEpoch: dep / 1000,
+    schedArrEpoch: (dep + 7 * 3600_000) / 1000,
+  };
+  const fix = {
+    ok: true,
+    position: {
+      lat: 44.1, lon: -60.2, onGround: false,
+      altitudeFt: 36000, groundspeedKt: 480, headingDeg: 60, verticalRateFpm: 0,
+    },
+  };
+
+  it('resolves, goes airborne and takes its first fix in ONE pass', async () => {
+    const store = memStore([entry()]);
+    const resolveFn = vi.fn().mockResolvedValue({ ok: true, flight: inTheAir });
+    const position = vi.fn().mockResolvedValue(fix);
+    await runTrackedTick(store, now, { resolve: resolveFn, position, resolvesUsedToday: 0 });
+    const e = store.current[0]!;
+    expect(resolveFn).toHaveBeenCalledTimes(1);
+    expect(e.state).toBe('airborne');
+    expect(position).toHaveBeenCalledWith('4008f3');
+    expect(e.lastLat).toBe(44.1);
+    expect(e.lastPosAtMs).toBe(now);
+  });
+
+  it('never chains a resolve into a second resolve', async () => {
+    // Resolved inside the hour before departure: the lifecycle would ask for
+    // the re-resolve next. That stays a tick away -- chaining exists to save
+    // latency, not to spend AeroDataBox calls faster.
+    const soon = DAY_START + 18 * 3600_000 - 30 * 60_000;
+    const store = memStore([entry()]);
+    const resolveFn = vi.fn().mockResolvedValue({ ok: true, flight: resolved });
+    await runTrackedTick(store, soon, { resolve: resolveFn, position: vi.fn(), resolvesUsedToday: 0 });
+    expect(resolveFn).toHaveBeenCalledTimes(1);
+    expect(store.current[0]!.state).toBe('resolved');
+  });
+});
+
+describe('poll pacing on a fast tick', () => {
+  const dep = DAY_START + 18 * 3600_000;
+  const airborne = (over: Partial<TrackedEntry> = {}): TrackedEntry =>
+    entry({
+      ...resolved,
+      state: 'airborne',
+      reresolved: true,
+      schedDepEpoch: dep / 1000,
+      schedArrEpoch: (dep + 7 * 3600_000) / 1000,
+      ...over,
+    });
+  const fix = {
+    ok: true,
+    position: {
+      lat: 44.1, lon: -60.2, onGround: false,
+      altitudeFt: 36000, groundspeedKt: 480, headingDeg: 60, verticalRateFpm: 0,
+    },
+  };
+
+  it('polls an entry at most once per POLL_INTERVAL_MS however often the tick runs', async () => {
+    const store = memStore([airborne()]);
+    const position = vi.fn().mockResolvedValue(fix);
+    const t0 = dep + 60 * 60_000;
+    for (let i = 0; i < 5; i++) {
+      await runTrackedTick(store, t0 + i * 60_000, { resolve: vi.fn(), position, resolvesUsedToday: 0 });
+    }
+    expect(position).toHaveBeenCalledTimes(1);
+    await runTrackedTick(store, t0 + POLL_INTERVAL_MS, { resolve: vi.fn(), position, resolvesUsedToday: 0 });
+    expect(position).toHaveBeenCalledTimes(2);
+  });
+
+  it('paces on the last ASK, not the last fix, so an ocean gap costs no more', async () => {
+    const store = memStore([airborne()]);
+    const position = vi.fn().mockResolvedValue({ ok: true, position: null });
+    const t0 = dep + 60 * 60_000;
+    for (let i = 0; i < 5; i++) {
+      await runTrackedTick(store, t0 + i * 60_000, { resolve: vi.fn(), position, resolvesUsedToday: 0 });
+    }
+    expect(position).toHaveBeenCalledTimes(1);
+    expect(store.current[0]!.lastPollAtMs).toBe(t0);
+  });
+
+  it('counts polls already made this window against MAX_AIRBORNE_POLLS', async () => {
+    // Ten polled a minute ago and two more never polled: the two must wait,
+    // or a 60s tick would allow five times the old OpenSky spend.
+    const t0 = dep + 60 * 60_000;
+    const recent = Array.from({ length: MAX_AIRBORNE_POLLS }, (_, i) =>
+      airborne({ id: `r${i}`, icao24: `aa000${i}`, lastPollAtMs: t0 - 60_000 }),
+    );
+    const fresh = [airborne({ id: 'n1', icao24: 'bb0001' }), airborne({ id: 'n2', icao24: 'bb0002' })];
+    const store = memStore([...recent, ...fresh]);
+    const position = vi.fn().mockResolvedValue(fix);
+    await runTrackedTick(store, t0, { resolve: vi.fn(), position, resolvesUsedToday: 0 });
+    expect(position).not.toHaveBeenCalled();
+  });
+});
+
+describe('reconcile', () => {
+  // The store is read whole and written whole, and a tick holds its copy
+  // across network calls. These are the writes that land in that gap.
+  const a = entry({ id: 'a' });
+  const b = entry({ id: 'b' });
+
+  it('keeps an entry POSTed while the tick was running', () => {
+    const added = entry({ id: 'new' });
+    const out = reconcile([a, b, added], [a, b], [{ ...a, state: 'resolved' }, b]);
+    expect(out.map((e) => e.id)).toEqual(['a', 'b', 'new']);
+    expect(out[0]!.state).toBe('resolved');
+  });
+
+  it('does not resurrect an entry DELETEd while the tick was running', () => {
+    const out = reconcile([a], [a, b], [a, { ...b, state: 'resolved' }]);
+    expect(out.map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('still drops what the tick itself dropped', () => {
+    const out = reconcile([a, b], [a, b], [b]);
+    expect(out.map((e) => e.id)).toEqual(['b']);
+  });
+
+  it('keeps an entry added during a real tick, end to end', async () => {
+    const box = { current: [entry()] as TrackedEntry[] };
+    const store = {
+      async read() { return box.current; },
+      async write(e: TrackedEntry[]) { box.current = e; },
+    };
+    const resolveFn = vi.fn().mockImplementation(async () => {
+      // A POST lands while AeroDataBox is being asked.
+      box.current = [...box.current, entry({ id: 'posted', number: 'DL1' })];
+      return { ok: true, flight: resolved };
+    });
+    await runTrackedTick(store, DAY_START, { resolve: resolveFn, position: vi.fn(), resolvesUsedToday: 0 });
+    expect(box.current.map((e) => e.id)).toEqual(['e1', 'posted']);
+    expect(box.current[0]!.state).toBe('resolved');
   });
 });

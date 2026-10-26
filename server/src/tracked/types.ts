@@ -139,4 +139,16 @@ export interface TrackedEntry {
   lastGroundspeedKt: number | null;
   lastHeadingDeg: number | null;
   lastVerticalRateFpm: number | null;
+  /**
+   * When OpenSky was last ASKED about this entry, answered or not.
+   *
+   * Not lastPosAtMs: an ocean gap answers with no position, so a throttle
+   * keyed on the last fix would re-poll every tick for the length of the gap
+   * and spend five times the credits on exactly the stretch where there is
+   * nothing to find. See POLL_INTERVAL_MS in tick.ts.
+   *
+   * Optional, and absent reads as "never polled": every entry stored before
+   * the field existed is simply due on the next tick.
+   */
+  lastPollAtMs?: number | null;
 }
