@@ -210,6 +210,13 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         // gap in the data -- see FlightInfo::progress_pct.
         info.progress_pct = optNum(f, "prog");
 
+        // The tracked card's other two views. Pinned cards only, like prog.
+        info.flown_mi = optNum(f, "flown_mi");
+        info.dep_text = optStr(f, "dep_text");
+        info.over_place = optStr(f, "over");
+        info.over_region = optStr(f, "over_rgn");
+        info.over_near = f["over_near"] | false;
+
         info.pinned = f["pin"] | false;
         // Absent means live: only the tracked path ever sets this, so an
         // ordinary area card must not be labelled an estimate by omission.

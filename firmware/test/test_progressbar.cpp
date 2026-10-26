@@ -10,8 +10,8 @@ static int failures = 0;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); failures++; } } while (0)
 
 int main() {
-    // The real geometry: a 128px panel, 1px border each side.
-    const int W = 126;
+    // The real geometry: a 128px panel, the bar edge to edge.
+    const int W = 128;
 
     // The two ends are exact, and they are the only values allowed to be
     // exact. Empty means "has not left"; full means "should be down".
@@ -19,11 +19,12 @@ int main() {
     CHECK(progressFillPixels(100.0, W) == W);
 
     // Ordinary readings scale linearly and round to the nearest pixel.
-    CHECK(progressFillPixels(50.0, W) == 63);
-    CHECK(progressFillPixels(25.0, W) == 32); // 31.5 rounds up
-    CHECK(progressFillPixels(10.0, W) == 13); // 12.6 rounds up
+    CHECK(progressFillPixels(50.0, W) == 64);
+    CHECK(progressFillPixels(25.0, W) == 32);
+    CHECK(progressFillPixels(10.0, W) == 13); // 12.8 rounds up
+    CHECK(progressFillPixels(30.0, W) == 38); // 38.4 rounds down
 
-    // JUST DEPARTED must not read as not-departed. 0.2% of 126 is 0.25px,
+    // JUST DEPARTED must not read as not-departed. 0.2% of 128 is 0.26px,
     // which rounds to nothing -- so the first half hour of a long-haul flight
     // would be indistinguishable from a card carrying no progress at all.
     CHECK(progressFillPixels(0.2, W) == 1);

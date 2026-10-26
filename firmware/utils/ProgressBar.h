@@ -33,13 +33,13 @@ inline int progressFillPixels(double pct, int trackWidth)
     int filled = (int)((trackWidth * pct) / 100.0 + 0.5);
 
     // A flight that has genuinely left must never draw as an empty bar. On a
-    // 126px track anything under 0.4% rounds to nothing, so the first half
+    // 128px track anything under 0.4% rounds to nothing, so the first half
     // hour of a 14-hour flight would render identically to "no progress data
     // at all" -- which is the single distinction this bar exists to make.
     if (filled < 1)
         filled = 1;
     // And one that is under way must not draw as complete: rounding at
-    // 99.6% of a 126px track reaches 126, which reads as landed while the
+    // 99.7% of a 128px track reaches 128, which reads as landed while the
     // aeroplane still has minutes to run.
     if (filled >= trackWidth)
         filled = trackWidth - 1;

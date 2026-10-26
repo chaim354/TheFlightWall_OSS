@@ -78,4 +78,22 @@ struct FlightInfo
     // same source so the bar and the words can never contradict each other,
     // which is also why the panel renders them in the same colour.
     double progress_pct = NAN;
+
+    // The rest of a tracked card's three views (see Hub75Display's
+    // TrackedView). Server-composed like eta_text, and absent -- NAN / empty --
+    // on every area card and on a server that predates them, in which case the
+    // card simply has fewer views.
+    //
+    // Statute miles from the origin airport to the current position, great
+    // circle. Shown where the flight number would be. POSITIONAL, unlike
+    // progress_pct, so a late departure makes the two disagree: the bar runs
+    // ahead on the timetable while this reads where the aircraft really is.
+    double flown_mi = NAN;
+    // Time since SCHEDULED departure, pre-formatted: "25m", "2h10".
+    String dep_text;
+    // The town under the aircraft, its state/province or country, and whether
+    // it is merely NEAR rather than under (the server decides the threshold).
+    String over_place;
+    String over_region;
+    bool over_near = false;
 };

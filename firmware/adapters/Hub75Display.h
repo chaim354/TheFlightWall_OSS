@@ -4,6 +4,7 @@
 #include <vector>
 #include "interfaces/BaseDisplay.h"
 #include "utils/LruCache.h"
+#include "utils/TrackedViews.h"
 
 class MatrixPanel_I2S_DMA;
 class GFXcanvas16;
@@ -77,6 +78,9 @@ private:
     uint32_t _dataVersion = 1;
     uint32_t _lastComposedVersion = 0;
     size_t _lastComposedIndex = SIZE_MAX;
+    // A tracked card changes view while its index and the data stay put, so
+    // the view is part of what was composed. Normal for every other card.
+    TrackedView _lastComposedView = TrackedView::Normal;
 
     // For the animated no-flights modes (clock/funfact/clockfact), the displayed
     // index stays SIZE_MAX so the dirty-check above would never recompose. We
@@ -132,25 +136,17 @@ private:
     void drawTextLine(int16_t x, int16_t y, const String &text, uint16_t color);
     String truncateToColumns(const String &text, int maxColumns);
 
-    // The tracked-flight marker: a 1px white border round the whole panel with
-    // TRACKED in the top-right. The length is stated rather than measured
-    // because it is needed for LAYOUT, in displayMiniCard, before anything is
-    // drawn -- sizeof-1 keeps the two from drifting if the word ever changes.
-    static constexpr const char *TRACKED_LABEL = "TRACKED";
-    static constexpr size_t TRACKED_LABEL_LEN = sizeof("TRACKED") - 1;
-    // Which layout displayFlightCard will pick, as a predicate: the tracked
-    // label needs the answer BEFORE the card is drawn, and a second copy of
-    // the test is how the label ends up on a card that never reserved room.
+    // Which layout displayFlightCard will pick, as a predicate. Used by the
+    // dispatcher and nowhere else now that no tracked label needs reserving
+    // room for, but kept as one named test so a second copy cannot drift.
     bool usesMiniCard() const { return _matrixHeight >= 48 && _matrixWidth >= 96; }
-    int16_t trackedLabelX() const;
     // The row a tracked card's progress bar occupies, or -1 when this panel
-    // has no room for one. Public to the class rather than local to
-    // drawTrackedChrome because displayStackedCard has to reserve the row
-    // BEFORE it lays out its text -- the same reason trackedLabelX exists.
+    // has no room for one. Public to the class because displayStackedCard has
+    // to reserve the row BEFORE it lays out its text.
     int16_t trackedProgressRow() const;
     // Whether THIS card will actually get a bar: a row to draw it on, and a
     // progress value to draw. One predicate, so the layout that reserves the
-    // row and the chrome that fills it cannot disagree about whether it is
+    // row and the code that fills it cannot disagree about whether it is
     // there -- a reserved-but-unused row is a wasted pixel, and the reverse is
     // a bar drawn through the bottom line of text.
     bool hasProgressBar(const FlightInfo &f) const;
@@ -158,13 +154,19 @@ private:
     // The ETA's colour on this card: progress green when a bar is under it,
     // the ordinary text colour otherwise.
     uint16_t etaColorFor(const FlightInfo &f);
-    void drawTrackedChrome(const FlightInfo &f);
+    // The views this card has something to show in, in display order; returns
+    // how many. Only Normal for an untracked card.
+    int trackedViewsFor(const FlightInfo &f, TrackedView *out) const;
     void buildFlightLines(const FlightInfo &f, std::vector<String> &outLines, bool includeAirline);
-    void displayFlightCard(const FlightInfo &f);     // picks a layout by panel shape
-    void displayMiniCard(const FlightInfo &f);       // big panels (128x64): logo + info + metric rows
-    void displaySideBySideCard(const FlightInfo &f); // wide panels: logo left, text right
-    void displayStackedCard(const FlightInfo &f);    // square/tall panels: logo top, text below
-    void displayTextOnlyCard(const FlightInfo &f);   // very short panels: bordered text
+    // buildFlightLines for Normal; the view's own two lines otherwise. For the
+    // layouts that draw a plain list of lines rather than fixed rows.
+    void buildCardLines(const FlightInfo &f, TrackedView view, int maxCols,
+                        std::vector<String> &outLines, bool includeAirline);
+    void displayFlightCard(const FlightInfo &f, TrackedView view);     // picks a layout by panel shape
+    void displayMiniCard(const FlightInfo &f, TrackedView view);       // big panels (128x64): logo + info + metric rows
+    void displaySideBySideCard(const FlightInfo &f, TrackedView view); // wide panels: logo left, text right
+    void displayStackedCard(const FlightInfo &f, TrackedView view);    // square/tall panels: logo top, text below
+    void displayTextOnlyCard(const FlightInfo &f, TrackedView view);   // very short panels: bordered text
     void displayLoadingScreen();
     // ONE decode of layout.noFlightsMode, used by both the dispatcher and the
     // recompose key.

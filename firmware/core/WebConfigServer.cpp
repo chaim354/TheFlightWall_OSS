@@ -410,6 +410,19 @@ String WebConfigServer::buildFlightsJson() const
             // bar across the room to find out whether the wall got any.
             if (renderable(f.progress_pct))
                 o["progressPct"] = (long)f.progress_pct;
+            // The other two tracked views' inputs, so whether the wall
+            // received them is readable here rather than only by waiting out
+            // the card's rotation in front of the panel.
+            if (renderable(f.flown_mi))
+                o["flownMi"] = (long)f.flown_mi;
+            if (f.dep_text.length())
+                o["depText"] = f.dep_text;
+            if (f.over_place.length())
+            {
+                o["overPlace"] = f.over_place;
+                o["overRegion"] = f.over_region;
+                o["overNear"] = f.over_near;
+            }
         }
     }
     String out;

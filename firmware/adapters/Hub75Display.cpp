@@ -287,6 +287,11 @@ void Hub75Display::buildFlightLines(const FlightInfo &f, std::vector<String> &ou
     if (L.showAirlineFlight)
     {
         String ident = f.ident.length() ? f.ident : f.ident_icao;
+        // A tracked card's first view puts miles flown where the flight
+        // number goes (see utils/TrackedViews.h). Only with a number to show:
+        // a server that predates flown_mi keeps the ident, not a blank.
+        if (f.pinned && renderable(f.flown_mi))
+            ident = flownText<String>(f.flown_mi, /*withWord=*/false);
         String line;
         if (includeAirline)
         {
@@ -541,30 +546,6 @@ int16_t Hub75Display::fitLines(std::vector<String> &lines, int maxCols, int avai
     return (int16_t)(n * charHeight + (n - 1) * lineSpacing);
 }
 
-// Where the TRACKED label starts, right-aligned inside the border, or -1 when
-// this panel is too narrow to carry it. displayMiniCard calls this BEFORE it
-// lays out its top line so the airline name can stop short of the label rather
-// than running underneath it; drawTrackedChrome then draws at the same x.
-//
-// The label is deliberately the full word rather than an abbreviation: it is
-// the only thing on the panel that says WHY this card looks different, and a
-// wall display is read from across a room, where "TRK" is a guess.
-int16_t Hub75Display::trackedLabelX() const
-{
-    // ONLY the Mini layout. It is the one that reserves columns for this (see
-    // displayMiniCard), and the others actively collide: the Stacked card
-    // centres a 32px logo at the very top, so a label right-aligned there
-    // would be drawn straight across it. Gated on the same predicate the
-    // dispatcher selects the layout with, so the two cannot drift into
-    // disagreeing about which card is on screen. Those panels still get the
-    // border, which is what says "tracked"; only the word is dropped.
-    if (!usesMiniCard())
-        return -1;
-    const int16_t w = (int16_t)(TRACKED_LABEL_LEN * 6); // 6px advance per glyph
-    const int16_t x = (int16_t)(_matrixWidth - 1 - w);
-    return x >= 0 ? x : (int16_t)-1;
-}
-
 /**
  * The green a tracked card is marked with -- the filled part of the progress
  * bar, and the ETA text above it.
@@ -577,8 +558,7 @@ int16_t Hub75Display::trackedLabelX() const
  * Not full 0,255,0, on the theory that a saturated primary blooms on a HUB75
  * panel and a bar this thin has no width to spare. Seen on the wall now and
  * not objected to -- unlike the track beside it, which had to change, and the
- * height, which did too. If it ever does read muddy, or dim against the white
- * border, this is the knob.
+ * height, which did too. If it ever does read muddy, this is the knob.
  */
 static inline uint16_t progressGreen() { return rgb565(0, 210, 90); }
 
@@ -598,60 +578,42 @@ static inline uint16_t progressGreen() { return rgb565(0, 210, 90); }
  * right of the line were dim green. Grey has no such reading -- an unlit
  * channel is just unlit -- so it recedes into the panel and the green is
  * unambiguously the value.
+ *
+ * 110, up from 42, at the maintainer's request: once the bar lost its border
+ * and dropped to one row, the track at 42 all but vanished. The panel's CIE
+ * table maps 42 to 2 of 63 levels -- barely lit -- and 110 to 9, which reads
+ * as a grey line from across the room while staying well under the fill's
+ * green channel (210 -> 40 of 63), so the green is still unmistakably the
+ * value and the grey the track.
  */
-static inline uint16_t progressTrack() { return rgb565(42, 42, 42); }
+static inline uint16_t progressTrack() { return rgb565(110, 110, 110); }
 
 /**
  * Bar height in pixels.
  *
- * TWO, not one. A single row is the thinnest thing the panel can draw and it
- * reads as a hairline -- ambiguous with the border a few pixels below it, and
- * hard to judge the length of from across a room, which is the only distance
- * this display is ever read from. Two rows is still a bar rather than a block,
- * and it costs a row the layouts already had spare (see trackedProgressRow).
+ * ONE, at the maintainer's request, now that it is the whole tracked marker.
+ * It was two, on the argument that a single row read as a hairline -- but
+ * that was a hairline a few pixels above a white border, which is what it was
+ * ambiguous WITH. With the border gone the bar sits alone on the bottom row,
+ * full width, and the brighter track (above) is what keeps its length
+ * readable.
  */
-static const int16_t kProgressBarH = 2;
+static const int16_t kProgressBarH = 1;
 
-// A 1px white border around the whole panel, plus TRACKED in the top-right.
+// The BOTTOM row of the panel, edge to edge -- or -1 on a panel under 16px
+// high.
 //
-// Drawn LAST, over the finished card, which is the opposite of the amber bar
-// this replaces: a bar only had to survive in the margin, whereas a border has
-// to close. A border with a gap in it does not read as a border at all, it
-// reads as a rendering fault -- so where a glyph reaches the outermost column
-// the border wins, costing that glyph one pixel of its edge. Nothing in the
-// Mini layout gets that close (its logo starts at x=2, its metric rows at x=1,
-// and its text stops well inside the last column), so on the 128x64 wall this
-// costs nothing at all.
-//
-// This is the whole marker now: a dead-reckoned position is no longer drawn
-// differently from an observed one. That was a deliberate call -- see
-// HANDOFF.md. `pos_src` is untouched on the wire and still visible in
-// /api/flights and on the server's watched-flights page.
-void Hub75Display::drawTrackedChrome(const FlightInfo &f)
-{
-    const uint16_t white = rgb565(255, 255, 255);
-    _canvas->drawRect(0, 0, _matrixWidth, _matrixHeight, white);
-
-    // y=1 clears the border's own top row. The label and the airline name share
-    // rows 4-7 but never a column: at 128px the name is cut to 7 chars, ending
-    // at x=80, and the label starts at x=85.
-    const int16_t x = trackedLabelX();
-    if (x >= 0)
-        drawTextLine(x, 1, String(TRACKED_LABEL), white);
-
-    drawProgressBar(f);
-}
-
-// The TOP row of the progress bar, which then occupies kProgressBarH rows
-// ending just above the border.
+// The bar used to sit inside a 1px white border, one row up from the edge and
+// one column in from each side. The border is gone (at the maintainer's
+// request -- the bar and the green ETA are now the whole marker), so the bar
+// takes the outermost row and the full width.
 //
 // -1 on a panel under 16px high. Those run displayTextOnlyCard, whose text
-// already fills the full inner height and overlaps the border -- a bar there
-// would be drawn straight through a line of glyphs, and on a panel that short
-// a two-pixel fraction is not readable anyway. Every layout above that size
-// has the gap: the Mini card's last metric row ends at y=59 of 64 (leaving
-// 60-62 inside the border), and the SideBySide card centres at most three 8px
-// lines in 32, ending at y=28.
+// already fills the full inner height -- a bar there would be drawn straight
+// through a line of glyphs, and on a panel that short a one-pixel fraction is
+// not readable anyway. Every layout above that size has the gap: the Mini
+// card's last metric row ends at y=59 of 64, and the SideBySide card centres
+// at most three 8px lines in 32, ending at y=28.
 //
 // displayStackedCard is the one layout that does NOT have the gap for free --
 // its text is centred in whatever is left below a 32px logo and reaches y=62 --
@@ -660,7 +622,7 @@ int16_t Hub75Display::trackedProgressRow() const
 {
     if (_matrixHeight < 16)
         return -1;
-    return (int16_t)(_matrixHeight - 1 - kProgressBarH);
+    return (int16_t)(_matrixHeight - kProgressBarH);
 }
 
 bool Hub75Display::hasProgressBar(const FlightInfo &f) const
@@ -669,7 +631,7 @@ bool Hub75Display::hasProgressBar(const FlightInfo &f) const
            _matrixWidth >= 8;
 }
 
-// A 2px horizontal bar: grey track for the whole journey, green for the part
+// A 1px horizontal bar: grey track for the whole journey, green for the part
 // already flown. fillRect rather than two drawFastHLine calls -- same pixels,
 // and the height stops being something two call sites have to agree about.
 void Hub75Display::drawProgressBar(const FlightInfo &f)
@@ -678,9 +640,9 @@ void Hub75Display::drawProgressBar(const FlightInfo &f)
         return;
 
     const int16_t y = trackedProgressRow();
-    const int16_t w = (int16_t)(_matrixWidth - 2);
+    const int16_t w = (int16_t)_matrixWidth;
 
-    _canvas->fillRect(1, y, w, kProgressBarH, progressTrack());
+    _canvas->fillRect(0, y, w, kProgressBarH, progressTrack());
 
     // Clamping, rounding and the two never-quite-there rules all live in
     // utils/ProgressBar.h, host-tested. They read as fussy for a bar this
@@ -688,7 +650,7 @@ void Hub75Display::drawProgressBar(const FlightInfo &f)
     // value from drawing past the end of the canvas.
     const int filled = progressFillPixels(f.progress_pct, w);
     if (filled > 0)
-        _canvas->fillRect(1, y, (int16_t)filled, kProgressBarH, progressGreen());
+        _canvas->fillRect(0, y, (int16_t)filled, kProgressBarH, progressGreen());
 }
 
 /**
@@ -728,22 +690,63 @@ void Hub75Display::startOutput()
     static_cast<RestartablePanel *>(_panel)->resumeDMAoutput();
 }
 
-void Hub75Display::displayFlightCard(const FlightInfo &f)
+void Hub75Display::displayFlightCard(const FlightInfo &f, TrackedView view)
 {
     if (usesMiniCard())
-        displayMiniCard(f); // big panel (e.g. 128x64): logo + 3 info lines + 2 metric rows
+        displayMiniCard(f, view); // big panel (e.g. 128x64): logo + 3 info lines + 2 metric rows
     else if (_matrixHeight < 16)
-        displayTextOnlyCard(f); // too short for a logo
+        displayTextOnlyCard(f, view); // too short for a logo
     else if (_matrixWidth >= _matrixHeight * 2)
-        displaySideBySideCard(f); // wide & short (128x32, 160x32, 64x32)
+        displaySideBySideCard(f, view); // wide & short (128x32, 160x32, 64x32)
     else
-        displayStackedCard(f); // square / tall (64x64)
+        displayStackedCard(f, view); // square / tall (64x64)
 
-    // After the layout, never inside one: every card shape gets the same
-    // marker, including displayTextOnlyCard, which the old bar missed entirely
-    // because it lived in drawLogoOrBadge and that layout never calls it.
-    if (f.pinned)
-        drawTrackedChrome(f);
+    // After the layout, never inside one, so every card shape gets it on every
+    // view. This is the whole tracked marker now -- the white border and the
+    // TRACKED label are gone -- and a pinned card with no progress value draws
+    // nothing here at all. hasProgressBar() is the gate.
+    drawProgressBar(f);
+}
+
+int Hub75Display::trackedViewsFor(const FlightInfo &f, TrackedView *out) const
+{
+    int n = 0;
+    out[n++] = TrackedView::Normal;
+    if (!f.pinned)
+        return n;
+    // Times needs either half: "Departed" alone is still worth a view, and so
+    // is "Arriving in" alone. Place needs a town -- the server sends none over
+    // open ocean, and the view is left out rather than shown empty.
+    if (f.dep_text.length() || (g_settings.layout.showEta && f.eta_text.length()))
+        out[n++] = TrackedView::Times;
+    if (f.over_place.length())
+        out[n++] = TrackedView::Place;
+    return n;
+}
+
+void Hub75Display::buildCardLines(const FlightInfo &f, TrackedView view, int maxCols,
+                                  std::vector<String> &outLines, bool includeAirline)
+{
+    switch (view)
+    {
+    case TrackedView::Times:
+    {
+        const String dep = departedLine(f.dep_text, maxCols);
+        const String arr = g_settings.layout.showEta ? arrivingLine(f.eta_text, maxCols) : String();
+        if (dep.length())
+            outLines.push_back(dep);
+        if (arr.length())
+            outLines.push_back(arr);
+        return;
+    }
+    case TrackedView::Place:
+        outLines.push_back(placeLabel<String>(f.over_near, maxCols));
+        outLines.push_back(placeLine(f.over_place, f.over_region, maxCols));
+        return;
+    case TrackedView::Normal:
+        break;
+    }
+    buildFlightLines(f, outLines, includeAirline);
 }
 
 // "ORD-LAX" style route, preferring IATA codes.
@@ -862,7 +865,7 @@ static String stripAirlineWords(const String &name)
     return out.length() ? out : name;
 }
 
-void Hub75Display::displayMiniCard(const FlightInfo &f)
+void Hub75Display::displayMiniCard(const FlightInfo &f, TrackedView view)
 {
     const uint16_t color = textColor();
 
@@ -874,16 +877,6 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     // Three info lines to the right of the logo (airline / route / aircraft).
     const int16_t tx = 2 + box + 4; // ~38
     const int topCols = (_matrixWidth - tx - 1) / 6;
-
-    // The TRACKED label shares the first line's row, so on a tracked card the
-    // airline name gets only the columns left of it (14 -> 7 at 128px wide).
-    // Only the AIRLINE line is shortened: route and aircraft sit on rows the
-    // label does not occupy and keep the full width. A negative result means
-    // the label leaves no usable columns at all, in which case the name is
-    // dropped rather than drawn as a stub -- the label still says what the card
-    // is, which is the more useful of the two in that space.
-    const int16_t labelX = f.pinned ? trackedLabelX() : (int16_t)-1;
-    const int topColsAirline = labelX < 0 ? topCols : (labelX - 2 - tx) / 6;
 
     String airline = f.airline_display_name_full.length() ? f.airline_display_name_full
                      : (f.operator_iata.length() ? f.operator_iata
@@ -898,8 +891,7 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     if (_lastDrewLogo)
         airline = stripAirlineWords(airline);
 
-    if (topColsAirline > 0)
-        drawTextLine(tx, topY, truncateToColumns(airline, topColsAirline), color);
+    drawTextLine(tx, topY, truncateToColumns(airline, topCols), color);
     if (route.length())
         drawTextLine(tx, topY + 11, truncateToColumns(route, topCols), color);
     if (type.length())
@@ -955,7 +947,23 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
         const bool haveEta = L.showEta && f.eta_text.length();
         if (haveEta)
             cands.push_back("ETA:" + f.eta_text);
-        if (L.flightNumberOverVr)
+        // A tracked card's first view puts MILES FLOWN in the flight
+        // number's slot (see utils/TrackedViews.h), whether or not the
+        // flight-number setting is on -- the setting chooses what an area
+        // card shows there, and a tracked card was asked for by name.
+        // "989mi flown" when it fits beside the ETA, the bare "989mi" when
+        // it does not: the word is what stops it reading as the distance
+        // from the wall, but not at the cost of the number.
+        const bool showFlown = f.pinned && renderable(f.flown_mi);
+        if (showFlown)
+        {
+            const String withWord = flownText<String>(f.flown_mi, true);
+            const int etaCols = haveEta ? (int)f.eta_text.length() + 4 /* "ETA:" */ + 1 : 0;
+            cands.push_back(etaCols + (int)withWord.length() <= botCols
+                                ? withWord
+                                : flownText<String>(f.flown_mi, false));
+        }
+        else if (L.flightNumberOverVr)
         {
             const String flt = f.ident.length() ? f.ident : f.ident_icao;
             if (flt.length())
@@ -984,12 +992,30 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
         return joinWithinColumns(cands, botCols);
     };
 
-    String row1 = buildRow1(true);
-    if ((int)row1.length() > botCols)
-        row1 = buildRow1(false); // drop units instead of "..."
-    String row2 = buildRow2(true);
-    if ((int)row2.length() > botCols)
-        row2 = buildRow2(false);
+    String row1, row2;
+    // Times draws its whole second row in the ETA colour -- it IS the ETA --
+    // where Normal colours only the "ETA:" token at the start of its row.
+    bool row2IsEta = false;
+    switch (view)
+    {
+    case TrackedView::Times:
+        row1 = departedLine(f.dep_text, botCols);
+        row2 = L.showEta ? arrivingLine(f.eta_text, botCols) : String();
+        row2IsEta = true;
+        break;
+    case TrackedView::Place:
+        row1 = placeLabel<String>(f.over_near, botCols);
+        row2 = placeLine(f.over_place, f.over_region, botCols);
+        break;
+    case TrackedView::Normal:
+        row1 = buildRow1(true);
+        if ((int)row1.length() > botCols)
+            row1 = buildRow1(false); // drop units instead of "..."
+        row2 = buildRow2(true);
+        if ((int)row2.length() > botCols)
+            row2 = buildRow2(false);
+        break;
+    }
 
     // Last-resort clamp, not the normal path: every OTHER value composed above
     // is a formatted number with an inherently bounded width (a heading is
@@ -1024,7 +1050,9 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
         // space that no eta_text of the server's contains ("~1h10", "LANDING").
         // The 6px fixed-width font makes the rest pure arithmetic.
         const uint16_t etaColor = etaColorFor(f);
-        const int sep = (etaColor != color && row2.startsWith("ETA:")) ? row2.indexOf(' ') : -2;
+        const int sep = row2IsEta ? -1
+                        : (etaColor != color && row2.startsWith("ETA:")) ? row2.indexOf(' ')
+                                                                         : -2;
         if (sep == -2)
         {
             drawTextLine(1, by, row2, color);
@@ -1041,7 +1069,7 @@ void Hub75Display::displayMiniCard(const FlightInfo &f)
     }
 }
 
-void Hub75Display::displaySideBySideCard(const FlightInfo &f)
+void Hub75Display::displaySideBySideCard(const FlightInfo &f, TrackedView view)
 {
     const uint16_t color = textColor();
 
@@ -1058,25 +1086,29 @@ void Hub75Display::displaySideBySideCard(const FlightInfo &f)
     const int maxCols = (_matrixWidth - tx - 1) / 6;
 
     std::vector<String> lines;
-    buildFlightLines(f, lines, /*includeAirline=*/false); // logo conveys the airline
+    buildCardLines(f, view, maxCols, lines, /*includeAirline=*/false); // logo conveys the airline
     if (lines.empty())
         lines.push_back(f.ident.length() ? f.ident : String("?"));
 
     const int16_t totalH = fitLines(lines, maxCols, _matrixHeight);
     int16_t y = (_matrixHeight - totalH) / 2;
     const uint16_t etaColor = etaColorFor(f);
+    // The Times view's arrival line is the ETA too, reworded; build it once
+    // the same way buildCardLines did so the comparison below is exact.
+    const String arrLine = view == TrackedView::Times ? arrivingLine(f.eta_text, maxCols) : String();
     for (const String &ln : lines)
     {
         // buildFlightLines pushes eta_text as a line of its own and verbatim,
         // so identity with the source string is an exact test -- no parsing,
         // and no risk of colouring the aircraft type because it happened to
         // look like a duration.
-        drawTextLine(tx, y, ln, ln == f.eta_text ? etaColor : color);
+        const bool isEta = ln == f.eta_text || (arrLine.length() && ln == arrLine);
+        drawTextLine(tx, y, ln, isEta ? etaColor : color);
         y += 9;
     }
 }
 
-void Hub75Display::displayStackedCard(const FlightInfo &f)
+void Hub75Display::displayStackedCard(const FlightInfo &f, TrackedView view)
 {
     const uint16_t color = textColor();
 
@@ -1091,31 +1123,33 @@ void Hub75Display::displayStackedCard(const FlightInfo &f)
     const int maxCols = (_matrixWidth - 2) / 6;
 
     std::vector<String> lines;
-    buildFlightLines(f, lines, /*includeAirline=*/false);
+    buildCardLines(f, view, maxCols, lines, /*includeAirline=*/false);
     if (lines.empty())
         lines.push_back(f.ident.length() ? f.ident : String("?"));
 
-    // The one layout whose text reaches the bottom border: three 8px lines
-    // centred below a 32px logo end at y=62 on a 64x64 panel, which is exactly
-    // the row trackedProgressRow() wants. Give the bar its row back BEFORE
-    // fitting, so the text re-centres around it rather than being drawn
-    // through. Costs nothing when there is no bar, and nothing on the layouts
-    // that already had the gap.
+    // The one layout whose text reaches the bottom edge: three 8px lines
+    // centred below a 32px logo end at y=62 on a 64x64 panel, touching the
+    // bar on y=63 with no gap. Reserve the bar's row plus one BEFORE fitting,
+    // so the text re-centres clear of it rather than sitting on it. Costs
+    // nothing when there is no bar, and nothing on the layouts that already
+    // had the gap.
     const int barRows = hasProgressBar(f) ? kProgressBarH + 1 : 0;
     const int availH = _matrixHeight - textTop - barRows;
     const int16_t totalH = fitLines(lines, maxCols, availH);
     int16_t y = textTop + (availH - totalH) / 2;
     const uint16_t etaColor = etaColorFor(f);
+    const String arrLine = view == TrackedView::Times ? arrivingLine(f.eta_text, maxCols) : String();
     for (const String &ln : lines)
     {
         // Center each line horizontally.
         const int16_t x = (_matrixWidth - (int)ln.length() * 6) / 2;
-        drawTextLine(x < 0 ? 0 : x, y, ln, ln == f.eta_text ? etaColor : color);
+        const bool isEta = ln == f.eta_text || (arrLine.length() && ln == arrLine);
+        drawTextLine(x < 0 ? 0 : x, y, ln, isEta ? etaColor : color);
         y += 9;
     }
 }
 
-void Hub75Display::displayTextOnlyCard(const FlightInfo &f)
+void Hub75Display::displayTextOnlyCard(const FlightInfo &f, TrackedView view)
 {
     const uint16_t color = textColor();
     _canvas->drawRect(0, 0, _matrixWidth, _matrixHeight, color);
@@ -1129,7 +1163,7 @@ void Hub75Display::displayTextOnlyCard(const FlightInfo &f)
     const int lineSpacing = 1;
 
     std::vector<String> lines;
-    buildFlightLines(f, lines, /*includeAirline=*/true);
+    buildCardLines(f, view, maxCols, lines, /*includeAirline=*/true);
     if (lines.empty())
         lines.push_back(f.ident.length() ? f.ident : String("?"));
 
@@ -1171,10 +1205,16 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
     // 1) Run the cycle-advance logic FIRST to decide which card we'd show now.
     //    SIZE_MAX is the "empty list / loading screen" sentinel.
     size_t indexToShow = SIZE_MAX;
+    TrackedView viewToShow = TrackedView::Normal;
     if (!flights.empty())
     {
         const unsigned long now = millis();
-        const unsigned long intervalMs = g_settings.cycleSeconds * 1000UL;
+        // A tracked card holds the wall for its whole set of views
+        // (kTrackedDwellMs); every other card for cycleSeconds. Decided by the
+        // card currently UP, since that is the one whose time is running.
+        const bool upIsTracked = flights[_currentFlightIndex % flights.size()].pinned;
+        const unsigned long intervalMs =
+            upIsTracked ? kTrackedDwellMs : g_settings.cycleSeconds * 1000UL;
 
         if (flights.size() > 1)
         {
@@ -1190,12 +1230,25 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
         }
 
         indexToShow = _currentFlightIndex % flights.size();
+
+        // Which view, from how long the card has been up. _lastCycleMs is when
+        // it came up -- or, for a lone card the cycle never replaces, some
+        // earlier moment, which trackedViewAt's modulo turns into the views
+        // simply continuing to rotate.
+        const FlightInfo &up = flights[indexToShow];
+        if (up.pinned)
+        {
+            TrackedView views[kMaxTrackedViews];
+            const int n = trackedViewsFor(up, views);
+            viewToShow = views[trackedViewAt(now - _lastCycleMs, n)];
+        }
     }
 
     // 2) Dirty-check: skip the expensive recompose (string formatters + canvas
     //    redraw + blit) when neither the displayed card index nor the data
     //    version changed. A new fetch bumps _dataVersion via markFlightsUpdated();
-    //    a cycle advance changes indexToShow; the empty<->non-empty transition is
+    //    a cycle advance changes indexToShow; a tracked card turning to its next
+    //    view changes viewToShow; the empty<->non-empty transition is
     //    a change in indexToShow (SIZE_MAX vs a real index). The very first render
     //    composes because _lastComposedVersion(0) != _dataVersion(1).
     //    Exception: the empty-list (SIZE_MAX) animated modes (clock/funfact/
@@ -1212,7 +1265,8 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
         ++_dataVersion; // one more recompose, now without the overlay
     }
 
-    if (indexToShow == _lastComposedIndex && _dataVersion == _lastComposedVersion)
+    if (indexToShow == _lastComposedIndex && _dataVersion == _lastComposedVersion &&
+        viewToShow == _lastComposedView)
     {
         if (indexToShow != SIZE_MAX)
             return;
@@ -1225,6 +1279,7 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
 
     _lastComposedIndex = indexToShow;
     _lastComposedVersion = _dataVersion;
+    _lastComposedView = viewToShow;
     if (indexToShow == SIZE_MAX)
         _lastNoFlightsKey = noFlightsFrameKey();
 
@@ -1233,7 +1288,7 @@ void Hub75Display::displayFlights(const std::vector<FlightInfo> &flights)
 
     if (indexToShow != SIZE_MAX)
     {
-        displayFlightCard(flights[indexToShow]);
+        displayFlightCard(flights[indexToShow], viewToShow);
     }
     else
     {
