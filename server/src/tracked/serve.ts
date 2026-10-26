@@ -7,15 +7,17 @@ import { airlineName } from '../airlines';
 // Atlantic (Z0) and easyJet (U2) among them, leaving their pinned cards with
 // no airline name at all while the curated table had one. See carrierCode.ts.
 import { carrierIataOf } from '../carrierCode';
-import { formatEta } from '../eta';
+import { formatEta, formatElapsed } from '../eta';
+import type { PlaceLookup } from '../places';
 import type { TrackedEntry } from './types';
 
 /**
  * How long a fix stays servable as "live".
  *
- * MUST EXCEED the poll interval in server.ts (`TRACKED_TICK_MS`, currently
- * 300s) with margin, and the two are coupled even though they live in
- * different files. When they were equal, a fix reached this boundary exactly as
+ * MUST EXCEED the per-entry poll interval (`POLL_INTERVAL_MS` in tick.ts,
+ * currently 300s) with margin, and the two are coupled even though they live
+ * in different files. Not the tick: that runs every 60s now, but an entry is
+ * still only asked about once per poll interval. When they were equal, a fix reached this boundary exactly as
  * the next poll was due, so any late tick or single failed poll relabelled a
  * perfectly good position as an estimate and the card oscillated between the
  * two while nothing was actually wrong.
@@ -23,7 +25,7 @@ import type { TrackedEntry } from './types';
  * 11 minutes is a little over TWO polls: one miss is a timing wobble and the
  * last fix is still the best thing we know, while two consecutive misses are a
  * real loss of ADS-B coverage -- which is precisely when "we are projecting"
- * becomes the honest answer. If you change TRACKED_TICK_MS, change this too.
+ * becomes the honest answer. If you change POLL_INTERVAL_MS, change this too.
  */
 export const FIX_FRESH_MS = 11 * 60_000;
 
@@ -83,9 +85,45 @@ export interface TrackedCard {
    * one can see.
    */
   prog: number | null;
+  /**
+   * Statute miles from the origin airport to where the aircraft is now, great
+   * circle. Shown in place of the flight number on the first of a tracked
+   * card's three views.
+   *
+   * POSITIONAL, unlike `prog` -- it is measured from the same fix (or the same
+   * dead-reckoned estimate, per `pos_src`) as `dst`, not from the timetable.
+   * So it can disagree with the bar, and on a late departure it will: the bar
+   * runs ahead by the delay while this reads where the aircraft actually is.
+   * Straight-line from the origin, so a flight that has doubled back round a
+   * storm reads short of the distance it has really covered.
+   *
+   * Null without origin coordinates.
+   */
+  flown_mi: number | null;
+  /**
+   * Time since SCHEDULED departure, "25m" / "2h10" -- see formatElapsed. The
+   * second view's "Departed 2h10 ago", beside eta_text's "Arriving in". Null
+   * without a departure time.
+   */
+  dep_text: string | null;
+  /**
+   * The town under (or near) the aircraft, for the third view -- see
+   * src/places.ts. `over` is the name, `over_rgn` the state/province or
+   * country, and `over_near` says the town is beyond OVER_KM, so the card
+   * says "near" rather than "over".
+   *
+   * All null when nothing is within NEAR_KM (open ocean, the Arctic) and when
+   * the server has no place table (the Worker). The device skips the view.
+   */
+  over: string | null;
+  over_rgn: string | null;
+  over_near: boolean;
   pin: true;
   pos_src: 'live' | 'estimated';
 }
+
+/** Statute mile, km. The panel's speed is in mph, so its distance is in miles. */
+const KM_PER_MI = 1.609344;
 
 /**
  * Elapsed fraction of the scheduled block, 0-100, or null.
@@ -130,6 +168,9 @@ export function trackedCards(
   entries: TrackedEntry[],
   nowMs: number,
   center: { lat: number; lon: number },
+  // Injected rather than imported: see src/places.ts on why the Worker must
+  // not bundle the table. Absent, every card simply has no place.
+  placeAt?: PlaceLookup,
 ): TrackedCard[] {
   const cards: TrackedCard[] = [];
 
@@ -206,6 +247,14 @@ export function trackedCards(
 
     const prefix = carrierIataOf(e.number);
 
+    const flownMi = e.orig !== null
+      ? Math.round(haversineKm(e.orig.lat, e.orig.lon, lat, lon) / KM_PER_MI)
+      : null;
+    const depText = e.schedDepEpoch !== null
+      ? formatElapsed((nowMs - e.schedDepEpoch * 1000) / 60000)
+      : null;
+    const place = placeAt ? placeAt(lat, lon) : null;
+
     cards.push({
       // The ICAO callsign when we have one, so this card carries the same KIND
       // of value an area card does and the device's own operator parse (and so
@@ -234,6 +283,11 @@ export function trackedCards(
       eta_text: etaText,
       eta_src: etaSrc,
       prog: progressPct(e.schedDepEpoch, e.schedArrEpoch, nowMs),
+      flown_mi: flownMi,
+      dep_text: depText,
+      over: place ? place.name : null,
+      over_rgn: place ? place.region : null,
+      over_near: place ? place.near : false,
       pin: true,
       pos_src: src,
     });

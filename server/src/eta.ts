@@ -280,3 +280,24 @@ export function formatEta(
   const m = total % 60;
   return `~${h}h${String(m).padStart(2, '0')}`;
 }
+
+/**
+ * Time since something happened, at minute resolution: "25m", "2h10".
+ *
+ * The tracked card's "departed ... ago". Same shape as formatEta's clock-derived
+ * output minus the tilde, so the two halves of "Departed 2h10 ago / Arriving in
+ * ~1h05" read as one vocabulary. No tilde because the departure is not an
+ * estimate the way the arrival is -- it is the published time, and the card says
+ * so by being the same clock as the bar -- but it is SCHEDULED, so a late
+ * pushback reads early by exactly the delay, like everything else on that card.
+ *
+ * Floored at one minute: "0m ago" is a sentence nobody would write. Null for a
+ * span that has not started or is not a number, which the device renders as
+ * the line simply not being there.
+ */
+export function formatElapsed(min: number | null): string | null {
+  if (min === null || !Number.isFinite(min) || min < 0) return null;
+  const total = Math.max(1, Math.round(min));
+  if (total < 60) return `${total}m`;
+  return `${Math.floor(total / 60)}h${String(total % 60).padStart(2, '0')}`;
+}

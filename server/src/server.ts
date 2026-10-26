@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { handleFlights, type Env } from './flights';
+import { nearestPlace } from './places';
 import { fileStorage } from './schedule/fileStorage';
 import { refreshSchedule, refreshPanynj, BOARD_FETCH_DELAY_MS } from './schedule/refresh';
 import { PAGE_DELAY_MS } from './schedule/panynj';
@@ -629,6 +630,7 @@ export function startServer(config: ServerConfig): Promise<RunningServer> {
     TRACKED: trackedStorage,
     AIRLINES: airlineStorage,
     UNNAMED: unnamedAirlines,
+    PLACES: nearestPlace,
   };
   const boards = config.boards.split(',').map((s) => s.trim()).filter(Boolean);
 

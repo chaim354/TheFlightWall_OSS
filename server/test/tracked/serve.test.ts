@@ -308,3 +308,48 @@ describe('trackedCards', () => {
     });
   });
 });
+
+describe('trackedCards: the three-view fields', () => {
+  const now = dep + 2 * 3600_000 + 10 * 60_000;
+  // ~1,000 statute miles out of JFK, over the Atlantic east of Nova Scotia.
+  const card = (over: Partial<TrackedEntry> = {}, placeAt?: Parameters<typeof trackedCards>[3]) =>
+    trackedCards([airborne({ lastLat: 44.5, lastLon: -55.0, lastPosAtMs: now, ...over })], now, CENTER, placeAt)[0]!;
+
+  it('flown_mi is statute miles from the origin to the fix, rounded', () => {
+    // haversine(JFK, 44.5N 55.0W) = 1,592km = 989mi.
+    expect(card().flown_mi).toBe(989);
+  });
+
+  it('flown_mi is null without origin coordinates', () => {
+    expect(card({ orig: null }).flown_mi).toBeNull();
+  });
+
+  it('dep_text is time since SCHEDULED departure, in formatElapsed\'s shape', () => {
+    expect(card().dep_text).toBe('2h10');
+    expect(card({ schedDepEpoch: null }).dep_text).toBeNull();
+  });
+
+  it('carries the place the lookup returns, including the over/near split', () => {
+    const c = card({}, () => ({ name: 'Gander', region: 'NL', km: 80, near: true }));
+    expect(c.over).toBe('Gander');
+    expect(c.over_rgn).toBe('NL');
+    expect(c.over_near).toBe(true);
+  });
+
+  it('asks the lookup about the CARD\'s position, dead-reckoned or not', () => {
+    const asked: Array<[number, number]> = [];
+    card({}, (lat, lon) => {
+      asked.push([lat, lon]);
+      return null;
+    });
+    expect(asked).toEqual([[44.5, -55.0]]);
+  });
+
+  it('has no place, and says "over" by default, when there is no lookup or no town', () => {
+    for (const c of [card(), card({}, () => null)]) {
+      expect(c.over).toBeNull();
+      expect(c.over_rgn).toBeNull();
+      expect(c.over_near).toBe(false);
+    }
+  });
+});

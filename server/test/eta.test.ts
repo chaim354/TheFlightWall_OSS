@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  etaMinutes, formatEta,
+  etaMinutes, formatEta, formatElapsed,
   TERMINAL_NM, TERMINAL_KT, TERMINAL_MIN,
   LANDING_NM, LANDING_MAX_MIN, NOMINAL_DESCENT_FPM,
 } from '../src/eta';
@@ -329,5 +329,31 @@ describe('etaMinutes: recognising a jet that is still too slow to look like one'
     // the projection -- a level aircraft's measured speed is real.
     const level = etaMinutes(930, 184, 1825, 0);
     expect(level).toBeCloseTo(((930 - 60) / 184) * 60 + 18, 6);
+  });
+});
+
+describe('formatElapsed', () => {
+  it('reads minutes under an hour and h:mm above it', () => {
+    expect(formatElapsed(25)).toBe('25m');
+    expect(formatElapsed(59.4)).toBe('59m');
+    expect(formatElapsed(60)).toBe('1h00');
+    expect(formatElapsed(130)).toBe('2h10');
+    expect(formatElapsed(14 * 60 + 5)).toBe('14h05');
+  });
+
+  it('rounds into the hour rather than printing 60m', () => {
+    expect(formatElapsed(59.6)).toBe('1h00');
+  });
+
+  it('floors at a minute -- never "0m ago"', () => {
+    expect(formatElapsed(0)).toBe('1m');
+    expect(formatElapsed(0.2)).toBe('1m');
+  });
+
+  it('is null for a span that has not started or is not a number', () => {
+    expect(formatElapsed(-1)).toBeNull();
+    expect(formatElapsed(null)).toBeNull();
+    expect(formatElapsed(Number.NaN)).toBeNull();
+    expect(formatElapsed(Number.POSITIVE_INFINITY)).toBeNull();
   });
 });

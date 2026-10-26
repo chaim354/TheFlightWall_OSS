@@ -12,6 +12,7 @@ import {
 } from './airlineOverrides';
 import { carrierIataOf, normaliseCarrierCode, operatorIcaoOf } from './carrierCode';
 import type { TrackedStorage } from './tracked/store';
+import type { PlaceLookup } from './places';
 import type { Flight, ScheduleRow } from './types';
 
 /**
@@ -32,6 +33,12 @@ export interface Env {
    */
   AIRLINES?: AirlineOverrideStorage;
   UNNAMED?: UnnamedLog;
+  /**
+   * Town lookup for a tracked card's "flying over" view. Optional and absent
+   * on the Worker for the same reason as TRACKED, and for one more: the table
+   * is 2.5MB, which the Worker would bundle for nothing. See src/places.ts.
+   */
+  PLACES?: PlaceLookup;
 }
 
 /** Hard ceiling on `max`, so a caller cannot ask us to serialise the whole sky. */
@@ -179,7 +186,7 @@ export async function handleFlights(url: URL, env: Env, nowMs: number): Promise<
   // AFTER prepending so a tracked flight can never be pushed off the end by
   // ordinary traffic -- being crowded out by a jet that happens to be closer is
   // exactly the failure this feature exists to prevent.
-  const pinned = env.TRACKED ? trackedCards(await env.TRACKED.read(), nowMs, { lat, lon }) : [];
+  const pinned = env.TRACKED ? trackedCards(await env.TRACKED.read(), nowMs, { lat, lon }, env.PLACES) : [];
   const merged = [...pinned, ...flights].slice(0, max);
 
   // AFTER THE SLICE, deliberately: the unnamed log should record what the wall
