@@ -7,7 +7,7 @@ import { airlineName } from '../airlines';
 // Atlantic (Z0) and easyJet (U2) among them, leaving their pinned cards with
 // no airline name at all while the curated table had one. See carrierCode.ts.
 import { carrierIataOf } from '../carrierCode';
-import { formatEta, formatElapsed } from '../eta';
+import { formatEta, formatSpan } from '../eta';
 import type { PlaceLookup } from '../places';
 import type { TrackedEntry } from './types';
 
@@ -101,11 +101,20 @@ export interface TrackedCard {
    */
   flown_mi: number | null;
   /**
-   * Time since SCHEDULED departure, "25m" / "2h10" -- see formatElapsed. The
-   * second view's "Departed 2h10 ago", beside eta_text's "Arriving in". Null
-   * without a departure time.
+   * Time since SCHEDULED departure, "25 min" / "3.5 hr" -- see formatSpan. The
+   * second view's "Departed 3.5 hr ago". Null without a departure time.
    */
   dep_text: string | null;
+  /**
+   * Time to the scheduled arrival in the same words, for that view's
+   * "Arriving in 20 min": eta_text's clock, said the way dep_text says it.
+   * "LANDING" exactly when eta_text is, so the device's own LANDING wording
+   * still applies. Null without an arrival time.
+   *
+   * A field of its own rather than a reformatted eta_text, because the first
+   * view keeps showing eta_text at minute resolution beside it.
+   */
+  arr_text: string | null;
   /**
    * The town under (or near) the aircraft, for the third view -- see
    * src/places.ts. `over` is the name, `over_rgn` the state/province or
@@ -251,8 +260,9 @@ export function trackedCards(
       ? Math.round(haversineKm(e.orig.lat, e.orig.lon, lat, lon) / KM_PER_MI)
       : null;
     const depText = e.schedDepEpoch !== null
-      ? formatElapsed((nowMs - e.schedDepEpoch * 1000) / 60000)
+      ? formatSpan((nowMs - e.schedDepEpoch * 1000) / 60000)
       : null;
+    const arrText = etaText === 'LANDING' ? etaText : formatSpan(etaMinRaw);
     const place = placeAt ? placeAt(lat, lon) : null;
 
     cards.push({
@@ -285,6 +295,7 @@ export function trackedCards(
       prog: progressPct(e.schedDepEpoch, e.schedArrEpoch, nowMs),
       flown_mi: flownMi,
       dep_text: depText,
+      arr_text: arrText,
       over: place ? place.name : null,
       over_rgn: place ? place.region : null,
       over_near: place ? place.near : false,

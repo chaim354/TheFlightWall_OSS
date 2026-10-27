@@ -287,7 +287,7 @@ describe('trackedCards', () => {
       })], now, center);
       expect(cards[0]!.eta_min).toBe(5);
       expect(cards[0]!.eta_text).not.toBe('LANDING');
-      expect(cards[0]!.eta_text).toBe('~5m');
+      expect(cards[0]!.eta_text).toBe('5m');
     });
 
     it('says LANDING for a flight near its own destination, however far that is from the wall', () => {
@@ -305,6 +305,8 @@ describe('trackedCards', () => {
       })], now, center);
       expect(cards[0]!.eta_min).toBe(5);
       expect(cards[0]!.eta_text).toBe('LANDING');
+      // The second view must say "Landing", not "Arriving in 5 min".
+      expect(cards[0]!.arr_text).toBe('LANDING');
     });
   });
 });
@@ -324,9 +326,19 @@ describe('trackedCards: the three-view fields', () => {
     expect(card({ orig: null }).flown_mi).toBeNull();
   });
 
-  it('dep_text is time since SCHEDULED departure, in formatElapsed\'s shape', () => {
-    expect(card().dep_text).toBe('2h10');
+  it('dep_text is time since SCHEDULED departure, in formatSpan\'s words', () => {
+    // 2h10 since departure, to the nearest half hour.
+    expect(card().dep_text).toBe('2 hr');
+    expect(card({ schedDepEpoch: (now - 20 * 60_000) / 1000 }).dep_text).toBe('20 min');
     expect(card({ schedDepEpoch: null }).dep_text).toBeNull();
+  });
+
+  it('arr_text is time to the SCHEDULED arrival in the same words', () => {
+    // 4h50 to go.
+    expect(card().arr_text).toBe('5 hr');
+    expect(card({ schedArrEpoch: (now + 207 * 60_000) / 1000 }).arr_text).toBe('3.5 hr');
+    expect(card({ schedArrEpoch: (now + 20 * 60_000) / 1000 }).arr_text).toBe('20 min');
+    expect(card({ schedArrEpoch: null }).arr_text).toBeNull();
   });
 
   it('carries the place the lookup returns, including the over/near split', () => {

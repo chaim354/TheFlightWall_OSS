@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  etaMinutes, formatEta, formatElapsed,
+  etaMinutes, formatEta, formatSpan,
   TERMINAL_NM, TERMINAL_KT, TERMINAL_MIN,
   LANDING_NM, LANDING_MAX_MIN, NOMINAL_DESCENT_FPM,
 } from '../src/eta';
@@ -120,7 +120,7 @@ describe('etaMinutes: descent-time floor', () => {
     const eta = etaMinutes(8.6, 320, 38000);
     expect(eta).toBeCloseTo(21.11, 2);
     expect(formatEta(8.6, eta)).not.toBe('LANDING');
-    expect(formatEta(8.6, eta)).toBe('~20m');
+    expect(formatEta(8.6, eta)).toBe('20m');
   });
 });
 
@@ -149,17 +149,17 @@ describe('formatEta', () => {
   });
 
   it('rounds to 5 minutes under an hour', () => {
-    expect(formatEta(200, 23)).toBe('~25m');
-    expect(formatEta(200, 22)).toBe('~20m');
-    expect(formatEta(200, 37)).toBe('~35m');
+    expect(formatEta(200, 23)).toBe('25m');
+    expect(formatEta(200, 22)).toBe('20m');
+    expect(formatEta(200, 37)).toBe('35m');
   });
 
   it('rounds to 10 minutes at an hour and over, as h:mm', () => {
-    expect(formatEta(800, 64)).toBe('~1h00');
-    expect(formatEta(800, 66)).toBe('~1h10');
-    expect(formatEta(800, 122)).toBe('~2h00');   // 122 -> 120
-    expect(formatEta(800, 125)).toBe('~2h10');   // 125 -> 130, not 120
-    expect(formatEta(800, 132)).toBe('~2h10');
+    expect(formatEta(800, 64)).toBe('1h00');
+    expect(formatEta(800, 66)).toBe('1h10');
+    expect(formatEta(800, 122)).toBe('2h00');   // 122 -> 120
+    expect(formatEta(800, 125)).toBe('2h10');   // 125 -> 130, not 120
+    expect(formatEta(800, 132)).toBe('2h10');
   });
 
   it('returns null when there is no estimate and we are not landing', () => {
@@ -168,7 +168,7 @@ describe('formatEta', () => {
 
   it('never renders a bare zero', () => {
     // Rounding 2 minutes to the nearest 5 gives 0; at that range we are landing.
-    expect(formatEta(200, 2)).toBe('~5m');
+    expect(formatEta(200, 2)).toBe('5m');
   });
 
   // clockDerived: etaMin counts down to a real arrival TIME (a tracked entry's
@@ -178,18 +178,18 @@ describe('formatEta', () => {
   // jump. Only the physics estimate keeps the coarse rounding.
   describe('clock-derived', () => {
     it('steps by one minute under an hour', () => {
-      expect(formatEta(200, 47, true)).toBe('~47m');
-      expect(formatEta(200, 46, true)).toBe('~46m');
-      expect(formatEta(200, 22.4, true)).toBe('~22m');
+      expect(formatEta(200, 47, true)).toBe('47m');
+      expect(formatEta(200, 46, true)).toBe('46m');
+      expect(formatEta(200, 22.4, true)).toBe('22m');
       // and the same minutes WITHOUT the flag still round, unchanged
-      expect(formatEta(200, 47)).toBe('~45m');
+      expect(formatEta(200, 47)).toBe('45m');
     });
 
     it('steps by one minute at an hour and over', () => {
-      expect(formatEta(800, 122, true)).toBe('~2h02');
-      expect(formatEta(800, 121, true)).toBe('~2h01');
-      expect(formatEta(800, 125, true)).toBe('~2h05');
-      expect(formatEta(800, 60, true)).toBe('~1h00');
+      expect(formatEta(800, 122, true)).toBe('2h02');
+      expect(formatEta(800, 121, true)).toBe('2h01');
+      expect(formatEta(800, 125, true)).toBe('2h05');
+      expect(formatEta(800, 60, true)).toBe('1h00');
     });
 
     it('moves on every single minute where the rounded form does not', () => {
@@ -197,14 +197,14 @@ describe('formatEta', () => {
       // five distinct strings, not one repeated string and then a jump.
       const rounded = [64, 63, 62, 61, 60].map((m) => formatEta(800, m));
       const precise = [64, 63, 62, 61, 60].map((m) => formatEta(800, m, true));
-      expect(new Set(rounded).size).toBe(1);   // '~1h00' five times over
+      expect(new Set(rounded).size).toBe(1);   // '1h00' five times over
       expect(new Set(precise).size).toBe(5);
-      expect(precise).toEqual(['~1h04', '~1h03', '~1h02', '~1h01', '~1h00']);
+      expect(precise).toEqual(['1h04', '1h03', '1h02', '1h01', '1h00']);
     });
 
     it('still says LANDING, and still never renders a bare zero', () => {
       expect(formatEta(5, 2, true)).toBe('LANDING');
-      expect(formatEta(200, 0.2, true)).toBe('~1m');
+      expect(formatEta(200, 0.2, true)).toBe('1m');
       expect(formatEta(200, null, true)).toBeNull();
     });
   });
@@ -332,28 +332,34 @@ describe('etaMinutes: recognising a jet that is still too slow to look like one'
   });
 });
 
-describe('formatElapsed', () => {
-  it('reads minutes under an hour and h:mm above it', () => {
-    expect(formatElapsed(25)).toBe('25m');
-    expect(formatElapsed(59.4)).toBe('59m');
-    expect(formatElapsed(60)).toBe('1h00');
-    expect(formatElapsed(130)).toBe('2h10');
-    expect(formatElapsed(14 * 60 + 5)).toBe('14h05');
+describe('formatSpan', () => {
+  it('reads minutes under an hour', () => {
+    expect(formatSpan(20)).toBe('20 min');
+    expect(formatSpan(59.4)).toBe('59 min');
   });
 
-  it('rounds into the hour rather than printing 60m', () => {
-    expect(formatElapsed(59.6)).toBe('1h00');
+  it('reads hours to the nearest half above it', () => {
+    expect(formatSpan(60)).toBe('1 hr');
+    expect(formatSpan(74)).toBe('1 hr');
+    expect(formatSpan(75)).toBe('1.5 hr');
+    expect(formatSpan(130)).toBe('2 hr');
+    expect(formatSpan(207)).toBe('3.5 hr');
+    expect(formatSpan(14 * 60 + 5)).toBe('14 hr');
   });
 
-  it('floors at a minute -- never "0m ago"', () => {
-    expect(formatElapsed(0)).toBe('1m');
-    expect(formatElapsed(0.2)).toBe('1m');
+  it('rounds into the hour rather than printing 60 min', () => {
+    expect(formatSpan(59.6)).toBe('1 hr');
+  });
+
+  it('floors at a minute -- never "0 min ago"', () => {
+    expect(formatSpan(0)).toBe('1 min');
+    expect(formatSpan(0.2)).toBe('1 min');
   });
 
   it('is null for a span that has not started or is not a number', () => {
-    expect(formatElapsed(-1)).toBeNull();
-    expect(formatElapsed(null)).toBeNull();
-    expect(formatElapsed(Number.NaN)).toBeNull();
-    expect(formatElapsed(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(formatSpan(-1)).toBeNull();
+    expect(formatSpan(null)).toBeNull();
+    expect(formatSpan(Number.NaN)).toBeNull();
+    expect(formatSpan(Number.POSITIVE_INFINITY)).toBeNull();
   });
 });

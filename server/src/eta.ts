@@ -242,8 +242,11 @@ export const LANDING_MAX_MIN = (LANDING_NM / TERMINAL_KT) * 60;
  *
  * Rounded because the model does not support finer precision: it cannot know
  * about vectoring, holds, runway changes or taxi-in, so it lands within ~5 min
- * enroute and gets vaguer near the end. Always prefixed "~" so the panel never
- * implies a scheduled time.
+ * enroute and gets vaguer near the end.
+ *
+ * No "~" prefix. There used to be one, so the panel never implied a scheduled
+ * time; it cost a column on every card and read as noise, and the rounding
+ * already says what it meant to.
  *
  * `clockDerived` opts out of that rounding, and ONLY a caller whose etaMin came
  * from a real arrival TIME may pass it -- AeroDataBox's revised or scheduled
@@ -254,8 +257,7 @@ export const LANDING_MAX_MIN = (LANDING_NM / TERMINAL_KT) * 60;
  * five, which reads as a stale card rather than a coarse one. It is only the
  * PHYSICS estimate that cannot support minutes -- this file's own measurements
  * put it ~10 min optimistic at cruise -- and that path keeps its rounding
- * untouched. The "~" prefix stays either way: a scheduled arrival is still a
- * plan, not a promise, and the aircraft's own progress is not in this number.
+ * untouched.
  */
 export function formatEta(
   distanceNm: number,
@@ -269,35 +271,36 @@ export function formatEta(
 
   // One minute is the smallest step either branch below can take, so the floor
   // is 1 rather than 5 here -- but it is still a floor for the same reason:
-  // outside LANDING_NM, "~0m" would be both wrong and alarming.
+  // outside LANDING_NM, "0m" would be both wrong and alarming.
   const step = clockDerived ? 1 : 5;
   if (etaMin < 60) {
     const m = Math.max(step, Math.round(etaMin / step) * step);
-    return m >= 60 ? '~1h00' : `~${m}m`;
+    return m >= 60 ? '1h00' : `${m}m`;
   }
   const total = clockDerived ? Math.round(etaMin) : Math.round(etaMin / 10) * 10;
   const h = Math.floor(total / 60);
   const m = total % 60;
-  return `~${h}h${String(m).padStart(2, '0')}`;
+  return `${h}h${String(m).padStart(2, '0')}`;
 }
 
 /**
- * Time since something happened, at minute resolution: "25m", "2h10".
+ * A span in words, for the tracked card's second view: "20 min" under an hour,
+ * then hours to the nearest half -- "1 hr", "3.5 hr". Both halves of
+ * "Departed 3.5 hr ago / Arriving in 20 min" use it, so they read as one
+ * vocabulary.
  *
- * The tracked card's "departed ... ago". Same shape as formatEta's clock-derived
- * output minus the tilde, so the two halves of "Departed 2h10 ago / Arriving in
- * ~1h05" read as one vocabulary. No tilde because the departure is not an
- * estimate the way the arrival is -- it is the published time, and the card says
- * so by being the same clock as the bar -- but it is SCHEDULED, so a late
- * pushback reads early by exactly the delay, like everything else on that card.
+ * Half hours, not formatEta's minutes, because this view is read as a sentence
+ * from across the room: "3.5 hr" is how a person says it, "3h27" is a clock.
+ * The ordinary ETA on the first view keeps its minute resolution.
  *
- * Floored at one minute: "0m ago" is a sentence nobody would write. Null for a
- * span that has not started or is not a number, which the device renders as
- * the line simply not being there.
+ * The minutes are rounded BEFORE choosing the unit, so 59.6 reads "1 hr" and
+ * not "60 min". Floored at one minute: "0 min ago" is a sentence nobody would
+ * write. Null for a span that has not started or is not a number, which the
+ * device renders as the line simply not being there.
  */
-export function formatElapsed(min: number | null): string | null {
+export function formatSpan(min: number | null): string | null {
   if (min === null || !Number.isFinite(min) || min < 0) return null;
   const total = Math.max(1, Math.round(min));
-  if (total < 60) return `${total}m`;
-  return `${Math.floor(total / 60)}h${String(total % 60).padStart(2, '0')}`;
+  if (total < 60) return `${total} min`;
+  return `${Math.round(total / 30) / 2} hr`;
 }

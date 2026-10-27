@@ -459,7 +459,7 @@ describe('handleFlights: schedule-time ETA end to end', () => {
     expect(body.flights[0]!.to).toBe('LGA');
     expect(body.flights[0]!.eta_src).toBe('scheduled');
     expect(body.flights[0]!.eta_min).toBe(45);
-    expect(body.flights[0]!.eta_text).toBe('~45m');
+    expect(body.flights[0]!.eta_text).toBe('45m');
   });
 });
 

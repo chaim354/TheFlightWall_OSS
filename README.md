@@ -196,7 +196,7 @@ The wall renders a **Mini-style flight card**: an airline logo tile on the left,
 Tiles are a tiny raw format: `uint16 width, uint16 height`, then `width×height` little-endian RGB565 pixels. They can be any size up to 64×64, and every tool here defaults to 32×32 — the size the bundled badges ship at and the size the 128×64 big-panel layout draws. Pass `--size` to the converters only if you want something else; the renderer auto-fits whatever size you provide, but it only ever upscales.
 
 ### Layouts by panel size
-The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft Spd:258mph` / `Trk:263deg <flight #>`, with IATA airport codes) — the second row shows the flight number or vertical rate depending on the toggle above, except that a resolved ETA (FlightWall server only) takes that slot instead, e.g. `Trk:263deg ETA:~1h05`; **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.
+The flight card adapts to the panel: **128×64** uses a "Mini" layout (32px logo + airline/route/aircraft beside it + two full-width metric rows: `Alt:4.1kft Spd:258mph` / `Trk:263deg <flight #>`, with IATA airport codes) — the second row shows the flight number or vertical rate depending on the toggle above, except that a resolved ETA (FlightWall server only) takes that slot instead, e.g. `Trk:263deg ETA:1h05`; **64×64** stacks the logo on top; wide/short panels (64×32, 128×32, 160×32) put the logo at left with text beside it.
 
 # Credits
 
