@@ -45,7 +45,7 @@ int main() {
     CHECK(arrivingLine(S("3.5 hr"), W) == "Arriving in 3.5 hr");
     CHECK(arrivingLine(S("20 min"), W) == "Arriving in 20 min");
     // An older server's eta_text still makes a sentence.
-    CHECK(arrivingLine(S("1h05"), W) == "Arriving in 1h05");
+    CHECK(arrivingLine(S("1h05m"), W) == "Arriving in 1h05m");
     // LANDING is a state, not a duration.
     CHECK(arrivingLine(S("LANDING"), W) == "Landing now");
     CHECK(placeLabel<S>(false, W) == "Flying over");
@@ -77,9 +77,9 @@ int main() {
     CHECK(flownText<S>(989.4, false) == "989mi");
     CHECK(flownText<S>(0.0, false) == "0mi");
     CHECK(flownText<S>(7999.6, false) == "8000mi");
-    // The pair that has to share the wall's second row: "ETA:1h05" (8) plus
-    // a space plus "989mi flown" (11) is 20, inside 21.
-    CHECK(S("ETA:1h05 ") .length() + flownText<S>(989, true).length() == 20);
+    // The pair that has to share the wall's second row: "ETA:1h05m" (9) plus
+    // a space plus "989mi flown" (11) is exactly 21.
+    CHECK(S("ETA:1h05m ") .length() + flownText<S>(989, true).length() == 21);
 
     if (failures) {
         printf("%d FAILURE(S)\n", failures);

@@ -155,11 +155,11 @@ describe('formatEta', () => {
   });
 
   it('rounds to 10 minutes at an hour and over, as h:mm', () => {
-    expect(formatEta(800, 64)).toBe('1h00');
-    expect(formatEta(800, 66)).toBe('1h10');
-    expect(formatEta(800, 122)).toBe('2h00');   // 122 -> 120
-    expect(formatEta(800, 125)).toBe('2h10');   // 125 -> 130, not 120
-    expect(formatEta(800, 132)).toBe('2h10');
+    expect(formatEta(800, 64)).toBe('1h00m');
+    expect(formatEta(800, 66)).toBe('1h10m');
+    expect(formatEta(800, 122)).toBe('2h00m');   // 122 -> 120
+    expect(formatEta(800, 125)).toBe('2h10m');   // 125 -> 130, not 120
+    expect(formatEta(800, 132)).toBe('2h10m');
   });
 
   it('returns null when there is no estimate and we are not landing', () => {
@@ -186,10 +186,10 @@ describe('formatEta', () => {
     });
 
     it('steps by one minute at an hour and over', () => {
-      expect(formatEta(800, 122, true)).toBe('2h02');
-      expect(formatEta(800, 121, true)).toBe('2h01');
-      expect(formatEta(800, 125, true)).toBe('2h05');
-      expect(formatEta(800, 60, true)).toBe('1h00');
+      expect(formatEta(800, 122, true)).toBe('2h02m');
+      expect(formatEta(800, 121, true)).toBe('2h01m');
+      expect(formatEta(800, 125, true)).toBe('2h05m');
+      expect(formatEta(800, 60, true)).toBe('1h00m');
     });
 
     it('moves on every single minute where the rounded form does not', () => {
@@ -197,9 +197,9 @@ describe('formatEta', () => {
       // five distinct strings, not one repeated string and then a jump.
       const rounded = [64, 63, 62, 61, 60].map((m) => formatEta(800, m));
       const precise = [64, 63, 62, 61, 60].map((m) => formatEta(800, m, true));
-      expect(new Set(rounded).size).toBe(1);   // '1h00' five times over
+      expect(new Set(rounded).size).toBe(1);   // '1h00m' five times over
       expect(new Set(precise).size).toBe(5);
-      expect(precise).toEqual(['1h04', '1h03', '1h02', '1h01', '1h00']);
+      expect(precise).toEqual(['1h04m', '1h03m', '1h02m', '1h01m', '1h00m']);
     });
 
     it('still says LANDING, and still never renders a bare zero', () => {

@@ -41,7 +41,7 @@ describe('enrich', () => {
     expect(f.al).toBe('Delta');
     expect(f.flt).toBe('DL5075');
     expect(f.eta_min).toBeGreaterThan(0);
-    expect(f.eta_text).toMatch(/^\d+(m|h\d\d)$/);
+    expect(f.eta_text).toMatch(/^\d+(m|h\d\dm)$/);
     expect(f.eta_src).toBe('physics');
   });
 
@@ -145,7 +145,7 @@ describe('enrich: edge cases', () => {
     // missing groundspeed this close to the airport must not blank the ETA.
     const f = enrich(ac({ groundspeedKt: null }), sched, {}, NOW_MS)!;
     expect(f.eta_min).not.toBeNull();
-    expect(f.eta_text).toMatch(/^\d+(m|h\d\d)$|^LANDING$/);
+    expect(f.eta_text).toMatch(/^\d+(m|h\d\dm)$|^LANDING$/);
   });
 
   it('applies the descent floor even at zero horizontal distance -- overhead the destination at cruise altitude is not landing', () => {
@@ -257,7 +257,7 @@ describe('enrich: schedule-time priority chain', () => {
     const f = enrich(ac(), rows, {}, NOW_MS)!;
     expect(f.eta_src).toBe('revised');
     expect(f.eta_min).toBe(90);
-    expect(f.eta_text).toBe('1h30');
+    expect(f.eta_text).toBe('1h30m');
   });
 
   it('uses the scheduled time when no revised time is present', () => {
@@ -406,7 +406,7 @@ describe('enrich: JBU81 JFK->RNO regression (real arrival time beats a bad physi
     expect(f.to).toBe('RNO');
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(300);       // exactly 5h, by construction above
-    expect(f.eta_text).toBe('5h00');
+    expect(f.eta_text).toBe('5h00m');
   });
 });
 
@@ -462,7 +462,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     // 108 exactly; the 18000ft descent floor (10min) does not bind.
     expect(f.eta_src).toBe('physics');
     expect(f.eta_min).toBe(108);
-    expect(f.eta_text).toBe('1h50');
+    expect(f.eta_text).toBe('1h50m');
   });
 
   it('DAL688 regression: falls through to physics when the scheduled time implies 630kt over 2,099nm', () => {
@@ -501,7 +501,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     // floor (10min) does not bind.
     expect(f.eta_src).toBe('physics');
     expect(f.eta_min).toBe(324);
-    expect(f.eta_text).toBe('5h20');
+    expect(f.eta_text).toBe('5h20m');
   });
 
   it('does not reject a genuine fast eastbound leg -- BA112 JFK-LHR in 4h56 implies ~606kt, under the bound', () => {
@@ -532,7 +532,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     // Minute resolution, because this is a clock time and not a physics guess
     // (see formatEta's clockDerived) -- so the text now names the same 4h56
     // this case is named after, instead of rounding it away to ~5h00.
-    expect(f.eta_text).toBe('4h56');
+    expect(f.eta_text).toBe('4h56m');
   });
 
   it('rejects only the implausible tier -- a bad revised time does not block a good scheduled time next to it', () => {
@@ -557,7 +557,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     )!;
     expect(f.eta_src).toBe('scheduled');
     expect(f.eta_min).toBe(90);
-    expect(f.eta_text).toBe('1h30');
+    expect(f.eta_text).toBe('1h30m');
   });
 
   it('TK6044: recovers via a plausible revised time once the operator publishes one for a delayed scheduled time', () => {
@@ -587,7 +587,7 @@ describe('enrich: a schedule-derived ETA a delay has made unreachable is not use
     )!;
     expect(f.eta_src).toBe('revised');
     expect(f.eta_min).toBe(100);
-    expect(f.eta_text).toBe('1h40');
+    expect(f.eta_text).toBe('1h40m');
   });
 
   it('does not apply the guard inside TERMINAL_NM, where minute-level rounding dominates the implied speed', () => {

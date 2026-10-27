@@ -59,7 +59,7 @@ struct FlightInfo
     // any cruise range. It cannot know about vectoring, holds or taxi-in, so it
     // is good to roughly +/-5 min enroute and vaguer near the end.
     double eta_minutes = NAN;
-    // Pre-rounded display string from the server: "25m", "1h10", or "LANDING"
+    // Pre-rounded display string from the server: "25m", "1h10m", or "LANDING"
     // inside 30nm. Rendered VERBATIM -- the rounding is the honesty policy, and
     // re-deriving it on device would let the two drift apart.
     String eta_text;

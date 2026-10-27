@@ -244,6 +244,9 @@ export const LANDING_MAX_MIN = (LANDING_NM / TERMINAL_KT) * 60;
  * about vectoring, holds, runway changes or taxi-in, so it lands within ~5 min
  * enroute and gets vaguer near the end.
  *
+ * Shaped "25m" under an hour and "5h18m" above it -- the trailing "m" so the
+ * minutes read as minutes, not as a decimal or a clock.
+ *
  * No "~" prefix. There used to be one, so the panel never implied a scheduled
  * time; it cost a column on every card and read as noise, and the rounding
  * already says what it meant to.
@@ -275,12 +278,12 @@ export function formatEta(
   const step = clockDerived ? 1 : 5;
   if (etaMin < 60) {
     const m = Math.max(step, Math.round(etaMin / step) * step);
-    return m >= 60 ? '1h00' : `${m}m`;
+    return m >= 60 ? '1h00m' : `${m}m`;
   }
   const total = clockDerived ? Math.round(etaMin) : Math.round(etaMin / 10) * 10;
   const h = Math.floor(total / 60);
   const m = total % 60;
-  return `${h}h${String(m).padStart(2, '0')}`;
+  return `${h}h${String(m).padStart(2, '0')}m`;
 }
 
 /**

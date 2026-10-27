@@ -710,7 +710,7 @@ void Hub75Display::displayFlightCard(const FlightInfo &f, TrackedView view)
 
 // The Times view's arrival span: the server's words ("20 min", "3.5 hr") when
 // it sends them, else the ordinary eta_text, so an older server still gets a
-// sentence ("Arriving in 1h05") rather than no line.
+// sentence ("Arriving in 1h05m") rather than no line.
 static const String &arrivalText(const FlightInfo &f)
 {
     return f.arr_text.length() ? f.arr_text : f.eta_text;
@@ -1053,7 +1053,7 @@ void Hub75Display::displayMiniCard(const FlightInfo &f, TrackedView view)
         //
         // ETA is always the FIRST candidate (see buildRow2), so when it is on
         // the row at all it starts at column 0, and the separator is a single
-        // space that no eta_text of the server's contains ("1h10", "LANDING").
+        // space that no eta_text of the server's contains ("1h10m", "LANDING").
         // The 6px fixed-width font makes the rest pure arithmetic. The Times
         // view's "Arriving in ..." never starts with "ETA:", so it stays white.
         const uint16_t etaColor = etaColorFor(f);
