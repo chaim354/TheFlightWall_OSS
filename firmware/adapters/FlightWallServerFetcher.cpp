@@ -213,6 +213,7 @@ bool FlightWallServerFetcher::fetchFlights(const String &baseUrl,
         // The tracked card's other two views. Pinned cards only, like prog.
         info.flown_mi = optNum(f, "flown_mi");
         info.dep_text = optStr(f, "dep_text");
+        info.arr_text = optStr(f, "arr_text");
         info.over_place = optStr(f, "over");
         info.over_region = optStr(f, "over_rgn");
         info.over_near = f["over_near"] | false;

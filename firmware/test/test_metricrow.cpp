@@ -23,7 +23,7 @@ int main() {
 
     // The case that motivated this: at 128px botCols is 21, and ETA plus a
     // flight number fit together where the old chain showed only one.
-    CHECK(joinWithinColumns(V{"ETA:~7h10", "DL182"}, 21) == "ETA:~7h10 DL182");
+    CHECK(joinWithinColumns(V{"ETA:7h10", "DL182"}, 21) == "ETA:7h10 DL182");
 
     // Worst realistic widths still fit: LANDING is eta_text's longest value
     // and 7 chars is a long ADS-B callsign.

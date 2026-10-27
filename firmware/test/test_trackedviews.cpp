@@ -38,10 +38,14 @@ int main() {
 
     // --- the 128px wall: 21 columns -----------------------------------------
     const int W = 21;
-    CHECK(departedLine(S("2h10"), W) == "Departed 2h10 ago");
-    CHECK(departedLine(S("14h05"), W) == "Departed 14h05 ago");
-    CHECK(arrivingLine(S("~1h05"), W) == "Arriving in ~1h05");
-    CHECK(arrivingLine(S("~25m"), W) == "Arriving in ~25m");
+    CHECK(departedLine(S("20 min"), W) == "Departed 20 min ago");
+    CHECK(departedLine(S("3.5 hr"), W) == "Departed 3.5 hr ago");
+    // The widest the server sends, on a long-haul: 20 columns.
+    CHECK(departedLine(S("10.5 hr"), W) == "Departed 10.5 hr ago");
+    CHECK(arrivingLine(S("3.5 hr"), W) == "Arriving in 3.5 hr");
+    CHECK(arrivingLine(S("20 min"), W) == "Arriving in 20 min");
+    // An older server's eta_text still makes a sentence.
+    CHECK(arrivingLine(S("1h05"), W) == "Arriving in 1h05");
     // LANDING is a state, not a duration.
     CHECK(arrivingLine(S("LANDING"), W) == "Landing now");
     CHECK(placeLabel<S>(false, W) == "Flying over");
@@ -56,26 +60,26 @@ int main() {
 
     // --- narrow panels shorten rather than truncate -------------------------
     // A 64px stacked card has 10 columns.
-    CHECK(departedLine(S("2h10"), 12) == "Dep 2h10 ago");
-    CHECK(departedLine(S("2h10"), 10) == "Dep 2h10");
-    CHECK(arrivingLine(S("~1h05"), 12) == "Arr in ~1h05");
-    CHECK(arrivingLine(S("~1h05"), 10) == "Arr ~1h05");
+    CHECK(departedLine(S("3.5 hr"), 14) == "Dep 3.5 hr ago");
+    CHECK(departedLine(S("3.5 hr"), 10) == "Dep 3.5 hr");
+    CHECK(arrivingLine(S("3.5 hr"), 13) == "Arr in 3.5 hr");
+    CHECK(arrivingLine(S("3.5 hr"), 10) == "Arr 3.5 hr");
     CHECK(arrivingLine(S("LANDING"), 10) == "Landing");
     CHECK(placeLabel<S>(false, 10) == "Over");
     // The region goes before the name is cut.
     CHECK(placeLine(S("Saint-Jean-sur-Richelieu"), S("QC"), W) == "Saint-Jean-sur-Richelieu");
     CHECK(placeLine(S("Lyon"), S("France"), 10) == "Lyon");
     // Nothing fits: the shortest form comes back for the caller to clamp.
-    CHECK(departedLine(S("2h10"), 3) == "Dep 2h10");
+    CHECK(departedLine(S("3.5 hr"), 3) == "Dep 3.5 hr");
 
     // --- miles flown --------------------------------------------------------
     CHECK(flownText<S>(989.0, true) == "989mi flown");
     CHECK(flownText<S>(989.4, false) == "989mi");
     CHECK(flownText<S>(0.0, false) == "0mi");
     CHECK(flownText<S>(7999.6, false) == "8000mi");
-    // The pair that has to share the wall's second row: "ETA:~1h05" (9) plus
-    // a space plus "989mi flown" (11) is exactly 21.
-    CHECK(S("ETA:~1h05 ") .length() + flownText<S>(989, true).length() == 21);
+    // The pair that has to share the wall's second row: "ETA:1h05" (8) plus
+    // a space plus "989mi flown" (11) is 20, inside 21.
+    CHECK(S("ETA:1h05 ") .length() + flownText<S>(989, true).length() == 20);
 
     if (failures) {
         printf("%d FAILURE(S)\n", failures);

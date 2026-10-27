@@ -8,7 +8,7 @@
 // three views, shown in this order:
 //
 //   Normal -- the ordinary card, with miles flown where the flight number goes
-//   Times  -- "Departed 2h10 ago" / "Arriving in ~1h05"
+//   Times  -- "Departed 3.5 hr ago" / "Arriving in 20 min"
 //   Place  -- "Flying over" / "Springfield, IL"
 //
 // A view with nothing to say is left out rather than shown empty, and the dwell
@@ -54,7 +54,7 @@ inline Str firstThatFits(const Str *cands, int count, int maxCols)
     return count > 0 ? cands[count - 1] : Str();
 }
 
-// "Departed 2h10 ago", shortening for narrow panels. Empty without a time.
+// "Departed 3.5 hr ago", shortening for narrow panels. Empty without a time.
 template <typename Str>
 inline Str departedLine(const Str &depText, int maxCols)
 {
@@ -68,7 +68,7 @@ inline Str departedLine(const Str &depText, int maxCols)
     return firstThatFits(c, 3, maxCols);
 }
 
-// "Arriving in ~1h05", or "Landing now" for the server's LANDING -- which is a
+// "Arriving in 20 min", or "Landing now" for the server's LANDING -- which is a
 // state, not a duration, and "Arriving in LANDING" is not a sentence. Empty
 // without an ETA.
 template <typename Str>

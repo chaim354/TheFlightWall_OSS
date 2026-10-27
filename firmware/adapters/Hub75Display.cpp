@@ -708,6 +708,14 @@ void Hub75Display::displayFlightCard(const FlightInfo &f, TrackedView view)
     drawProgressBar(f);
 }
 
+// The Times view's arrival span: the server's words ("20 min", "3.5 hr") when
+// it sends them, else the ordinary eta_text, so an older server still gets a
+// sentence ("Arriving in 1h05") rather than no line.
+static const String &arrivalText(const FlightInfo &f)
+{
+    return f.arr_text.length() ? f.arr_text : f.eta_text;
+}
+
 int Hub75Display::trackedViewsFor(const FlightInfo &f, TrackedView *out) const
 {
     int n = 0;
@@ -717,7 +725,7 @@ int Hub75Display::trackedViewsFor(const FlightInfo &f, TrackedView *out) const
     // Times needs either half: "Departed" alone is still worth a view, and so
     // is "Arriving in" alone. Place needs a town -- the server sends none over
     // open ocean, and the view is left out rather than shown empty.
-    if (f.dep_text.length() || (g_settings.layout.showEta && f.eta_text.length()))
+    if (f.dep_text.length() || (g_settings.layout.showEta && arrivalText(f).length()))
         out[n++] = TrackedView::Times;
     if (f.over_place.length())
         out[n++] = TrackedView::Place;
@@ -732,7 +740,7 @@ void Hub75Display::buildCardLines(const FlightInfo &f, TrackedView view, int max
     case TrackedView::Times:
     {
         const String dep = departedLine(f.dep_text, maxCols);
-        const String arr = g_settings.layout.showEta ? arrivingLine(f.eta_text, maxCols) : String();
+        const String arr = g_settings.layout.showEta ? arrivingLine(arrivalText(f), maxCols) : String();
         if (dep.length())
             outLines.push_back(dep);
         if (arr.length())
@@ -972,7 +980,7 @@ void Hub75Display::displayMiniCard(const FlightInfo &f, TrackedView view)
         // Heading is a FALLBACK for the ETA, not an addition to it -- offered
         // only when there is no ETA to show. Leaving this to the width budget
         // instead would be subtly wrong: a short ETA and a short callsign
-        // ("ETA:~1h AA1", 11 of 21 columns) leave room for "Trk:230", so
+        // ("ETA:1h AA1", 10 of 21 columns) leave room for "Trk:230", so
         // heading would appear on some cards and not others for no reason a
         // viewer could see. "Where is it pointing" is the consolation for not
         // knowing "when does it arrive", and once the arrival IS known the
@@ -993,15 +1001,13 @@ void Hub75Display::displayMiniCard(const FlightInfo &f, TrackedView view)
     };
 
     String row1, row2;
-    // Times draws its whole second row in the ETA colour -- it IS the ETA --
-    // where Normal colours only the "ETA:" token at the start of its row.
-    bool row2IsEta = false;
+    // Times is plain white on both rows: it is read as a sentence, and only
+    // the Normal view's "ETA:" token takes the progress green.
     switch (view)
     {
     case TrackedView::Times:
         row1 = departedLine(f.dep_text, botCols);
-        row2 = L.showEta ? arrivingLine(f.eta_text, botCols) : String();
-        row2IsEta = true;
+        row2 = L.showEta ? arrivingLine(arrivalText(f), botCols) : String();
         break;
     case TrackedView::Place:
         row1 = placeLabel<String>(f.over_near, botCols);
@@ -1047,12 +1053,11 @@ void Hub75Display::displayMiniCard(const FlightInfo &f, TrackedView view)
         //
         // ETA is always the FIRST candidate (see buildRow2), so when it is on
         // the row at all it starts at column 0, and the separator is a single
-        // space that no eta_text of the server's contains ("~1h10", "LANDING").
-        // The 6px fixed-width font makes the rest pure arithmetic.
+        // space that no eta_text of the server's contains ("1h10", "LANDING").
+        // The 6px fixed-width font makes the rest pure arithmetic. The Times
+        // view's "Arriving in ..." never starts with "ETA:", so it stays white.
         const uint16_t etaColor = etaColorFor(f);
-        const int sep = row2IsEta ? -1
-                        : (etaColor != color && row2.startsWith("ETA:")) ? row2.indexOf(' ')
-                                                                         : -2;
+        const int sep = (etaColor != color && row2.startsWith("ETA:")) ? row2.indexOf(' ') : -2;
         if (sep == -2)
         {
             drawTextLine(1, by, row2, color);
@@ -1093,16 +1098,14 @@ void Hub75Display::displaySideBySideCard(const FlightInfo &f, TrackedView view)
     const int16_t totalH = fitLines(lines, maxCols, _matrixHeight);
     int16_t y = (_matrixHeight - totalH) / 2;
     const uint16_t etaColor = etaColorFor(f);
-    // The Times view's arrival line is the ETA too, reworded; build it once
-    // the same way buildCardLines did so the comparison below is exact.
-    const String arrLine = view == TrackedView::Times ? arrivingLine(f.eta_text, maxCols) : String();
     for (const String &ln : lines)
     {
         // buildFlightLines pushes eta_text as a line of its own and verbatim,
         // so identity with the source string is an exact test -- no parsing,
         // and no risk of colouring the aircraft type because it happened to
-        // look like a duration.
-        const bool isEta = ln == f.eta_text || (arrLine.length() && ln == arrLine);
+        // look like a duration. The Times view's "Arriving in ..." is never
+        // equal to it, so that view stays white.
+        const bool isEta = ln == f.eta_text;
         drawTextLine(tx, y, ln, isEta ? etaColor : color);
         y += 9;
     }
@@ -1138,12 +1141,11 @@ void Hub75Display::displayStackedCard(const FlightInfo &f, TrackedView view)
     const int16_t totalH = fitLines(lines, maxCols, availH);
     int16_t y = textTop + (availH - totalH) / 2;
     const uint16_t etaColor = etaColorFor(f);
-    const String arrLine = view == TrackedView::Times ? arrivingLine(f.eta_text, maxCols) : String();
     for (const String &ln : lines)
     {
         // Center each line horizontally.
         const int16_t x = (_matrixWidth - (int)ln.length() * 6) / 2;
-        const bool isEta = ln == f.eta_text || (arrLine.length() && ln == arrLine);
+        const bool isEta = ln == f.eta_text;
         drawTextLine(x < 0 ? 0 : x, y, ln, isEta ? etaColor : color);
         y += 9;
     }

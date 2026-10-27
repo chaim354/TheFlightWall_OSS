@@ -59,7 +59,7 @@ struct FlightInfo
     // any cruise range. It cannot know about vectoring, holds or taxi-in, so it
     // is good to roughly +/-5 min enroute and vaguer near the end.
     double eta_minutes = NAN;
-    // Pre-rounded display string from the server: "~25m", "~1h10", or "LANDING"
+    // Pre-rounded display string from the server: "25m", "1h10", or "LANDING"
     // inside 30nm. Rendered VERBATIM -- the rounding is the honesty policy, and
     // re-deriving it on device would let the two drift apart.
     String eta_text;
@@ -89,8 +89,13 @@ struct FlightInfo
     // progress_pct, so a late departure makes the two disagree: the bar runs
     // ahead on the timetable while this reads where the aircraft really is.
     double flown_mi = NAN;
-    // Time since SCHEDULED departure, pre-formatted: "25m", "2h10".
+    // The Times view's two spans, pre-formatted in words: "20 min", "3.5 hr".
+    // dep_text is since SCHEDULED departure; arr_text is to the scheduled
+    // arrival -- eta_text's clock in the same words, or "LANDING" exactly when
+    // eta_text says so. Empty arr_text (an older server) falls back to
+    // eta_text; see Hub75Display's arrivalText.
     String dep_text;
+    String arr_text;
     // The town under the aircraft, its state/province or country, and whether
     // it is merely NEAR rather than under (the server decides the threshold).
     String over_place;

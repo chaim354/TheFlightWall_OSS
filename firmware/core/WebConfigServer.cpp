@@ -417,6 +417,8 @@ String WebConfigServer::buildFlightsJson() const
                 o["flownMi"] = (long)f.flown_mi;
             if (f.dep_text.length())
                 o["depText"] = f.dep_text;
+            if (f.arr_text.length())
+                o["arrText"] = f.arr_text;
             if (f.over_place.length())
             {
                 o["overPlace"] = f.over_place;
